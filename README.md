@@ -14,8 +14,9 @@ FEATURES:
 --------------------------
 >##	Tab completion
 >##	Terminal-resize compatible
+>## Links are mouse-clickable
 >##	Tracking images and links posted
->###		Press F2 to open menu (pending mouse support for clicking on <LINK #>)
+>###		Press F2 to open menu
 >#	View members of a certain room
 >###		Press F3 to open menu
 >##	Alter formatting sent to the server
