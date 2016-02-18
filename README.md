@@ -10,58 +10,58 @@ This client is based on chlib.py <https://github.com/cellsheet/chlib.git>
 
 --------------------------
 
-FEATURES:
-	Tab completion
-	Terminal-resize compatible
-	Tracking images and links posted
-		Press F2 to open menu (pending mouse support for clicking on <LINK #>)
-	View members of a certain room
-		Press F3 to open menu
-	Alter formatting sent to the server
-		F4
-	Change channel
-		Supports white, red, and blue channels (pending filtering)
-	
-	Alterable "colorers"
-		Color text matching a regex or so
+###FEATURES:
+>#	Tab completion
+>#	Terminal-resize compatible
+>#	Tracking images and links posted
+>##		Press F2 to open menu (pending mouse support for clicking on <LINK #>)
+>#	View members of a certain room
+>##		Press F3 to open menu
+>#	Alter formatting sent to the server
+>##		F4
+>#	Change channel
+>##		Supports white, red, and blue channels (pending filtering)
+>	
+>#	Alterable "colorers"
+>##		Color text matching a regex or so
 
-""API""
-	It's nowhere near comprehensive enough to be called an API,
-	but this section helps demonstrate the abilities of the display.
-	__DECORATORS__
-	client.colorer
-		Adds a colorer to be applied to the client.
-		Decorated function arguments:
-			base:		The "base message." Look for patterns here
-			coldic:		The color dictionary; this must be retained between colorers
-			default:	The default color to insert
-			*args:		The rest of tha arguments. Currently:
-					0:		Channel number
+###""API""
+>##	It's nowhere near comprehensive enough to be called an API,
+>##	but this section might help demonstrate the abilities of the display.
+>#	__DECORATORS__
+>##	client.colorer
+>###		Adds a colorer to be applied to the client.
+>###		Decorated function arguments:
+>			base:		The "base message." Look for patterns here
+>			coldic:		The color dictionary; this must be retained between colorers
+>			default:	The default color to insert
+>			*args:		The rest of tha arguments. Currently:
+>					0:		Channel number
 		
-		Format for color dictionary is {draw_before_location:color}
-		Where draw_before_location is a position in the string the color stops drawing at
-			and color is the curses color (e.g., ones that have been pulled with color_pair)
+>###		Format for color dictionary is {draw_before_location:color}
+>###		Where draw_before_location is a position in the string the color stops drawing at
+>###			and color is the curses color (e.g., ones that have been pulled with color_pair)
 		
-	client.onkey(keyname or curses key value)
-		Causes a function to be run on keypress.
-		Decorated function arguments:
-			self:	the current client object
+>##	client.onkey(keyname or curses key value)
+>###		Causes a function to be run on keypress.
+>###		Decorated function arguments:
+>			self:	the current client object
 	
-	client.command(command name)
-		/(command name) will run the function
-		Decorated function arguments:
-			arglist:	Space-delimited values following the command name
+>##	client.command(command name)
+>###		/(command name) will run the function
+>###		Decorated function arguments:
+>			arglist:	Space-delimited values following the command name
 	
-	__CLASSES__
-	client.listinput(screen,string iterable)
-		Class that draws a list that covers the chat.
-		
-	client.colorinput(screen,string iterable)
-		Class that draws a color selector over the chat.
-		
-	*See how these are called in chatango.py, such as in F3()*
+>##	__CLASSES__
+>###	client.listinput(screen,string iterable)
+>###		Class that draws a list that covers the chat.
+>		
+>###	client.colorinput(screen,string iterable)
+>###		Class that draws a color selector over the chat.
+>		
+>###	*See how these are called in chatango.py, such as in F3()*
 
-#CHANGELOG
+###CHANGELOG
 
 ># v3.0.1	*2016/2/17*
 >##	Merged bot.py into chatango.py
