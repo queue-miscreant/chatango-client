@@ -1,4 +1,5 @@
 Ultra-Meme Chatango CLIent
+==========================
 Version 3.0.1	
 ==========================
 
@@ -8,24 +9,25 @@ If you really want to, create a link to /usr/local/bin/ so you don't have to nav
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib.git>
 
+
+FEATURES:
 --------------------------
-
-###FEATURES:
->#	Tab completion
->#	Terminal-resize compatible
->#	Tracking images and links posted
->##		Press F2 to open menu (pending mouse support for clicking on <LINK #>)
+>##	Tab completion
+>##	Terminal-resize compatible
+>##	Tracking images and links posted
+>###		Press F2 to open menu (pending mouse support for clicking on <LINK #>)
 >#	View members of a certain room
->##		Press F3 to open menu
->#	Alter formatting sent to the server
->##		F4
->#	Change channel
->##		Supports white, red, and blue channels (pending filtering)
+>###		Press F3 to open menu
+>##	Alter formatting sent to the server
+>###		F4
+>##	Change channel
+>###		Supports white, red, and blue channels (pending filtering)
 >	
->#	Alterable "colorers"
->##		Color text matching a regex or so
+>##	Alterable "colorers"
+>###		Color text matching a regex or so
 
-###""API""
+""API""
+--------------------------
 >##	It's nowhere near comprehensive enough to be called an API,
 >##	but this section might help demonstrate the abilities of the display.
 >#	__DECORATORS__
@@ -61,8 +63,8 @@ This client is based on chlib.py <https://github.com/cellsheet/chlib.git>
 >		
 >###	*See how these are called in chatango.py, such as in F3()*
 
-###CHANGELOG
-
+CHANGELOG
+--------------------------
 ># v3.0.1	*2016/2/17*
 >##	Merged bot.py into chatango.py
 >##	Fixed the colors drawing bug.
