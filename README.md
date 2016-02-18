@@ -63,6 +63,13 @@ FEATURES:
 >		
 >###	*See how these are called in chatango.py, such as in F3()*
 
+DEPENDENCIES
+--------------------------
+>###    Feh image viewer
+>###    MPV
+>###    Curses
+>###    Python 3
+
 CHANGELOG
 --------------------------
 ># v3.0.1	*2016/2/17*
