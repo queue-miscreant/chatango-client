@@ -4,11 +4,11 @@ Version 3.0.1
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
-Run `./chatango.py` in the directory you extracted it to.
+Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.
 If you really want to, create a link to /usr/local/bin/ so you don't have to navigate to the folder.
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib.git>
-
+Requires feh and mpv as image viewer and media player
 
 FEATURES:
 --------------------------

@@ -82,9 +82,6 @@ def video(*args):
 		pass
 		#raise Exception('failed to run display ({})'.format(exc))
 
-def compileTable(send,default):
-	return {i[0]:i[1] for i in send}
-
 #add take out links, add them to a list
 def parseLinks(raw,lastlinks):
 	#in case the raw message ends with a link

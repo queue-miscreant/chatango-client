@@ -367,24 +367,36 @@ def F12(self):
 def mouse(self):
 	try:
 		_, x, y, z, state = curses.getmouse()
+		lineno = self.chat.nums-y
 		#if not a release, or it's not in the chat window, return
 		if state > curses.BUTTON1_PRESSED: return
-		if y >= self.chat.height: return
-	
-		lines = self.chat.lines
-		#pull line clicked
-		line = lines[max(len(lines)-self.chat.height,0)+y][0]
+		if lineno < 0: return
 		
+		lines = self.chat.lines
+		length = len(lines)
+		pulled = 0
+		mlines = []
+		#read in reverse for links that appear, only the ones on screen
+		for i in reversed(range(max(length-self.chat.nums-1,0),length)):
+			#recalculate height of each message
+			mlines = client.splitMessage(lines[i][0],self.chat.width)
+			pulled += len(mlines)
+			if pulled >= lineno:
+				break
+		#get the exact line from the message
+		try:
+			line = mlines[pulled-lineno]
+		except: return
 		#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"
 		matches = {abs((i.start()+i.end())/2 - x):i.groups()[0] for i in re.finditer(r"<LINK (\d+?)>",line)}
 		if matches == {}: return
 		#get the closest capture
 		ret = matches[min(matches.keys())]
 		
-		#they begin with an index of 0, but appear beginning with 1
+		#they begin with an index of 0, but appear beginning with 1 (i.e LINK 1 is lastlinks[0])
 		self.openLink(self.lastlinks[int(ret)-1])
 	except Exception as exc:
-		pass
+		op(exc)
 
 @client.onkey(curses.KEY_RESIZE)
 def resize(self):
