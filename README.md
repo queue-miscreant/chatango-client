@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 3.0.1	
+Version 3.1
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -8,24 +8,27 @@ Run `python chatango.py` or `./chatango.py` in the directory you extracted it to
 If you really want to, create a link to /usr/local/bin/ so you don't have to navigate to the folder.
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib.git>
-Requires feh and mpv as image viewer and media player
 
 FEATURES:
 --------------------------
 >##	Tab completion
 >##	Terminal-resize compatible
 >## Links are mouse-clickable
->##	Tracking images and links posted
->###		Press F2 to open menu
->#	View members of a certain room
->###		Press F3 to open menu
->##	Alter formatting sent to the server
->###		F4
->##	Change channel
->###		Supports white, red, and blue channels (pending filtering)
+>##	Tracking images and links posted (F2)
+>#	View members of a certain room (F3)
+>##	Alter formatting sent to the server (F4)
+>##	Change channel (F5)
+>###		Supports white, red, and blue channels
 >	
 >##	Alterable "colorers"
 >###		Color text matching a regex or so
+
+DEPENDENCIES
+--------------------------
+>###    Feh image viewer
+>###    MPV
+>###    Curses
+>###    Python 3
 
 ""API""
 --------------------------
@@ -35,11 +38,12 @@ FEATURES:
 >##	client.colorer
 >###		Adds a colorer to be applied to the client.
 >###		Decorated function arguments:
->			base:		The "base message." Look for patterns here
->			coldic:		The color dictionary; this must be retained between colorers
->			default:	The default color to insert
->			*args:		The rest of tha arguments. Currently:
->					0:		Channel number
+>			msg:		The message. Look for patterns here
+>			coldic:		The color dictionary; this is retained between colorers since it is passed by reference
+>			*args:		The rest of the arguments. Currently:
+>					0:		reply (boolean)
+>					1:		history (boolean)
+>					2:		channel number
 		
 >###		Format for color dictionary is {draw_before_location:color}
 >###		Where draw_before_location is a position in the string the color stops drawing at
@@ -55,6 +59,11 @@ FEATURES:
 >###		Decorated function arguments:
 >			arglist:	Space-delimited values following the command name
 	
+>##	client.chatfilter
+>###		Function run on attempt to push message. If any filter returns false, the message is not pushed
+>###		Decorated function arguments:
+>			*args:	Same arguments as in client.colorer
+
 >##	__CLASSES__
 >###	client.listinput(screen,string iterable)
 >###		Class that draws a list that covers the chat.
@@ -64,15 +73,14 @@ FEATURES:
 >		
 >###	*See how these are called in chatango.py, such as in F3()*
 
-DEPENDENCIES
---------------------------
->###    Feh image viewer
->###    MPV
->###    Curses
->###    Python 3
-
 CHANGELOG
 --------------------------
+># v3.1	*2016/2/20*
+>##	Changed colorer arguments. Made client more generalized so that argument list is pulled from the bot.
+>##	Modified the name colorer to use intene colors on certain names. Should be easier to tell names apart
+>## Added chat filtering (space in F5 menu)
+>		Drawing filtered channels in the menu pending
+
 ># v3.0.1	*2016/2/17*
 >##	Merged bot.py into chatango.py
 >##	Fixed the colors drawing bug.

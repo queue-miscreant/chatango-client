@@ -44,6 +44,7 @@ MPV_PATH = "mpv"
 
 colorers = []
 commands = {}
+filters = []
 
 def op(*args):
 	with open("debug","a+") as a:
@@ -148,14 +149,6 @@ def easyWrap(fullString,width):
 	#unicode wrapping
 	return ret[::-1]
 
-#sum of name; returns a number corresponding to a curses pair between 2 and 6
-def getColor(name, rot = 2):
-	total = 1
-	for i in name:
-		n = ord(i)
-		total ^= (n > 109) and n or ~n
-	return ((total + rot) % 5)+2
-
 #if given is at place 0 in the member name
 #return rest of the member name or an empty string
 def findName(given,memList):
@@ -170,7 +163,6 @@ def toHexColor(rgb):
 	return ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
 
 def fromHexColor(hexStr):
-	op(hexStr)
 	return [int(hexStr[2*i:2*i+2],16) for i in range(3)]
 
 class cursesInput:
@@ -363,6 +355,9 @@ class chat:
 	#format expected: (string, coldic)
 	def push(self, newmsg, append = True, refresh = True):
 		if append: self.lines.append(newmsg)
+		try:
+			if not all(i(*newmsg[2]) for i in filters): return
+		except: pass
 		if self.debounce: return
 		newlines = splitMessage(newmsg[0],self.width)[-self.height:]
 		colors = newmsg[1]
@@ -446,28 +441,21 @@ class client(cursesInput):
 		self.chat.redraw()
 	
 	#simple method to output to the chat window
-	def newMessage(self, base, coldic = None):
-		if coldic is None:
-			coldic = {len(base): curses.color_pair(1)}
-		
-		self.chat.push((base,coldic))
+	def newMessage(self, base):
+		self.chat.push((base,{len(base): curses.color_pair(6)}))
 		self.inputwin.inrefresh()
 	
-	def newPost(self, user, post, reply, history, channel):
+	def newPost(self, post, *args):
 		post = parseLinks(post,self.lastlinks)
 		
-	#color is just a sum of the name
-		#or if it's a reply to the user, then it's in reverse color
-		color = getColor(user)
-		formatting = reply and curses.A_REVERSE
-		formatting |= history and curses.A_UNDERLINE
-		
-		base = " {}: {}".format(user,post)
 		coldic = {}
 		for i in colorers:
-			i(base,coldic,curses.color_pair(color)|formatting,channel)
+			i(post,coldic,*args)
+		if coldic.get('default'):
+			coldic.pop('default')
 		
-		self.newMessage(base,coldic)
+		self.chat.push((post,coldic,list(args)))
+		self.inputwin.inrefresh()
 	
 	def printTime(self, predicate="", numtime=None):
 		if numtime is None: numtime = time.time()
@@ -625,8 +613,21 @@ def command(commandname):
 def colorer(func):
 	colorers.append(func)
 
+def chatfilter(func):
+	filters.append(func)
+
 class DisconnectException(Exception):
 	pass
 
 class SizeException(Exception):
 	pass
+
+def colorPairs():
+	#this is perfect. don't fuck it up, or else stuff will stop drawing colors properly
+	curses.init_pair(1,curses.COLOR_BLUE,	curses.COLOR_BLACK)	# blue on black
+	curses.init_pair(2,curses.COLOR_CYAN,	curses.COLOR_BLACK)	# cyan on black
+	curses.init_pair(3,curses.COLOR_MAGENTA,curses.COLOR_BLACK)	# magenta on black
+	curses.init_pair(4,curses.COLOR_YELLOW,	curses.COLOR_BLACK)	# yellow on black
+	curses.init_pair(5,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
+	#control colors
+	curses.init_pair(6,curses.COLOR_RED,	curses.COLOR_WHITE)	# red on white for system

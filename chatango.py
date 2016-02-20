@@ -49,6 +49,8 @@ FONT_SIZES = [9,10,11,12,13,14]
 #ignore list
 #needed here so that commands can access it
 ignores = []
+#					White	Red	 Blue	Both
+filtered_channels = [1,1,1,1]
 
 #debugging function, as curses won't let normal prints occur
 def op(*args):
@@ -109,6 +111,14 @@ def decodeHtml(raw,encode=0):
 		raw = raw.replace("&nbsp;"," ")
 	
 	return raw
+	
+#sum of name; returns a number corresponding to a curses pair between 2 and 6
+def getColor(name, rot = 2):
+	total = 1
+	for i in name:
+		n = ord(i)
+		total ^= (n > 109) and n or ~n
+	return (((total + rot) % 6), total&3)
 
 #bot for interacting with chat
 class mainBot(chlib.ConnectionManager):
@@ -127,7 +137,7 @@ class mainBot(chlib.ConnectionManager):
 		self.addGroup(creds['room'])
 		
 	def setFormatting(self, group = None):
-		if not group:
+		if group is not None:
 			 group = self.joinedGroup
 		
 		if self.creds.get('formatting') is None:
@@ -187,7 +197,10 @@ class mainBot(chlib.ConnectionManager):
 		me = self.creds.get('user')
 		#and is short-circuited
 		reply = me is not None and ("@"+me.lower() in post.raw.lower())
-		self.parent.newPost(user, formatRaw(post.raw), reply, history, post.channel)
+		#format as ' user: message'
+		self.parent.newPost(" {}: {}".format(post.user,formatRaw(post.raw)),
+		#extra arguments. use in colorers
+			reply, history, post.channel)
 
 	def recvshow_fw(self, group):
 		self.parent.newMessage("Flood ban warning issued")
@@ -347,9 +360,18 @@ def F5(self):
 			replace.chatBot.channel = self.it
 			return -1
 		return ret
+	
+	def oninput(self,replace):
+		def ret(chars):
+			global filtered_channels
+			#space only
+			if chars[0] != 32: return
+			filtered_channels[self.it] = not filtered_channels[self.it]
+		return ret
 		
 	box = client.listInput(self.screen,["None", "Red", "Blue", "Both"])
 	setattr(box,'onenter',select(box,self))
+	setattr(box,'oninput',oninput(box,self))
 	setattr(box,'onKEY_RESIZE',client.resize(box,self))
 	box.it = self.chatBot.channel
 	
@@ -361,7 +383,7 @@ def F5(self):
 #DEBUG ONLY
 @client.onkey(curses.KEY_F12)
 def F12(self):
-	op(self.chat.lines)
+	op(filtered_channels)
 
 @client.onkey(curses.KEY_MOUSE)
 def mouse(self):
@@ -419,33 +441,65 @@ def ignore(arglist):
 	if person in ignores: return
 	ignores.append(person)
 
+#color by user's name
 @client.colorer
-def channel(base,coldic,default,*args):
-	coldic[1] = curses.color_pair(args[0]*2 + 8)
+def defaultcolor(msg,coldic,*args):
+	color,bold = getColor(msg[1:msg.find(":")])
+	coldic['default'] = curses.color_pair(color) | (bold and curses.A_BOLD)
 
+#color lines starting with '>' as green; ignore replies and ' user:'
 @client.colorer
-def greentext(base,coldic,default,*args):
-	lines = base.split("\n")
+def greentext(msg,coldic,*args):
+	default = coldic.get('default')
+	lines = msg.split("\n")
 	tracker = 0
 	for no,line in enumerate(lines):
-		begin = re.match("^ \w+?: ",line) and line.find(":")+1
-		if begin: coldic[begin] = default				
-		if line[begin or 0:].startswith(begin and " >" or ">"):
+		try:
+			#user:
+			begin = re.match(r"^ \w+?: ",line).span(0)[1]
+			#@user
+			reply = re.match(r"^@\w+? ",line[begin:])
+			if reply: begin += reply.span(0)[1]
+			coldic[begin] = default
+		except:
+			begin = 0
+		if len(line[begin:]) and line[begin:][0] == ">":
 			coldic[tracker+len(line)] = curses.color_pair(7)
 		else:
 			coldic[tracker+len(line)] = default
 		tracker += len(line)
+
+@client.colorer
+def link(msg,coldic,*args):
+	default = coldic.get('default')
+	for i in re.finditer(r"\<LINK \d+?>",msg):
+		coldic[i.span(0)[0]] = default
+		coldic[i.span(0)[1]] = curses.color_pair(0)
+
+#draw replies, history, and channel
+@client.colorer
+def chatcolors(msg,coldic,*args):
+	default = coldic.get('default')
+	for i in coldic:
+		if args[0]:
+			#remove the bolding if it's a reply
+			coldic[i] ^= coldic[i] & curses.A_BOLD and curses.A_BOLD
+			coldic[i] |= curses.A_STANDOUT
+		coldic[i] |= args[1] and curses.A_UNDERLINE
+	coldic[1] = curses.color_pair(args[2]*2 + 8)
+	
+@client.chatfilter
+def channelfilter(*args):
+	try:
+		return filtered_channels[args[2]]
+	except:
+		return False
 	
 def begin(stdscr,creds):
-	#this is perfect. don't fuck it up, or else stuff will stop drawing colors properly
-	curses.init_pair(1,curses.COLOR_RED,	curses.COLOR_WHITE)	# red on white for system
-	curses.init_pair(2,curses.COLOR_BLUE,	curses.COLOR_BLACK)	# blue on black
-	curses.init_pair(3,curses.COLOR_CYAN,	curses.COLOR_BLACK)	# cyan on black
-	curses.init_pair(4,curses.COLOR_MAGENTA,curses.COLOR_BLACK)	# magenta on black
-	curses.init_pair(5,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
-	curses.init_pair(6,curses.COLOR_YELLOW,	curses.COLOR_BLACK)	# yellow on black
+	client.colorPairs()
+	#user-defined colors
 	curses.init_pair(7,curses.COLOR_GREEN,	curses.COLOR_BLACK)	# green on black (greentext only)
-	curses.init_pair(8,curses.COLOR_WHITE,	curses.COLOR_BLACK)	# white on black
+	curses.init_pair(8,curses.COLOR_BLACK,	curses.COLOR_BLACK)	# black on black (channel drawing)
 	curses.init_pair(10,curses.COLOR_BLACK, curses.COLOR_RED) #red
 	curses.init_pair(11,curses.COLOR_BLACK, curses.COLOR_GREEN) #green
 	curses.init_pair(12,curses.COLOR_BLACK, curses.COLOR_BLUE) #blue
