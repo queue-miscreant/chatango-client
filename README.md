@@ -15,13 +15,14 @@ FEATURES:
 >##	Terminal-resize compatible
 >## Links are mouse-clickable
 >##	Tracking images and links posted (F2)
->#	View members of a certain room (F3)
->##	Alter formatting sent to the server (F4)
+>##	View members of a certain room (F3)
+>##	Alter formatting sent to the chatango (F4)
 >##	Change channel (F5)
 >###		Supports white, red, and blue channels
 >	
 >##	Alterable "colorers"
 >###		Color text matching a regex or so
+>## Chat filters based on message attributes
 
 DEPENDENCIES
 --------------------------
