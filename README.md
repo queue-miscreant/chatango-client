@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 3.1
+Version 3.1.2
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
