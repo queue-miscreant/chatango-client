@@ -438,7 +438,7 @@ def mouse(self):
 	ret = matches[min(matches.keys())]
 	
 	#they begin with an index of 0, but appear beginning with 1 (i.e LINK 1 is lastlinks[0])
-	client.link_opener(self,self.lastlinks[ret-1])
+	client.link_opener(self,self.lastlinks[int(ret)-1])
 
 @client.onkey(curses.KEY_RESIZE)
 def resize(self):
