@@ -26,12 +26,16 @@ try:
 	import curses
 	import client
 except ImportError:
-	print("ERROR WHILE IMPORTING CURSES, is this running on Windows?")
+	print("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 	exit()
-import threading
+from threading import Thread
+import subprocess
 import re
 import json
 import chlib
+import os
+import nix
+from webbrowser import open_new_tab
 
 #constants for chatango
 FONT_FACES = ["Arial",
@@ -46,20 +50,17 @@ FONT_FACES = ["Arial",
 			  ]
 FONT_SIZES = [9,10,11,12,13,14]
 
+IMG_PATH = "feh"
+MPV_PATH = "mpv"
+
 #ignore list
 #needed here so that commands can access it
 ignores = []
-#					White	Red	 Blue	Both
-filtered_channels = [1,1,1,1]
+filtered_channels =	[1, #white
+			1, #red
+			1, #blue
+			1] #both
 
-#debugging function, as curses won't let normal prints occur
-def op(*args):
-	with open("debug","a+") as a:
-		for i in args:
-			a.write(str(i)+"\t")
-		a.write("\n")
-		a.close()
-		
 #read credentials from file
 def readFromFile(filePath):
 	try:
@@ -111,14 +112,6 @@ def decodeHtml(raw,encode=0):
 		raw = raw.replace("&nbsp;"," ")
 	
 	return raw
-	
-#sum of name; returns a number corresponding to a curses pair between 2 and 6
-def getColor(name, rot = 2):
-	total = 1
-	for i in name:
-		n = ord(i)
-		total ^= (n > 109) and n or ~n
-	return (((total + rot) % 6), total&2)
 
 #if given is at place 0 in the member name
 #return rest of the member name or an empty string
@@ -137,12 +130,10 @@ class chat_bot(chlib.ConnectionManager):
 
 	def __init__(self, wrapper,creds):
 		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
-		
 		self.parent = wrapper
 		self.parent.chatBot = self
 		self.creds = creds
 		self.channel = 0
-		
 		self.addGroup(creds['room'])
 		
 	def setFormatting(self, group = None):
@@ -155,7 +146,6 @@ class chat_bot(chlib.ConnectionManager):
 			'ff': "0",
 			'fz': 12,
 			}
-		
 		group.setFontColor(self.creds['formatting']['fc'])
 		group.setNameColor(self.creds['formatting']['nc'])
 		group.setFontFace(self.creds['formatting']['ff'])
@@ -170,7 +160,8 @@ class chat_bot(chlib.ConnectionManager):
 	def tryPost(self,text):
 		try:
 			group = getattr(self,'joinedGroup')
-			group.sendPost(decodeHtml(text,1),self.channel)
+			text = decodeHtml(text,1)
+			group.sendPost(text.replace("\n","<br/>"),self.channel)
 		except AttributeError:
 			return
 	
@@ -232,7 +223,9 @@ class chat_bot(chlib.ConnectionManager):
 	def recvg_participants(self,group):
 		self.members = group.users
 		self.parent.inputwin.statrefresh(self.creds.get('user'),int(group.unum,16))
-		
+#-------------------------------------------------------------------------------------------------------
+#KEYS
+	
 @client.onkey("tab")
 def ontab(self):
 	#only search after the last space
@@ -355,8 +348,6 @@ def F4(self):
 				loop = furtherInput.loop()
 				if loop + 1:
 					formatting['fz'] = loop
-			#resize just in case any resize events occurred in sub-windows
-#			me.onKEY_RESIZE()
 			#set formatting, even if changes didn't occur
 			self.chatBot.setFormatting()
 		return ret
@@ -416,38 +407,39 @@ def F12(self):
 
 @client.onkey(curses.KEY_MOUSE)
 def mouse(self):
+	#try to pull mouse event
 	try:
 		_, x, y, z, state = curses.getmouse()
-		lineno = self.chat.nums-y
-		#if not a release, or it's not in the chat window, return
-		if state > curses.BUTTON1_PRESSED: return
-		if lineno < 0: return
+	except: return
 		
-		lines = self.chat.lines
-		length = len(lines)
-		pulled = 0
-		mlines = []
-		#read in reverse for links that appear, only the ones on screen
-		for i in reversed(range(max(length-self.chat.nums-1,0),length)):
-			#recalculate height of each message
-			mlines = client.splitMessage(lines[i][0],self.chat.width)
-			pulled += len(mlines)
-			if pulled >= lineno:
-				break
-		#get the exact line from the message
-		try:
-			line = mlines[pulled-lineno]
-		except: return
-		#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"
-		matches = {abs((i.start()+i.end())/2 - x):i.groups()[0] for i in re.finditer(r"<LINK (\d+?)>",line)}
-		if matches == {}: return
-		#get the closest capture
-		ret = matches[min(matches.keys())]
-		
-		#they begin with an index of 0, but appear beginning with 1 (i.e LINK 1 is lastlinks[0])
-		self.openLink(self.lastlinks[int(ret)-1])
-	except Exception as exc:
-		op(exc)
+	lineno = self.chat.nums-y
+	#if not a release, or it's not in the chat window, return
+	if state > curses.BUTTON1_PRESSED: return
+	if lineno < 0: return
+	
+	lines = self.chat.lines
+	length = len(lines)
+	pulled = 0
+	mlines = []
+	#read in reverse for links that appear, only the ones on screen
+	for i in reversed(range(max(length-self.chat.nums-1,0),length)):
+		#recalculate height of each message
+		mlines = client.splitMessage(lines[i][0],self.chat.width)
+		pulled += len(mlines)
+		if pulled >= lineno:
+			break
+	#get the exact line from the message
+	try:
+		line = mlines[pulled-lineno]
+	except: return
+	#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"
+	matches = {abs((i.start()+i.end())//2 - x):i.groups()[0] for i in re.finditer(r"<LINK (\d+?)>",line)}
+	if matches == {}: return
+	#get the closest capture
+	ret = matches[min(matches.keys())]
+	
+	#they begin with an index of 0, but appear beginning with 1 (i.e LINK 1 is lastlinks[0])
+	client.link_opener(self,self.lastlinks[ret-1])
 
 @client.onkey(curses.KEY_RESIZE)
 def resize(self):
@@ -459,23 +451,25 @@ def resize(self):
 	self.chat.redraw()
 	self.inputwin.statrefresh(self.chatBot.creds.get('user'))
 	self.inputwin.blurbrefresh()
-
-#methods like this can be used in the form /[commandname]
-@client.command('ignore')
-def ignore(arglist):
-	global ignores
-	person = arglist[0]
-	if '@' not in person: return
-	person = person[1:]
-	if person in ignores: return
-	ignores.append(person)
+#-------------------------------------------------------------------------------------------------------
+#COLORERS
 
 #color by user's name
 @client.colorer
 def defaultcolor(msg,coldic,*args):
-	color,bold = getColor(msg[1:msg.find(":")])
-	coldic['default'] = curses.color_pair(color) | (bold and curses.A_BOLD)
-
+	name = msg[1:msg.find(":")]
+	total = 1
+	for i in name:
+		n = ord(i)
+		total ^= (n > 109) and n or ~n
+	coldic['default'] = curses.color_pair(((total + 2) % 5) + 5) | (total&2 and curses.A_BOLD)
+#links as white
+@client.colorer
+def link(msg,coldic,*args):
+	default = coldic.get('default')
+	for i in re.finditer(r"\<LINK \d+?>",msg):
+		coldic[i.span(0)[0]] = default
+		coldic[i.span(0)[1]] = curses.color_pair(0)
 #color lines starting with '>' as green; ignore replies and ' user:'
 @client.colorer
 def greentext(msg,coldic,*args):
@@ -497,14 +491,6 @@ def greentext(msg,coldic,*args):
 		else:
 			coldic[tracker+len(line)] = default
 		tracker += len(line)
-
-@client.colorer
-def link(msg,coldic,*args):
-	default = coldic.get('default')
-	for i in re.finditer(r"\<LINK \d+?>",msg):
-		coldic[i.span(0)[0]] = default
-		coldic[i.span(0)[1]] = curses.color_pair(0)
-
 #draw replies, history, and channel
 @client.colorer
 def chatcolors(msg,coldic,*args):
@@ -516,16 +502,82 @@ def chatcolors(msg,coldic,*args):
 			coldic[i] |= curses.A_STANDOUT
 		coldic[i] |= args[1] and curses.A_UNDERLINE
 	coldic[1] = curses.color_pair(args[2]+11)
+#-------------------------------------------------------------------------------------------------------
+#OPENERS
+
+#start and daemonize feh (or replaced image viewing program)
+@client.opener("jpeg")
+@client.opener("jpg")
+@client.opener("png")
+def images(client,link,ext):
+	client.printBlurb("Displaying image... ({})".format(ext))
+	args = [IMG_PATH, link]
+	try:
+		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+		display_thread = Thread(target = displayProcess.communicate)
+		display_thread.daemon = True
+		display_thread.start()
+	except Exception as exc:
+		raise Exception("failed to start image display")
 	
+#start and daemonize mpv (or replaced video playing program)
+@client.opener("webm")
+@client.opener("mp4")
+@client.opener("gif")
+def videos(client,link,ext):
+	client.printBlurb("Playing video... ({})".format(ext))
+	args = [MPV_PATH, link, "--pause"]
+	try:
+		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+		display_thread = Thread(target = displayProcess.communicate)
+		display_thread.daemon = True
+		display_thread.start()
+	except Exception as exc:
+		raise Exception("failed to start video display")
+
+@client.opener("htmllink")
+def linked(client,link):
+	client.printBlurb("Opened new tab")
+	#magic code to output stderr to /dev/null
+	savout = os.dup(1)
+	os.close(1)
+	os.open(os.devnull, os.O_RDWR)
+	try:
+		open_new_tab(link)
+	finally:
+		os.dup2(savout, 1)
+#-------------------------------------------------------------------------------------------------------
+#COMMANDS
+
+#methods like this can be used in the form /[commandname]
+@client.command('ignore')
+def ignore(arglist):
+	global ignores
+	person = arglist[0]
+	if '@' not in person: return
+	person = person[1:]
+	if person in ignores: return
+	ignores.append(person)
+#-------------------------------------------------------------------------------------------------------
+#FILTERS
+
+#filter filtered channels
 @client.chatfilter
 def channelfilter(*args):
 	try:
 		return filtered_channels[args[2]]
 	except:
 		return False
-	
+#-------------------------------------------------------------------------------------------------------
+
 def begin(stdscr,creds):
 	client.colorPairs()
+	#user colors
+	curses.init_pair(5,curses.COLOR_BLUE,	curses.COLOR_BLACK)	# blue on black
+	curses.init_pair(6,curses.COLOR_CYAN,	curses.COLOR_BLACK)	# cyan on black
+	curses.init_pair(7,curses.COLOR_MAGENTA,curses.COLOR_BLACK)	# magenta on black
+	curses.init_pair(8,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
+	curses.init_pair(9,curses.COLOR_YELLOW,	curses.COLOR_BLACK)	# yellow on black
 	#user-defined colors
 	curses.init_pair(10,curses.COLOR_GREEN,	curses.COLOR_BLACK)	# green on black (greentext only)
 	curses.init_pair(11,curses.COLOR_BLACK,	curses.COLOR_BLACK)	# black on black (channel drawing)
@@ -540,9 +592,9 @@ def begin(stdscr,creds):
 	chat = chat_bot(cl,creds)
 	
 	#daemonize functions
-	bot_thread = threading.Thread(target=chat.main)
+	bot_thread = Thread(target=chat.main)
 	bot_thread.daemon = True
-	printtime = threading.Thread(target=cl.timeloop)
+	printtime = Thread(target=cl.timeloop)
 	printtime.daemon = True
 	#start threads
 	bot_thread.start()

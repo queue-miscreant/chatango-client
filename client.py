@@ -8,19 +8,24 @@
 #Historical messages are underlined
 #
 
-import threading
-import subprocess
+from os import environ
 import curses
-import os
 import time
 import re
-from webbrowser import open_new_tab
 #curses likes to wait a second on escape by default. Turn that off
-os.environ.setdefault('ESCDELAY', '25')
+environ.setdefault('ESCDELAY', '25')
 
 IMAGES = ["jpg","png","jpeg"]
 VIDEOS = ["gif","webm","mp4"]
 COLOR_NAMES = [" Red","Green"," Blue"]
+
+#debug stuff
+def dbmsg(*args):
+	with open("debug","a+") as a:
+		for i in args:
+			a.write(str(i)+"\t")
+		a.write("\n")
+		a.close()
 
 #predefined keys
 #if you want to define more key events, you'll want to use
@@ -39,53 +44,33 @@ for i in dir(curses):
 CURSES_KEYS[curses.KEY_ENTER] = 'enter'
 CURSES_KEYS[curses.KEY_BACKSPACE] = 'backspace'
 
-IMG_PATH = "feh"
-MPV_PATH = "mpv"
-
 colorers = []
 commands = {}
 filters = []
 
-def op(*args):
-	with open("debug","a+") as a:
-		for i in args:
-			a.write(str(i)+"\t")
-		a.write("\n")
-		a.close()
+class link_opener:
+#	__init__ is like a static __call__
+	def __init__(self,client,link):
+		#extension
+		ext = link[link.rfind(".")+1:]
+		try:
+			if len(ext) <= 4:
+				getattr(self, ext)(client,link,ext)
+			else:
+				getattr(self, 'htmllink')(client,link)
+		except AttributeError as exc:
+			pass
 
-#start and daemonize feh (or replaced image viewing program)
-def display(*args):
-	args = [IMG_PATH] + [i for i in args] 
-	try:
-		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		display_thread = threading.Thread(target = displayProcess.communicate)
-
-		display_thread.setDaemon(True)
-
-		display_thread.start()
-		
-	except Exception as exc:
-		pass
-		#raise Exception('failed to run display ({})'.format(exc))
-		
-#start and daemonize mpv (or replaced video playing program)
-def video(*args):
-	args = [MPV_PATH] + [i for i in args] + ["--pause"]
-	try:
-		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		display_thread = threading.Thread(target = displayProcess.communicate)
-		
-		display_thread.setDaemon(True)
-
-		display_thread.start()
-
-	except Exception as exc:
-		pass
-		#raise Exception('failed to run display ({})'.format(exc))
+def colorPairs():
+	#control colors
+	curses.init_pair(1,curses.COLOR_RED,	curses.COLOR_WHITE)	# red on white for system
+	curses.init_pair(2,curses.COLOR_RED,	curses.COLOR_RED)	#drawing red boxes
+	curses.init_pair(3,curses.COLOR_GREEN,	curses.COLOR_GREEN)	#drawing green boxes
+	curses.init_pair(4,curses.COLOR_BLUE,	curses.COLOR_BLUE)	#drawing blue boxes
 
 #add take out links, add them to a list
 def parseLinks(raw,lastlinks):
-	#in case the raw message ends with a link
+	#in case the raw message ends wzith a link
 	raw += " "
 	newLinks = []
 	#look for whole word links starting with http:// or https://
@@ -130,7 +115,7 @@ def wordWrap(fullString, width, byteString):
 	#width+1 in case the next character is a space
 	#if it's the middle of the word, split it at the last space
 	if b' ' in byteString[:width+1]:
-		lastSpace = byteString.rfind(b" ",int(width/2),width+1)
+		lastSpace = byteString.rfind(b" ",width//2,width+1)
 		if lastSpace + 1:
 			a,b = unicodeWrap(fullString,lastSpace)
 			return a,b[1:]
@@ -148,7 +133,6 @@ def easyWrap(fullString,width):
 	ret,_ = unicodeWrap(fullString[::-1],width-1)
 	#unicode wrapping
 	return ret[::-1]
-
 #conversions to and from hex strings ([255,255,255] <-> FFFFFF)
 def toHexColor(rgb):
 	return ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
@@ -170,19 +154,21 @@ class cursesInput:
 		next = 0
 		while next+1:
 			next = screen.getch()
+			#if there's a character being injected, stop
+			if next == 27: return
 			chars.append(next)
 		screen.nodelay(0)
 		
 		curseAction = CURSES_KEYS.get(chars[0])
-		
-		if curseAction and len(chars) == 2:
-			if hasattr(self,"on"+curseAction):
+		try:
+			if curseAction and len(chars) == 2:
 				return getattr(self,"on"+curseAction)()
-		elif hasattr(self,"oninput") and chars[0] in range(32,255):
-			getattr(self,"oninput")(chars[:-1])
+			elif chars[0] in range(32,255):
+				getattr(self,"oninput")(chars[:-1])
+		except AttributeError:
+			pass
 
 class listInput(cursesInput):
-	#vertical list iterator, horizontal mode changer
 	it = 0
 	mode = 0
 	
@@ -207,9 +193,9 @@ class listInput(cursesInput):
 		#drawing calls are expensive, especially when drawing the chat
 		#which means that you have to live with fullscreen lists
 		#height,width,y,x = (int(i) for i in [height*.5, width*.8, height*.2, width*.1])
-		height,width,y,x = (int(i) for i in [height-3,width,0,0])
+		height,width,y,x = height-3,width
 		if width < 7 or height < 3 : raise SizeException()
-		self.display = curses.newwin(height,width,y,x)
+		self.display = curses.newwin(height,width,0,0)
 	
 	#draw method for previous method's window
 	def draw(self):
@@ -222,13 +208,13 @@ class listInput(cursesInput):
 		display.erase()
 		display.border()
 		#which portion of the list is currently displaced
-		listNum = int(self.it/maxy)
+		listNum = self.it//maxy
 		subList = self.outList[maxy*listNum:min(maxy*(listNum+1),len(self.outList))]
 		#display
 		for i,value in enumerate(subList):
 			#add an elipsis in the middle of the string if it can't be displayed
 			if len(value) > maxx:
-				half = int(maxx/2)
+				half = maxx//2
 				value = value[:half - 3] + "..." + value[-half:]
 			display.addstr(i+1,1,value,(i+maxy*listNum == self.it) and curses.A_STANDOUT)
 		
@@ -280,7 +266,7 @@ class colorInput(listInput):
 			for i in range(3):
 				#gibberish for "draw a pretty rectange of the color it represents"
 				for j in range(starty(i),h-6):
-					display.addstr(j,third(i)," "*part,curses.color_pair(i+7))
+					display.addstr(j,third(i)," "*part,curses.color_pair(i+2))
 				
 				display.addstr(h - 5, third(i), centered(COLOR_NAMES[i]),
 					self.mode == i and curses.A_REVERSE)
@@ -380,7 +366,7 @@ class chat:
 					if j > len(line): break
 			wholetr += len(line)
 			#self.win.addnstr(calc+i, 0, line[0], self.width, line[1])
-		self.win.hline(self.height, 0, '-', self.width)
+		self.win.hline(self.height, 0, curses.ACS_HLINE, self.width)
 		
 		self.nums = min(self.height,self.nums+len(newlines))
 		if refresh: self.win.refresh()
@@ -441,7 +427,7 @@ class client(cursesInput):
 	
 	#simple method to output to the chat window
 	def newMessage(self, base):
-		self.chat.push((base,{len(base): curses.color_pair(6)}))
+		self.chat.push((base,{len(base): curses.color_pair(1)}))
 		self.inputwin.inrefresh()
 	
 	def newPost(self, post, *args):
@@ -498,26 +484,6 @@ class client(cursesInput):
 	def onKEY_SHOME(self):
 		self.text = ""
 		self.inputwin.inrefresh(self.text)
-
-	def openLink(self,link):
-		#extension
-		ext = link[link.rfind(".")+1:]
-		if ext.lower() in IMAGES:
-			self.printBlurb("Displaying image... ({})".format(ext))
-			display(link)
-		elif ext.lower() in VIDEOS:
-			self.printBlurb("Playing video... ({})".format(ext))
-			video(link)
-		else:
-			self.printBlurb("Opened new tab")
-			#magic code to output stderr to /dev/null
-			savout = os.dup(1)
-			os.close(1)
-			os.open(os.devnull, os.O_RDWR)
-			try:
-				open_new_tab(link)
-			finally:
-				os.dup2(savout, 1)
 	
 	def onKEY_UP(self):
 		if len(self.history) > 0:
@@ -540,25 +506,19 @@ class client(cursesInput):
 				if not len(self.lastlinks): return
 				current = self.lastlinks[len(self.lastlinks) - 1 - me.it]
 				if not me.mode:
-					self.openLink(current)
+					link_opener(self,current)
 				else:
 					paste(current)
 				#exit
 				return -1
 			return ret
-	
-		def drawMode(self):
-			display = self.display
-		
-			maxy,maxx = display.getmaxyx()
-			display.addnstr(maxy-1,1, (self.mode and "COPY") or "DISPLAY", maxx-1, curses.A_REVERSE)
 		
 		#take out the protocol
 		dispList = [i.replace("http://","").replace("https://","") for i in reversed(self.lastlinks)]
 		#link number: link, but in reverse
 		dispList = ["{}: {}".format(len(self.lastlinks)-i,j) for i,j in enumerate(dispList)] 
 	
-		box = listInput(self.screen, dispList, drawMode)
+		box = listInput(self.screen, dispList)
 		box.addKeys({
 			'enter':select(box),
 			curses.KEY_RESIZE:resize(box,self)
@@ -583,9 +543,6 @@ class client(cursesInput):
 			if not i % 300:
 				self.printTime()
 				i=0
-				
-	def stop(self):
-		self.screen.ungetch(27)
 
 #generic wrapper for redrawing listinputs
 def resize(self,replace):
@@ -595,7 +552,7 @@ def resize(self,replace):
 		self.makeWindows(y,x)
 	return ret
 
-#wrapper for key bindings
+#DID SOMEONE SAY DECORATORS?
 def onkey(keyname):
 	def wrapper(func):
 		if type(keyname) == str:
@@ -604,34 +561,26 @@ def onkey(keyname):
 			setattr(client,"on"+CURSES_KEYS[keyname],func)
 	return wrapper
 
-#wrapper for commands
 def command(commandname):
 	def wrapper(func):
 		commands[commandname] = func
 	return wrapper
 	
-#wrapper for colorers
 def colorer(func):
 	colorers.append(func)
 
 def chatfilter(func):
 	filters.append(func)
 
+def opener(extension):
+	def wrap(func):
+		setattr(link_opener,extension,staticmethod(func))
+		#allow stacking wrappers
+		return func
+	return wrap
+
 class DisconnectException(Exception):
 	pass
 
 class SizeException(Exception):
 	pass
-
-def colorPairs():
-	#this is perfect. don't fuck it up, or else stuff will stop drawing colors properly
-	curses.init_pair(1,curses.COLOR_BLUE,	curses.COLOR_BLACK)	# blue on black
-	curses.init_pair(2,curses.COLOR_CYAN,	curses.COLOR_BLACK)	# cyan on black
-	curses.init_pair(3,curses.COLOR_MAGENTA,curses.COLOR_BLACK)	# magenta on black
-	curses.init_pair(4,curses.COLOR_YELLOW,	curses.COLOR_BLACK)	# yellow on black
-	curses.init_pair(5,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
-	#control colors
-	curses.init_pair(6,curses.COLOR_RED,	curses.COLOR_WHITE)	# red on white for system
-	curses.init_pair(7,curses.COLOR_RED,	curses.COLOR_RED)	#drawing red boxes
-	curses.init_pair(8,curses.COLOR_GREEN,	curses.COLOR_GREEN)	#drawing green boxes
-	curses.init_pair(9,curses.COLOR_BLUE,	curses.COLOR_BLUE)	#drawing blue boxes

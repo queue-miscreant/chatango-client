@@ -34,7 +34,7 @@ DEPENDENCIES
 ""API""
 --------------------------
 >##	It's nowhere near comprehensive enough to be called an API,
->##	but this section might help demonstrate the abilities of the display.
+>##	but this section might help demonstrate the abilities of the client.
 >#	__DECORATORS__
 >##	client.colorer
 >###		Adds a colorer to be applied to the client.
@@ -59,7 +59,15 @@ DEPENDENCIES
 >###		/(command name) will run the function
 >###		Decorated function arguments:
 >			arglist:	Space-delimited values following the command name
-	
+
+
+>##	client.opener(extension)
+>###		Function run on attempt to open link. Special case 'htmllink' is run on unhandled extensions
+>###		Decorated function arguments:
+>			client:	The client object. Passed so that blurbs can be printed from within functions
+>			link:	The link retrieved
+>			ext:	(Optional for 'htmllink') The extension captured
+
 >##	client.chatfilter
 >###		Function run on attempt to push message. If any filter returns false, the message is not pushed
 >###		Decorated function arguments:
@@ -76,6 +84,11 @@ DEPENDENCIES
 
 CHANGELOG
 --------------------------
+># v3.1.2	*2016/2/21*
+>##	Finally fixed garbage control character injection. xterm seems to not flicker anymore.
+>##	Moved link functions to be dependent on chatango.py
+>###	Greater API freedom; less code to change on Windows.
+
 ># v3.1.1	*2016/2/20*
 >##	Added drawing currently unfiltered channels
 >##	Made color input window slightly more resize-friendly (read: made things more full out)
