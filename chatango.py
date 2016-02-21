@@ -3,7 +3,7 @@
 #
 #chatango.py:
 #		Chat bot that extends the ConnectionManager class in chlib and
-#		extensions to the client for chatango only.
+#		adds extensions to the client for chatango only.
 #		The main source file.
 #
 
@@ -118,11 +118,20 @@ def getColor(name, rot = 2):
 	for i in name:
 		n = ord(i)
 		total ^= (n > 109) and n or ~n
-	return (((total + rot) % 6), total&3)
+	return (((total + rot) % 6), total&2)
+
+#if given is at place 0 in the member name
+#return rest of the member name or an empty string
+def findName(given,memList):
+	for i in memList:
+		if i[0] in "!#":
+			i = i[1:]
+		if not i.find(given):
+			return i[len(given):]
+	return ""
 
 #bot for interacting with chat
-class mainBot(chlib.ConnectionManager):
-
+class chat_bot(chlib.ConnectionManager):
 	parent = None
 	members = []
 
@@ -137,7 +146,7 @@ class mainBot(chlib.ConnectionManager):
 		self.addGroup(creds['room'])
 		
 	def setFormatting(self, group = None):
-		if group is not None:
+		if group is None:
 			 group = self.joinedGroup
 		
 		if self.creds.get('formatting') is None:
@@ -237,16 +246,16 @@ def ontab(self):
 		#look for the name starting with the text given
 		if afterReply != "":
 			#up until the @
-			self.text += client.findName(afterReply,self.chatBot.members) + " "
+			self.text += findName(afterReply,self.chatBot.members) + " "
 		self.inputwin.inrefresh(self.text)
 
 @client.onkey(curses.KEY_F3)	
 def F3(self):
 	self.chat.debounce = True
 	#special wrapper to manipulate inject functionality for newlines in the list
-	def newLine(self):
+	def select(me):
 		def ret():
-			current = self.outList[self.it]
+			current = me.outList[me.it]
 			current = current.split(' ')[0]
 			if current[0] in "!#":
 				current = current[1:]
@@ -257,8 +266,11 @@ def F3(self):
 	dispList = {i:self.chatBot.members.count(i) for i in self.chatBot.members}
 	dispList = [str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()]
 	box = client.listInput(self.screen, sorted(dispList))
-	setattr(box,'onenter',newLine(box))
-	setattr(box,'onKEY_RESIZE',client.resize(box,self))
+	box.addKeys({
+		'enter':select(box),
+		curses.KEY_RESIZE:client.resize(box,self)
+	})
+	
 	#direct input away from normal input
 	loop = box.loop()
 	if loop != -1:
@@ -274,77 +286,86 @@ def F4(self):
 	self.chat.debounce = True
 	
 	#select which further input to display
-	def select(self, replace):
+	def select(me):
 		def ret():
-			display = self.display
-			formatting = replace.chatBot.creds['formatting']
+			formatting = self.chatBot.creds['formatting']
 			#ask for font color
-			if self.it == 0:
+			if me.it == 0:
 				def enter(self):
 					def ret():
 						return client.toHexColor(self.color)
 					return ret
 			
 				furtherInput = client.colorInput(self.screen,client.fromHexColor(formatting['fc']))
-				setattr(furtherInput,'onenter',enter(furtherInput))
-				setattr(furtherInput,'onKEY_RESIZE',client.resize(furtherInput,replace))
+				furtherInput.addKeys({
+					'enter':enter(furtherInput),
+					curses.KEY_RESIZE:client.resize(furtherInput,me)
+				})
 			
 				loop = furtherInput.loop()
 				if loop != -1:
 					formatting['fc'] = loop
 			#ask for name color
-			elif self.it == 1:
+			elif me.it == 1:
 				def enter(self):
 					def ret():
 						return client.toHexColor(self.color)
 					return ret
 			
 				furtherInput = client.colorInput(self.screen,client.fromHexColor(formatting['nc']))
-				setattr(furtherInput,'onenter',enter(furtherInput))
-				setattr(furtherInput,'onKEY_RESIZE',client.resize(furtherInput,replace))
+				furtherInput.addKeys({
+					'enter':enter(furtherInput),
+					curses.KEY_RESIZE:client.resize(furtherInput,me)
+				})
 			
 				loop = furtherInput.loop()
 				if loop != -1:
 					formatting['nc'] = loop
 			#ask for font face
-			elif self.it == 2:
+			elif me.it == 2:
 				def enter(self):
 					def ret():
 						return self.it
 					return ret
 				
 				furtherInput = client.listInput(self.screen,FONT_FACES)
+				furtherInput.addKeys({
+					'enter':enter(furtherInput),
+					curses.KEY_RESIZE:client.resize(furtherInput,me)
+				})
 				furtherInput.it = int(formatting['ff'])
-				setattr(furtherInput,'onenter',enter(furtherInput))
-				setattr(furtherInput,'onKEY_RESIZE',client.resize(furtherInput,replace))
 			
 				loop = furtherInput.loop()
 				if loop + 1:
 					formatting['ff'] = str(loop)
 			#ask for font size
-			elif self.it == 3:
+			elif me.it == 3:
 				def enter(self):
 					def ret():
 						return FONT_SIZES[self.it]
 					return ret
 					
 				furtherInput = client.listInput(self.screen,[i for i in map(str,FONT_SIZES)])
+				furtherInput.addKeys({
+					'enter':enter(furtherInput),
+					curses.KEY_RESIZE:client.resize(furtherInput,me)
+				})
 				furtherInput.it = FONT_SIZES.index(formatting['fz'])
-				setattr(furtherInput,'onenter',enter(furtherInput))
-				setattr(furtherInput,'onKEY_RESIZE',client.resize(furtherInput,replace))
 			
 				loop = furtherInput.loop()
 				if loop + 1:
 					formatting['fz'] = loop
 			#resize just in case any resize events occurred in sub-windows
-			self.onKEY_RESIZE()
+#			me.onKEY_RESIZE()
 			#set formatting, even if changes didn't occur
-			replace.chatBot.setFormatting()
+			self.chatBot.setFormatting()
 		return ret
 		
 	box = client.listInput(self.screen,["Font Color", "Name Color", "Font Face", "Font Size"])
-	setattr(box,'onenter',select(box,self))
-	setattr(box,'onKEY_RESIZE',client.resize(box,self))
+	box.addKeys({
+		'enter':select(box),
+		curses.KEY_RESIZE:client.resize(box,self)
+	})
 	
 	box.loop()
 	curses.curs_set(1)
@@ -355,24 +376,32 @@ def F4(self):
 @client.onkey(curses.KEY_F5)
 def F5(self):
 	self.chat.debounce = True
-	def select(self,replace):
+	def select(me):
 		def ret():
-			replace.chatBot.channel = self.it
+			self.chatBot.channel = me.it
 			return -1
 		return ret
 	
-	def oninput(self,replace):
+	def oninput(me):
 		def ret(chars):
 			global filtered_channels
 			#space only
 			if chars[0] != 32: return
-			filtered_channels[self.it] = not filtered_channels[self.it]
+			filtered_channels[me.it] = not filtered_channels[me.it]
 		return ret
-		
-	box = client.listInput(self.screen,["None", "Red", "Blue", "Both"])
-	setattr(box,'onenter',select(box,self))
-	setattr(box,'oninput',oninput(box,self))
-	setattr(box,'onKEY_RESIZE',client.resize(box,self))
+	
+	def drawActive(me):
+		h, w = me.display.getmaxyx()
+		for i in range(4):
+			if filtered_channels[i]:
+				me.display.addstr(i+1,w-2," ",curses.color_pair(i and i+11 or 15))
+					
+	box = client.listInput(self.screen,["None", "Red", "Blue", "Both"],drawActive)
+	box.addKeys({
+		'enter':select(box),
+		'input':oninput(box),
+		curses.KEY_RESIZE:client.resize(box,self)
+	})
 	box.it = self.chatBot.channel
 	
 	box.loop()
@@ -383,7 +412,7 @@ def F5(self):
 #DEBUG ONLY
 @client.onkey(curses.KEY_F12)
 def F12(self):
-	op(filtered_channels)
+	pass
 
 @client.onkey(curses.KEY_MOUSE)
 def mouse(self):
@@ -464,7 +493,7 @@ def greentext(msg,coldic,*args):
 		except:
 			begin = 0
 		if len(line[begin:]) and line[begin:][0] == ">":
-			coldic[tracker+len(line)] = curses.color_pair(7)
+			coldic[tracker+len(line)] = curses.color_pair(10)
 		else:
 			coldic[tracker+len(line)] = default
 		tracker += len(line)
@@ -486,7 +515,7 @@ def chatcolors(msg,coldic,*args):
 			coldic[i] ^= coldic[i] & curses.A_BOLD and curses.A_BOLD
 			coldic[i] |= curses.A_STANDOUT
 		coldic[i] |= args[1] and curses.A_UNDERLINE
-	coldic[1] = curses.color_pair(args[2]*2 + 8)
+	coldic[1] = curses.color_pair(args[2]+11)
 	
 @client.chatfilter
 def channelfilter(*args):
@@ -498,17 +527,17 @@ def channelfilter(*args):
 def begin(stdscr,creds):
 	client.colorPairs()
 	#user-defined colors
-	curses.init_pair(7,curses.COLOR_GREEN,	curses.COLOR_BLACK)	# green on black (greentext only)
-	curses.init_pair(8,curses.COLOR_BLACK,	curses.COLOR_BLACK)	# black on black (channel drawing)
-	curses.init_pair(10,curses.COLOR_BLACK, curses.COLOR_RED) #red
-	curses.init_pair(11,curses.COLOR_BLACK, curses.COLOR_GREEN) #green
-	curses.init_pair(12,curses.COLOR_BLACK, curses.COLOR_BLUE) #blue
+	curses.init_pair(10,curses.COLOR_GREEN,	curses.COLOR_BLACK)	# green on black (greentext only)
+	curses.init_pair(11,curses.COLOR_BLACK,	curses.COLOR_BLACK)	# black on black (channel drawing)
+	curses.init_pair(12,curses.COLOR_BLACK, curses.COLOR_RED) #red
+	curses.init_pair(13,curses.COLOR_BLACK, curses.COLOR_BLUE) #blue
 	curses.init_pair(14,curses.COLOR_BLACK, curses.COLOR_MAGENTA) #both
+	curses.init_pair(15,curses.COLOR_WHITE, curses.COLOR_WHITE) #white for other
 	
 	curses.mousemask(1)
 	
 	cl = client.client(stdscr)
-	chat = mainBot(cl,creds)
+	chat = chat_bot(cl,creds)
 	
 	#daemonize functions
 	bot_thread = threading.Thread(target=chat.main)
@@ -519,9 +548,12 @@ def begin(stdscr,creds):
 	bot_thread.start()
 	printtime.start()
 	
-	while bot_thread.is_alive():
+	while chat.connected:
 		if cl.input():
 			break
+	
+	cl.active = False
+	chat.connected = False
 
 if __name__ == '__main__':
 	creds = readFromFile('creds')
@@ -546,7 +578,8 @@ if __name__ == '__main__':
 			if '-' in creds['room']: raise Exception()
 		except:
 			raise Exception("Improper argument formatting")
-	
+			
+	#input if missing information
 	if not all((creds.get('user'),creds.get('passwd'),creds.get('room'))):
 		creds['user'] = input("Enter your username: ")
 		creds['passwd'] = input("Enter your password: ")

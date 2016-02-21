@@ -76,6 +76,13 @@ DEPENDENCIES
 
 CHANGELOG
 --------------------------
+># v3.1.1	*2016/2/20*
+>##	Added drawing currently unfiltered channels
+>##	Made color input window slightly more resize-friendly (read: made things more full out)
+>## Daemonized threads should stop together
+>## Made better API for listinterface keys. Now uses a dictionary of the same type as client.onkey wrappers. For example, 
+>###		{'enter':func1,curses.KEY_UP:func2}
+
 ># v3.1	*2016/2/20*
 >##	Changed colorer arguments. Made client more generalized so that argument list is pulled from the bot.
 >##	Modified the name colorer to use intene colors on certain names. Should be easier to tell names apart

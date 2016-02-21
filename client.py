@@ -149,19 +149,9 @@ def easyWrap(fullString,width):
 	#unicode wrapping
 	return ret[::-1]
 
-#if given is at place 0 in the member name
-#return rest of the member name or an empty string
-def findName(given,memList):
-	for i in memList:
-		if i[0] in "!#":
-			i = i[1:]
-		if not i.find(given):
-			return i[len(given):]
-	return ""
-
+#conversions to and from hex strings ([255,255,255] <-> FFFFFF)
 def toHexColor(rgb):
 	return ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
-
 def fromHexColor(hexStr):
 	return [int(hexStr[2*i:2*i+2],16) for i in range(3)]
 
@@ -205,6 +195,13 @@ class listInput(cursesInput):
 		curses.curs_set(0)
 		if drawOther:
 			setattr(self,'drawOther',drawOther)
+			
+	def addKeys(self,newFunctions = {}):
+		for i,j in newFunctions.items():
+			if type(i) == str:
+				setattr(self,"on"+i,j)
+			else:
+				setattr(self,"on"+CURSES_KEYS[i],j)
 		
 	def makeWindows(self, height, width):
 		#drawing calls are expensive, especially when drawing the chat
@@ -272,24 +269,25 @@ class colorInput(listInput):
 		display.clear()
 		display.border()
 		h, w = display.getmaxyx()
-		part = int(w/7)
+		part = w//3-1
 		
-		buff = lambda x: int(h*x/10)
-		if buff(7)+4 >= h: raise SizeException()
-		seventh = lambda x: (2*x+1)*part
-		starty = lambda x:buff(1)+int(buff(6)*(1 - self.color[x]/255))
-		
-		self.display.addstr(buff(7) + 4,seventh(1),toHexColor(self.color).rjust(6,"0"))
+		third = lambda x: x*(part)+x+1
+		centered = lambda x: x.rjust((part+len(x))//2).ljust(part)
+		starty = lambda x:1+int((h-6)*(1 - self.color[x]/255))
+		try:
+			self.display.addstr(h-2,third(1),centered(toHexColor(self.color)))
 						
-		for i in range(3):
-			#gibberish for "draw a pretty rectange of the color it represents"
-			for j in range(starty(i),buff(6)):
-				display.addstr(j,seventh(i)," "*part,curses.color_pair(i+10))
+			for i in range(3):
+				#gibberish for "draw a pretty rectange of the color it represents"
+				for j in range(starty(i),h-6):
+					display.addstr(j,third(i)," "*part,curses.color_pair(i+7))
 				
-			display.addstr(buff(7) + 1, seventh(i), COLOR_NAMES[i].ljust(6),
-				self.mode == i and curses.A_REVERSE)
-			display.addstr(buff(7) + 2,seventh(i),(" %d"%self.color[i]).ljust(6),
-				self.mode == i and curses.A_REVERSE)
+				display.addstr(h - 5, third(i), centered(COLOR_NAMES[i]),
+					self.mode == i and curses.A_REVERSE)
+				display.addstr(h - 4, third(i), centered(" %d"%self.color[i]),
+					self.mode == i and curses.A_REVERSE)
+		except:
+			raise SizeException()
 		
 		display.refresh()
 	#color manipulation: mode represents color selected
@@ -355,14 +353,14 @@ class chat:
 	#format expected: (string, coldic)
 	def push(self, newmsg, append = True, refresh = True):
 		if append: self.lines.append(newmsg)
+		self.lines = self.lines[-100:]
+		if self.debounce: return
 		try:
 			if not all(i(*newmsg[2]) for i in filters): return
 		except: pass
-		if self.debounce: return
 		newlines = splitMessage(newmsg[0],self.width)[-self.height:]
 		colors = newmsg[1]
 		
-		self.lines = self.lines[-100:]
 		calc = min(self.nums,self.height-len(newlines))
 		#scroll some lines if needed
 		if self.height-self.nums <= 0:
@@ -435,6 +433,7 @@ class client(cursesInput):
 	
 	def __init__(self,screen):
 		cursesInput.__init__(self,screen)
+		self.active = True
 		y,x = screen.getmaxyx()
 		self.chat = chat(y-3,x)
 		self.inputwin = chatinput(y-3,x)
@@ -536,12 +535,12 @@ class client(cursesInput):
 	def onKEY_F2(self):
 		self.chat.debounce = True
 		#special wrapper to inject functionality for newlines in the list
-		def newLine(self,replace):
+		def select(me):
 			def ret():
-				if not len(replace.lastlinks): return
-				current = replace.lastlinks[len(replace.lastlinks) - 1 - self.it]
-				if not self.mode:
-					replace.openLink(current)
+				if not len(self.lastlinks): return
+				current = self.lastlinks[len(self.lastlinks) - 1 - me.it]
+				if not me.mode:
+					self.openLink(current)
 				else:
 					paste(current)
 				#exit
@@ -560,8 +559,10 @@ class client(cursesInput):
 		dispList = ["{}: {}".format(len(self.lastlinks)-i,j) for i,j in enumerate(dispList)] 
 	
 		box = listInput(self.screen, dispList, drawMode)
-		setattr(box,'onenter',newLine(box,self))
-		setattr(box,'onKEY_RESIZE',resize(box,self))
+		box.addKeys({
+			'enter':select(box),
+			curses.KEY_RESIZE:resize(box,self)
+		})
 		#direct input away from normal input
 		box.loop()
 	
@@ -573,7 +574,7 @@ class client(cursesInput):
 	#also handles erasing blurbs
 	def timeloop(self):
 		i = 0
-		while True:
+		while self.active:
 			time.sleep(2)
 			i+=1
 			if time.time() - self.lastBlurb > 4:
@@ -631,3 +632,6 @@ def colorPairs():
 	curses.init_pair(5,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
 	#control colors
 	curses.init_pair(6,curses.COLOR_RED,	curses.COLOR_WHITE)	# red on white for system
+	curses.init_pair(7,curses.COLOR_RED,	curses.COLOR_RED)	#drawing red boxes
+	curses.init_pair(8,curses.COLOR_GREEN,	curses.COLOR_GREEN)	#drawing green boxes
+	curses.init_pair(9,curses.COLOR_BLUE,	curses.COLOR_BLUE)	#drawing blue boxes

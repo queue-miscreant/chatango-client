@@ -1,10 +1,6 @@
 TODO:
-	Color dictionary optimizer (e.g. taking redundant definitions like {1:(green),2:(green)})
+	Color dictionary optimizer (e.g. taking out redundant definitions like {1:(green),2:(green)})
 	
 	Better ignore capabilities: pass client object to ignorer functions?
-	
-	Add listinput methods to bind resize/enter functions
-	
-	Make daemonized threads stop with entire program
 	
 	Stacktrace random segfaults
