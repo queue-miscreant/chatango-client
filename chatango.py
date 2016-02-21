@@ -34,7 +34,6 @@ import re
 import json
 import chlib
 import os
-import nix
 from webbrowser import open_new_tab
 
 #constants for chatango

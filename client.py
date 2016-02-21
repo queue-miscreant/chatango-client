@@ -217,10 +217,9 @@ class listInput(cursesInput):
 				half = maxx//2
 				value = value[:half - 3] + "..." + value[-half:]
 			display.addstr(i+1,1,value,(i+maxy*listNum == self.it) and curses.A_STANDOUT)
-		
 		if hasattr(self,'drawOther'):
 			getattr(self,'drawOther')(self)
-		
+			
 		display.refresh()
 	
 	#predefined list iteration methods
@@ -228,7 +227,6 @@ class listInput(cursesInput):
 		self.it -= 1
 		if self.it == -1:
 			self.it = len(self.outList)-1
-			
 	def onKEY_DOWN(self):
 		self.it += 1
 		if self.it == len(self.outList):
