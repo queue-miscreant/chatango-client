@@ -159,6 +159,8 @@ class cursesInput:
 			chars.append(next)
 		screen.nodelay(0)
 		
+		if ord('[') in chars and len(chars) > 2: chars = [chars[0],-1]
+		
 		curseAction = CURSES_KEYS.get(chars[0])
 		try:
 			if curseAction and len(chars) == 2:
@@ -357,7 +359,7 @@ class chat:
 				if wholetr+linetr < j:
 					#error found
 					try:
-						self.win.addstr(calc+i, linetr + (i!=0)*4, line[linetr:min(j,len(line))], colors[j])
+						self.win.addstr(calc+i, linetr+(i!=0)*4, line[linetr:min(j,len(line))], colors[j])
 					except:
 						raise SizeException()
 					linetr = min(j,len(line))
@@ -436,6 +438,7 @@ class client(cursesInput):
 			i(post,coldic,*args)
 		if coldic.get('default'):
 			coldic.pop('default')
+		coldic = {i:j for i,j in coldic.items() if j is not None}
 		
 		self.chat.push((post,coldic,list(args)))
 		self.inputwin.inrefresh()

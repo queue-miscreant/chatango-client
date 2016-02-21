@@ -462,13 +462,6 @@ def defaultcolor(msg,coldic,*args):
 		n = ord(i)
 		total ^= (n > 109) and n or ~n
 	coldic['default'] = curses.color_pair(((total + 2) % 5) + 5) | (total&2 and curses.A_BOLD)
-#links as white
-@client.colorer
-def link(msg,coldic,*args):
-	default = coldic.get('default')
-	for i in re.finditer(r"\<LINK \d+?>",msg):
-		coldic[i.span(0)[0]] = default
-		coldic[i.span(0)[1]] = curses.color_pair(0)
 #color lines starting with '>' as green; ignore replies and ' user:'
 @client.colorer
 def greentext(msg,coldic,*args):
@@ -490,6 +483,17 @@ def greentext(msg,coldic,*args):
 		else:
 			coldic[tracker+len(line)] = default
 		tracker += len(line)
+#links as white
+@client.colorer
+def link(msg,coldic,*args):
+	default = coldic.get('default')
+	for i in re.finditer(r"<LINK \d+?>",msg):
+		begin,end = i.span(0)[0],i.span(0)[1]
+		coldic[begin] = default
+		for j in coldic:
+			if j in range(begin+1,end):
+				coldic[j] = curses.color_pair(0)
+		coldic[end] = curses.color_pair(0)
 #draw replies, history, and channel
 @client.colorer
 def chatcolors(msg,coldic,*args):
