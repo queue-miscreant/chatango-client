@@ -54,7 +54,7 @@ class link_opener:
 		#extension
 		ext = link[link.rfind(".")+1:]
 		try:
-			if len(ext) <= 4:
+			if len(ext) <= 4 and hasattr(self,ext):
 				getattr(self, ext)(client,link,ext)
 			else:
 				getattr(self, 'htmllink')(client,link)
@@ -195,7 +195,7 @@ class listInput(cursesInput):
 		#drawing calls are expensive, especially when drawing the chat
 		#which means that you have to live with fullscreen lists
 		#height,width,y,x = (int(i) for i in [height*.5, width*.8, height*.2, width*.1])
-		height,width,y,x = height-3,width
+		height,width = height-3,width
 		if width < 7 or height < 3 : raise SizeException()
 		self.display = curses.newwin(height,width,0,0)
 	
