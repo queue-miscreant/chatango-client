@@ -154,12 +154,11 @@ class cursesInput:
 		next = 0
 		while next+1:
 			next = screen.getch()
-			#if there's a character being injected, stop
-			if next == 27: return
 			chars.append(next)
 		screen.nodelay(0)
 		
-		if ord('[') in chars and len(chars) > 2: chars = [chars[0],-1]
+		#stop character injection
+		if 27 in chars and len(chars) > 2: return
 		
 		curseAction = CURSES_KEYS.get(chars[0])
 		try:
