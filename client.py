@@ -15,8 +15,6 @@ import re
 #curses likes to wait a second on escape by default. Turn that off
 environ.setdefault('ESCDELAY', '25')
 
-IMAGES = ["jpg","png","jpeg"]
-VIDEOS = ["gif","webm","mp4"]
 COLOR_NAMES = [" Red","Green"," Blue"]
 
 #debug stuff
@@ -154,12 +152,10 @@ class cursesInput:
 		next = 0
 		while next+1:
 			next = screen.getch()
-			#if there's a character being injected, stop
-			if next == 27: return
 			chars.append(next)
 		screen.nodelay(0)
-		
-		if ord('[') in chars and len(chars) > 2: chars = [chars[0],-1]
+		#control sequences
+		if 27 in chars and len(chars) > 2: chars = chars[:chars.index(27)].append(-1)
 		
 		curseAction = CURSES_KEYS.get(chars[0])
 		try:
