@@ -140,6 +140,7 @@ def fromHexColor(hexStr):
 class cursesInput:
 	def __init__(self,screen):
 		self.screen = screen
+		self.debounce = False
 	#usually for loop control
 	def onescape(self):
 		return -1
@@ -148,14 +149,15 @@ class cursesInput:
 		screen = self.screen
 		chars = [screen.getch()]
 		#get as many chars as possible
+		self.bounce(True)
 		screen.nodelay(1)
 		next = 0
 		while next+1:
 			next = screen.getch()
 			chars.append(next)
 		screen.nodelay(0)
+		self.bounce(False)
 		#control sequences
-		if 27 in chars and len(chars) > 2: chars = chars[:chars.index(27)].append(-1)
 		
 		curseAction = CURSES_KEYS.get(chars[0])
 		try:
@@ -165,6 +167,9 @@ class cursesInput:
 				getattr(self,"oninput")(chars[:-1])
 		except AttributeError:
 			pass
+	
+	def bounce(self,newbounce):
+		self.debounce = newbounce
 
 class listInput(cursesInput):
 	it = 0
@@ -318,6 +323,7 @@ class chat:
 		self.win.setscrreg(0,maxy-2)
 		self.win.leaveok(1)
 		self.nums = 0
+		self.lineno = 0
 		self.lines = lines
 		self.debounce = False
 		self.redraw()
@@ -327,19 +333,24 @@ class chat:
 		#clear the window
 		self.win.clear()
 		#draw all chat windows
+		self.nums = 0
 		for data in self.lines:
-			self.push(data, False, False)
+			self.drawline(data) 
 		#refresh
 		self.win.refresh()
 	
 	#format expected: (string, coldic)
-	def push(self, newmsg, append = True, refresh = True):
-		if append: self.lines.append(newmsg)
-		self.lines = self.lines[-100:]
+	def push(self, newmsg, append = True):
+		self.lines.append(newmsg)
 		if self.debounce: return
+		self.lineno+=1
 		try:
 			if not all(i(*newmsg[2]) for i in filters): return
 		except: pass
+		self.drawline(newmsg)
+		self.win.refresh()
+		
+	def drawline(self, newmsg):
 		newlines = splitMessage(newmsg[0],self.width)[-self.height:]
 		colors = newmsg[1]
 		
@@ -355,7 +366,7 @@ class chat:
 				if wholetr+linetr < j:
 					#error found
 					try:
-						self.win.addstr(calc+i, linetr+(i!=0)*4, line[linetr:min(j,len(line))], colors[j])
+						self.win.addstr(calc+i, linetr+((i!=0) and 4), line[linetr:min(j,len(line))], colors[j])
 					except:
 						raise SizeException()
 					linetr = min(j,len(line))
@@ -365,8 +376,18 @@ class chat:
 		self.win.hline(self.height, 0, curses.ACS_HLINE, self.width)
 		
 		self.nums = min(self.height,self.nums+len(newlines))
-		if refresh: self.win.refresh()
-
+	
+	def bounce(self, newbounce):
+		self.debounce = newbounce;
+		if not newbounce:
+			while (self.lineno < len(self.lines)):
+				self.drawline(self.lines[self.lineno])
+				self.lineno+=1
+			#scroll garbage from superwindows off the screen
+			self.win.scroll(1)
+			self.win.scroll(-1)
+			self.win.refresh()
+			
 class chatinput:
 	def __init__(self, height, width, count = 0):
 		self.width = width
@@ -496,7 +517,7 @@ class client(cursesInput):
 			self.inputwin.inrefresh(self.text)
 		
 	def onKEY_F2(self):
-		self.chat.debounce = True
+		self.chat.bounce(True)
 		#special wrapper to inject functionality for newlines in the list
 		def select(me):
 			def ret():
@@ -524,7 +545,7 @@ class client(cursesInput):
 		box.loop()
 	
 		curses.curs_set(1)
-		self.chat.debounce = False
+		self.chat.bounce(False)
 		self.chat.redraw()
 		
 	#threaded function that prints the current time every 10 minutes
@@ -540,6 +561,10 @@ class client(cursesInput):
 			if not i % 300:
 				self.printTime()
 				i=0
+	
+	def bounce(self,newbounce):
+		self.debounce = newbounce
+		self.chat.bounce(newbounce)
 
 #generic wrapper for redrawing listinputs
 def resize(self,replace):

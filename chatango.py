@@ -243,7 +243,7 @@ def ontab(self):
 
 @client.onkey(curses.KEY_F3)	
 def F3(self):
-	self.chat.debounce = True
+	self.chat.bounce(True)
 	#special wrapper to manipulate inject functionality for newlines in the list
 	def select(me):
 		def ret():
@@ -269,14 +269,12 @@ def F3(self):
 		self.text += loop
 	
 	curses.curs_set(1)
-	self.chat.debounce = False
-	self.chat.redraw()
+	self.chat.bounce(False)
 	self.inputwin.inrefresh(self.text)
 
 @client.onkey(curses.KEY_F4)
 def F4(self):
-	self.chat.debounce = True
-	
+	self.chat.bounce(True)	
 	#select which further input to display
 	def select(me):
 		def ret():
@@ -359,13 +357,13 @@ def F4(self):
 	
 	box.loop()
 	curses.curs_set(1)
-	
-	self.chat.debounce = False
+	self.chat.bounce(False)
 	self.chat.redraw()
 
 @client.onkey(curses.KEY_F5)
 def F5(self):
-	self.chat.debounce = True
+	self.chat.bounce(True)	
+	
 	def select(me):
 		def ret():
 			self.chatBot.channel = me.it
@@ -396,7 +394,7 @@ def F5(self):
 	
 	box.loop()
 	curses.curs_set(1)
-	self.chat.debounce = False
+	self.chat.bounce(False)
 	self.chat.redraw()
 
 #DEBUG ONLY
