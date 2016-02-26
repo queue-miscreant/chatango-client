@@ -325,11 +325,11 @@ class chat:
 		self.nums = 0
 		self.lineno = 0
 		self.lines = lines
-		self.debounce = False
+		self._debounce = False
 		self.redraw()
 		
 	def redraw(self):
-		if self.debounce: return
+		if self._debounce: return
 		#clear the window
 		self.win.clear()
 		#draw all chat windows
@@ -342,7 +342,7 @@ class chat:
 	#format expected: (string, coldic)
 	def push(self, newmsg, append = True):
 		self.lines.append(newmsg)
-		if self.debounce: return
+		if self._debounce: return
 		self.lineno+=1
 		try:
 			if not all(i(*newmsg[2]) for i in filters): return
@@ -378,14 +378,15 @@ class chat:
 		self.nums = min(self.height,self.nums+len(newlines))
 	
 	def bounce(self, newbounce):
-		self.debounce = newbounce;
+		self._debounce = newbounce;
 		if not newbounce:
 			while (self.lineno < len(self.lines)):
 				self.drawline(self.lines[self.lineno])
 				self.lineno+=1
+			self.lines = self.lines[-100:]
+			self.lineno = len(self.lines)
 			#scroll garbage from superwindows off the screen
-			self.win.scroll(1)
-			self.win.scroll(-1)
+			self.win.touchwin()	
 			self.win.refresh()
 			
 class chatinput:
@@ -546,7 +547,6 @@ class client(cursesInput):
 	
 		curses.curs_set(1)
 		self.chat.bounce(False)
-		self.chat.redraw()
 		
 	#threaded function that prints the current time every 10 minutes
 	#also handles erasing blurbs

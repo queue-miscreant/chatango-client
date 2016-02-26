@@ -358,7 +358,6 @@ def F4(self):
 	box.loop()
 	curses.curs_set(1)
 	self.chat.bounce(False)
-	self.chat.redraw()
 
 @client.onkey(curses.KEY_F5)
 def F5(self):
@@ -395,7 +394,6 @@ def F5(self):
 	box.loop()
 	curses.curs_set(1)
 	self.chat.bounce(False)
-	self.chat.redraw()
 
 #DEBUG ONLY
 @client.onkey(curses.KEY_F12)
