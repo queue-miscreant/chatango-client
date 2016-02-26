@@ -361,7 +361,7 @@ def F4(self):
 
 @client.onkey(curses.KEY_F5)
 def F5(self):
-	self.chat.bounce(True)	
+	self.chat.debounce = True
 	
 	def select(me):
 		def ret():
@@ -393,7 +393,8 @@ def F5(self):
 	
 	box.loop()
 	curses.curs_set(1)
-	self.chat.bounce(False)
+	self.chat.debounce = False
+	self.chat.redraw()
 
 #DEBUG ONLY
 @client.onkey(curses.KEY_F12)
@@ -564,6 +565,7 @@ def ignore(arglist):
 @client.chatfilter
 def channelfilter(*args):
 	try:
+		client.dbmsg(args,filtered_channels)
 		return filtered_channels[args[2]]
 	except:
 		return False

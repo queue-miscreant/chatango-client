@@ -325,11 +325,11 @@ class chat:
 		self.nums = 0
 		self.lineno = 0
 		self.lines = lines
-		self._debounce = False
+		self.debounce = False
 		self.redraw()
 		
 	def redraw(self):
-		if self._debounce: return
+		if self.debounce: return
 		#clear the window
 		self.win.clear()
 		#draw all chat windows
@@ -342,15 +342,17 @@ class chat:
 	#format expected: (string, coldic)
 	def push(self, newmsg, append = True):
 		self.lines.append(newmsg)
-		if self._debounce: return
+		if self.debounce: return
 		self.lineno+=1
-		try:
-			if not all(i(*newmsg[2]) for i in filters): return
-		except: pass
+		
 		self.drawline(newmsg)
 		self.win.refresh()
 		
 	def drawline(self, newmsg):
+		try:
+			if not all(i(*newmsg[2]) for i in filters): return
+		except: pass
+		
 		newlines = splitMessage(newmsg[0],self.width)[-self.height:]
 		colors = newmsg[1]
 		
@@ -378,7 +380,7 @@ class chat:
 		self.nums = min(self.height,self.nums+len(newlines))
 	
 	def bounce(self, newbounce):
-		self._debounce = newbounce;
+		self.debounce = newbounce;
 		if not newbounce:
 			while (self.lineno < len(self.lines)):
 				self.drawline(self.lines[self.lineno])
