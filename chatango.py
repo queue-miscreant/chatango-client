@@ -34,6 +34,7 @@ import re
 import json
 import chlib
 import os
+import time
 from webbrowser import open_new_tab
 
 #constants for chatango
@@ -68,20 +69,18 @@ def readFromFile(filePath):
 		jsonInput.close()
 		return jsonData
 	except Exception as exc:
-		return {}
-
+		return {} 
 def sendToFile(filePath,jsonData):
 	if filePath == '': return
 	encoder = json.JSONEncoder(ensure_ascii=False)
 	out = open(filePath,'w')
-	out.write(encoder.encode(jsonData))
-
+	out.write(encoder.encode(jsonData)) 
 #format raw HTML data
 def formatRaw(raw):
 	if len(raw) == 0: return raw
 	html = re.findall("(<[^<>]*?>)", raw)
 	#REEEEEE CONTROL CHARACTERS GET OUT
-	for j in str(raw):
+	for j in raw:
 		if ord(j) < 32:
 			raw = raw.replace(j,"")
 	#replace <br>s with actual line breaks
@@ -98,10 +97,10 @@ def formatRaw(raw):
 #fucking HTML
 def decodeHtml(raw,encode=0):
 	htmlCodes = [["&#39;","'"],
-				 ["&gt;",">"],
-				 ["&lt;","<"],
-				 ["&quot;",'"'],
-				 ["&amp;",'&']]
+		 ["&gt;",">"],
+		 ["&lt;","<"],
+		 ["&quot;",'"'],
+		 ["&amp;",'&']]
 	if encode: htmlCodes = reversed(htmlCodes)
 	for i in htmlCodes:
 		if encode: raw = raw.replace(i[1],i[0])
@@ -153,8 +152,8 @@ class chat_bot(chlib.ConnectionManager):
 		sendToFile('creds',self.creds)
 	
 	def start(self,*args):
-		self.parent.newMessage('Connecting')
-		self.parent.inputwin.statrefresh(self.creds.get('user'))
+		self.parent.msgSystem('Connecting')
+		self.parent.inputwin.statrefresh()
 	
 	def tryPost(self,text):
 		try:
@@ -165,7 +164,7 @@ class chat_bot(chlib.ConnectionManager):
 			return
 	
 	def recvinited(self, group):
-		self.parent.newMessage("Connected to "+group.name)
+		self.parent.msgSystem("Connected to "+group.name)
 		self.joinedGroup = group
 		self.setFormatting(group)
 		#I modified the library to pull history messages, and put them in the group's message array
@@ -175,8 +174,8 @@ class chat_bot(chlib.ConnectionManager):
 		for i in past:
 			self.recvPost(group, i.user, i, 1)
 		
-		self.parent.printTime("Last message at ",float(past[-1].time))
-		self.parent.printTime()
+		self.parent.msgTime(float(past[-1].time),"Last message at ")
+		self.parent.msgTime(time.time())
 
 	def recvRemove(self,group):
 		raise KeyboardInterrupt
@@ -196,19 +195,21 @@ class chat_bot(chlib.ConnectionManager):
 		me = self.creds.get('user')
 		#and is short-circuited
 		reply = me is not None and ("@"+me.lower() in post.raw.lower())
+		#sound bell
+		if reply and not history: print('\a');
 		#format as ' user: message'
-		self.parent.newPost(" {}: {}".format(post.user,formatRaw(post.raw)),
+		self.parent.msgPost(" {}: {}".format(post.user,formatRaw(post.raw)),
 		#extra arguments. use in colorers
 			reply, history, post.channel)
 
 	def recvshow_fw(self, group):
-		self.parent.newMessage("Flood ban warning issued")
+		self.parent.msgSystem("Flood ban warning issued")
 
 	def recvshow_tb(self, group, mins, secs):
 		self.recvtb(group, mins, secs)
 
 	def recvtb(self, group, mins, secs):
-		self.parent.newMessage("You are banned for %d seconds"%(60*mins+secs))
+		self.parent.msgSystem("You are banned for %d seconds"%(60*mins+secs))
 	
 	#pull members when any of these are invoked
 	def recvparticipant(self, group, bit, user, uid):
@@ -217,7 +218,7 @@ class chat_bot(chlib.ConnectionManager):
 		if user == "none": user = "anon"
 		bit = (bit == "1" and 1) or -1
 		#notifications
-		self.parent.printBlurb("%s has %s" % (user,bit+1 and "joined" or "left"))
+		self.parent.newBlurb("%s has %s" % (user,bit+1 and "joined" or "left"))
 	
 	def recvg_participants(self,group):
 		self.members = group.users
@@ -241,9 +242,8 @@ def ontab(self):
 			self.text += findName(afterReply,self.chatBot.members) + " "
 		self.inputwin.inrefresh(self.text)
 
-@client.onkey(curses.KEY_F3)	
+@client.onkey(curses.KEY_F3)
 def F3(self):
-	self.chat.bounce(True)
 	#special wrapper to manipulate inject functionality for newlines in the list
 	def select(me):
 		def ret():
@@ -252,7 +252,7 @@ def F3(self):
 			if current[0] in "!#":
 				current = current[1:]
 			#reply
-			return "@%s " % current
+			self.text += "@%s " % current
 		return ret
 	
 	dispList = {i:self.chatBot.members.count(i) for i in self.chatBot.members}
@@ -263,18 +263,10 @@ def F3(self):
 		curses.KEY_RESIZE:client.resize(box,self)
 	})
 	
-	#direct input away from normal input
-	loop = box.loop()
-	if loop != -1:
-		self.text += loop
-	
-	curses.curs_set(1)
-	self.chat.bounce(False)
-	self.inputwin.inrefresh(self.text)
+	self.chat.subWindow(box)
 
 @client.onkey(curses.KEY_F4)
 def F4(self):
-	self.chat.bounce(True)	
 	#select which further input to display
 	def select(me):
 		def ret():
@@ -355,14 +347,10 @@ def F4(self):
 		curses.KEY_RESIZE:client.resize(box,self)
 	})
 	
-	box.loop()
-	curses.curs_set(1)
-	self.chat.bounce(False)
+	self.chat.subWindow(box)
 
 @client.onkey(curses.KEY_F5)
 def F5(self):
-	self.chat.debounce = True
-	
 	def select(me):
 		def ret():
 			self.chatBot.channel = me.it
@@ -377,8 +365,7 @@ def F5(self):
 			filtered_channels[me.it] = not filtered_channels[me.it]
 		return ret
 	
-	def drawActive(me):
-		h, w = me.display.getmaxyx()
+	def drawActive(me,h,w):
 		for i in range(4):
 			if filtered_channels[i]:
 				me.display.addstr(i+1,w-2," ",curses.color_pair(i and i+11 or 15))
@@ -391,9 +378,7 @@ def F5(self):
 	})
 	box.it = self.chatBot.channel
 	
-	box.loop()
-	curses.curs_set(1)
-	self.chat.debounce = False
+	self.chat.subWindow(box)
 	self.chat.redraw()
 
 #DEBUG ONLY
@@ -445,7 +430,7 @@ def resize(self):
 	self.chat = client.chat(y-3, x, old)
 	self.inputwin = client.chatinput(y-3, x, self.inputwin.count)
 	self.chat.redraw()
-	self.inputwin.statrefresh(self.chatBot.creds.get('user'))
+	self.inputwin.statrefresh()
 	self.inputwin.blurbrefresh()
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
@@ -510,7 +495,7 @@ def chatcolors(msg,coldic,*args):
 @client.opener("jpg")
 @client.opener("png")
 def images(client,link,ext):
-	client.printBlurb("Displaying image... ({})".format(ext))
+	client.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -525,7 +510,7 @@ def images(client,link,ext):
 @client.opener("mp4")
 @client.opener("gif")
 def videos(client,link,ext):
-	client.printBlurb("Playing video... ({})".format(ext))
+	client.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -537,7 +522,7 @@ def videos(client,link,ext):
 
 @client.opener("htmllink")
 def linked(client,link):
-	client.printBlurb("Opened new tab")
+	client.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
 	savout = os.dup(1)
 	os.close(1)
@@ -565,7 +550,6 @@ def ignore(arglist):
 @client.chatfilter
 def channelfilter(*args):
 	try:
-		client.dbmsg(args,filtered_channels)
 		return filtered_channels[args[2]]
 	except:
 		return False
