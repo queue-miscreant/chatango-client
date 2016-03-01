@@ -31,6 +31,7 @@ _CURSES_KEYS[curses.KEY_ENTER] = 'enter'
 _CURSES_KEYS[curses.KEY_BACKSPACE] = 'backspace'
 
 indent = 4
+cursorchar = "_"
 
 colorers = []
 commands = {}
@@ -122,12 +123,12 @@ def splitMessage(baseMessage, width):
 		wide = bytes(split,'utf-8')
 		while len(wide) >= w:
 			#look for a space in the later half of the string; if none, do a hard split
-			lastSpace = wide.rfind(b' ',width//2,width+1)
+			lastSpace = wide.rfind(b' ',w//2,w+1)
 			if lastSpace + 1:
 				sub,split = unicodeWrap(split,wide,lastSpace)
 				split = split[1:]
 			else: #otherwise split at the last character in the row
-				sub, split = unicodeWrap(split,wide,width)
+				sub, split = unicodeWrap(split,wide,w)
 
 			parts.append(sub)
 			wide = bytes(split,'utf-8')
@@ -312,6 +313,7 @@ class colorInput(listInput):
 
 	def onKEY_LEFT(self):
 		self.mode = (self.mode - 1) % 3
+
 class chat:
 	def __init__(self, maxy, maxx, lines = []):
 		self.height = maxy-1
@@ -328,9 +330,7 @@ class chat:
 	
 	def subWindow(self,subwin):
 		scheduler.bounce(True)
-		curses.curs_set(0)
 		subwin.loop()
-		curses.curs_set(1)
 		scheduler(self.win.redrawwin)
 		scheduler(self.win.refresh)
 		scheduler.bounce(False)
@@ -411,8 +411,7 @@ class chatinput:
 	def _inrefresh(self, input):
 		if input is not None:
 			self.inputWin.clear()
-			split = easyWrap(input.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r"),self.width-1)
-			self.inputWin.addnstr(0,0,split,self.width-1)
+			self.inputWin.addstr(0,0,input)
 		self.inputWin.refresh()
 		
 	def _statrefresh(self,*args):
@@ -423,6 +422,7 @@ class chatinput:
 		else: return
 
 		try:
+			self.statWin.hline(' ',self.width-1)
 			self.statWin.addstr(0,0,args[0])
 			self.statWin.addstr(0,self.width-len(args[1])-1,args[1])
 		except:
@@ -444,20 +444,49 @@ class chatinput:
 	
 	def blurbrefresh(self,message = ""):
 		scheduler(self._blurbrefresh,message)
-		
+
+class scrollable:
+	text = ""
+	pos = 0
+	disp = 0
+	
+	def __init__(self,width):
+		self.width = width
+	
+	def append(self,new):
+		self.text = self.text[:self.pos] + new + self.text[self.pos:]
+		self.movepos(len(new))
+	
+	def backspace(self):
+		if not pos: return #don't backspace at the beginning of the line
+		self.text = self.text[:self.pos-1] + self.text[self.pos:]
+		self.movepos(-1)
+
+	def movepos(self,dist):
+		self.pos = max(0,min(len(self.text),self.pos+dist))
+		if (self.pos == self.disp and self.pos != 0) or self.pos - self.disp >= self.width:
+			self.disp += dist
+	
+	def display(self):
+		text = self.text[:self.pos] + cursorchar + self.text[self.pos:]
+		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
+		text = text[self.disp:self.disp+self.width]
+		return easyWrap(text,self.width)
+	
 class client(cursesInput):
 	lastlinks = []
 	history = []
 	shistory = 0
-	text = ""
 	last = 0
 
 	def __init__(self,screen):
 		cursesInput.__init__(self,screen)
 		self.active = True
 		y,x = screen.getmaxyx()
+		self.text = scrollable(x-1)
 		self.chat = chat(y-3,x)
 		self.inputwin = chatinput(y-3,x)
+		curses.curs_set(0)
 
 	#simple method to output to the chat window
 	def msgSystem(self, base):
@@ -486,16 +515,16 @@ class client(cursesInput):
 		self.inputwin.blurbrefresh(message)
 				
 	def onbackspace(self):
-		self.text = self.text[:-1]
-		self.inputwin.inrefresh(self.text)
+		self.text.backspace()
+		self.inputwin.inrefresh(self.text.display())
 	
 	def onenter(self):
 		#if it's not just spaces
-		text = self.text
+		text = self.text.text
 		if text.count(" ") != len(text):
 			#good thing strings are scalars
-			self.text = ""
-			self.inputwin.inrefresh(self.text)
+			self.text.text = ""
+			self.inputwin.inrefresh(self.text.display())
 			#if it's a command
 			if text[0] == '/' and ' ' in text:
 				try:
@@ -512,27 +541,34 @@ class client(cursesInput):
 	
 	def oninput(self,chars):
 		#allow unicode input
-		new = bytes(chars).decode()
-		self.text += new
-		self.inputwin.inrefresh(self.text)
+		self.text.append(bytes(chars).decode())
+		self.inputwin.inrefresh(self.text.display())
 
 	def onKEY_SHOME(self):
-		self.text = ""
+		self.text.text = ""
 		self.shistory = 0
-		self.inputwin.inrefresh(self.text)
+		self.inputwin.inrefresh(self.text.display())
+
+	def onKEY_LEFT(self):
+		self.text.movepos(-1)
+		self.inputwin.inrefresh(self.text.display())
 	
+	def onKEY_RIGHT(self):
+		self.text.movepos(1)
+		self.inputwin.inrefresh(self.text.display())
+
 	def onKEY_UP(self):
 		if len(self.history) > 0:
 			self.selectHistory += (self.selectHistory < (len(self.history)))
 			self.text = self.history[-self.selectHistory]
-			self.inputwin.inrefresh(self.text)
+			self.inputwin.inrefresh(self.text.display())
 		
 	def onKEY_DOWN(self):
 		if len(self.history) > 0:
 			self.selectHistory -= (self.selectHistory > 0)
 			#the next element or an empty string
 			self.text = self.selectHistory and self.history[-self.selectHistory] or ""
-			self.inputwin.inrefresh(self.text)
+			self.inputwin.inrefresh(self.text.display())
 		
 	def onKEY_F2(self):
 		#special wrapper to inject functionality for newlines in the list

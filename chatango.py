@@ -229,8 +229,8 @@ class chat_bot(chlib.ConnectionManager):
 @client.onkey("tab")
 def ontab(self):
 	#only search after the last space
-	lastSpace = self.text.rfind(" ")
-	search = self.text[lastSpace + 1 and lastSpace:]
+	lastSpace = self.text.text.rfind(" ")
+	search = self.text.text[lastSpace + 1 and lastSpace:]
 
 	#find the last @
 	reply = search.rfind("@")
@@ -239,8 +239,8 @@ def ontab(self):
 		#look for the name starting with the text given
 		if afterReply != "":
 			#up until the @
-			self.text += findName(afterReply,self.chatBot.members) + " "
-		self.inputwin.inrefresh(self.text)
+			self.text.append(findName(afterReply,self.chatBot.members) + " ")
+		self.inputwin.inrefresh(self.text.display())
 
 @client.onkey(curses.KEY_F3)
 def F3(self):
@@ -252,7 +252,7 @@ def F3(self):
 			if current[0] in "!#":
 				current = current[1:]
 			#reply
-			self.text += "@%s " % current
+			self.text.append("@%s " % current)
 		return ret
 	
 	dispList = {i:self.chatBot.members.count(i) for i in self.chatBot.members}
@@ -428,10 +428,12 @@ def resize(self):
 	old = self.chat.lines
 	del self.chat
 	self.chat = client.chat(y-3, x, old)
-	self.inputwin = client.chatinput(y-3, x, self.inputwin.count)
-	self.chat.redraw()
+	args = self.inputwin.args
+	self.inputwin = client.chatinput(y-3, x)
+	self.inputwin.args = args
 	self.inputwin.statrefresh()
 	self.inputwin.blurbrefresh()
+	self.chat.redraw()
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
 

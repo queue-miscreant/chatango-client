@@ -1,6 +1,6 @@
-TODO:
-	Color dictionary optimizer (e.g. taking out redundant definitions like {1:(green),2:(green)})
-	
-	Better ignore capabilities: pass client object to ignorer functions?
-	
-	Stacktrace random segfaults
+todo:
+	stop using constructors, just remake windows
+	implement line scrolling
+		test new history method
+	color dictionary optimizer
+	ignore capabilities
