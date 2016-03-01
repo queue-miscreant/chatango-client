@@ -229,8 +229,8 @@ class chat_bot(chlib.ConnectionManager):
 @client.onkey("tab")
 def ontab(self):
 	#only search after the last space
-	lastSpace = self.text.text.rfind(" ")
-	search = self.text.text[lastSpace + 1 and lastSpace:]
+	lastSpace = self.text().rfind(" ")
+	search = self.text()[lastSpace + 1 and lastSpace:]
 
 	#find the last @
 	reply = search.rfind("@")
@@ -240,7 +240,6 @@ def ontab(self):
 		if afterReply != "":
 			#up until the @
 			self.text.append(findName(afterReply,self.chatBot.members) + " ")
-		self.inputwin.inrefresh(self.text.display())
 
 @client.onkey(curses.KEY_F3)
 def F3(self):
@@ -590,6 +589,7 @@ def begin(stdscr,creds):
 	while chat.connected:
 		if cl.input():
 			break
+		cl.inputwin.inrefresh(cl.text.display())
 	
 	cl.active = False
 	chat.connected = False
