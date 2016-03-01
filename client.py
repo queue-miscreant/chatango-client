@@ -327,7 +327,6 @@ class chat:
 		self.win.setscrreg(0,maxy-2)
 		self.win.leaveok(1)
 
-		self.lines = []
 		self.numlines = 0
 		self.redraw()
 			
