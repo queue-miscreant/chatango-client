@@ -406,9 +406,9 @@ class chatinput:
 		#create chat window, input window...
 		win = lambda x: curses.newwin(1, curses.COLS, maxy + x, 0)
 		
-		self.inputWin = win(0)			#two after chat
-		self.debugWin = win(1)			#three after chat
-		self.statWin = win(2)			#last line for status
+		self.inputWin = win(0)	#two after chat
+		self.debugWin = win(1)	#three after chat
+		self.statWin = win(2)	#last line for status
 		
 		self.debugWin.leaveok(1)
 		self.statWin.leaveok(1)
@@ -434,11 +434,13 @@ class chatinput:
 		except:
 			raise SizeException()
 		self.statWin.refresh()
+		self.inputWin.refresh()
 	
 	def _blurbrefresh(self,message):
 		self.debugWin.clear()
 		self.debugWin.addnstr(0,0,message,curses.COLS)
 		self.debugWin.refresh()
+		self.inputWin.refresh()
 	
 	def inrefresh(self, input = None):
 		scheduler(self._inrefresh,input)
@@ -521,6 +523,7 @@ class client(cursesInput):
 	#simple method to output to the chat window
 	def msgSystem(self, base):
 		self.chat.push((base,{len(base): curses.color_pair(1)}))
+		self.inputwin.inrefresh()
 	
 	def msgPost(self, post, *args):
 		post = parseLinks(post,self.lastlinks)
@@ -533,6 +536,7 @@ class client(cursesInput):
 		coldic = {i:j for i,j in coldic.items() if j is not None}
 		
 		self.chat.push((post,coldic,list(args)))
+		self.inputwin.inrefresh()
 	
 	def msgTime(self, numtime, predicate=""):
 		dtime = time.strftime("%H:%M:%S",time.localtime(numtime))
