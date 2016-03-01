@@ -367,7 +367,7 @@ def F5(self):
 	def drawActive(me,h,w):
 		for i in range(4):
 			if filtered_channels[i]:
-				me.display.addstr(i+1,w-2," ",curses.color_pair(i and i+11 or 15))
+				me.display.addstr(i+1,w," ",curses.color_pair(i and i+11 or 15))
 					
 	box = client.listInput(self.screen,["None", "Red", "Blue", "Both"],drawActive)
 	box.addKeys({
@@ -405,12 +405,11 @@ def mouse(self):
 	for i in reversed(range(max(length-self.chat.numlines-1,0),length)):
 		#recalculate height of each message
 		msg = lines[i][0]
-		pulled += len(client.splitMessage(msg,self.chat.width))
+		pulled += len(client.splitMessage(msg,curses.COLS))
 		if pulled >= lineno:
 			break
-	client.dbmsg(msg)
 	#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"
-	matches = {abs((i.start()+i.end())//2 - (x+self.chat.width*(pulled-lineno))):i.groups()[0] for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg)}
+	matches = {abs((i.start()+i.end())//2 - (x+curses.COLS*(pulled-lineno))):i.groups()[0] for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg)}
 	if matches == {}: return
 	#get the closest capture
 	ret = matches[min(matches.keys())]
@@ -418,16 +417,6 @@ def mouse(self):
 	#they begin with an index of 0, but appear beginning with 1 (i.e LINK 1 is lastlinks[0])
 	client.link_opener(self,ret)
 
-@client.onkey(curses.KEY_RESIZE)
-def resize(self):
-	y, x = self.screen.getmaxyx()
-	self.chat(y-3, x)
-	self.inputwin(y-3, x)
-	self.text.width = x-1
-
-	self.inputwin.statrefresh()
-	self.inputwin.blurbrefresh()
-	self.chat.redraw()
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
 
@@ -580,7 +569,7 @@ def begin(stdscr,creds):
 	#start threads
 	bot_thread.start()
 	printtime.start()
-	
+
 	while chat.connected:
 		if cl.input():
 			break

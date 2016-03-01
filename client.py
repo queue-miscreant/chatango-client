@@ -269,11 +269,11 @@ class colorInput(listInput):
 				for j in range(1+int((maxy-6)*(1 - self.color[i]/255)),maxy-6):
 					display.addstr(j,third(i)," "*part,curses.color_pair(i+2))
 
-				display.addstr(maxy - 5, third(i), centered(COLOR_NAMES[i]),
+				display.addstr(maxy - 5, third(i), centered(_COLOR_NAMES[i]),
 					self.mode == i and curses.A_REVERSE)
 				display.addstr(maxy - 4, third(i), centered(" %d"%self.color[i]),
 					self.mode == i and curses.A_REVERSE)
-		except:
+		except curses.error:
 			raise SizeException()
 
 		display.refresh()
@@ -315,15 +315,14 @@ class colorInput(listInput):
 		self.mode = (self.mode - 1) % 3
 
 class chat:
-	def __init__(self, maxy, maxx):
+	def __init__(self, maxy):
 		self.lines = []
-		self.__call__(maxy,maxx)
+		self.__call__(maxy)
 
-	def __call__(self, maxy, maxx):
+	def __call__(self, maxy):
 		self.height = maxy-1
-		self.width = maxx
 
-		self.win = curses.newwin(maxy,maxx)
+		self.win = curses.newwin(maxy,curses.COLS)
 		self.win.scrollok(1)
 		self.win.setscrreg(0,maxy-2)
 		self.win.leaveok(1)
@@ -347,7 +346,7 @@ class chat:
 		for data in self.lines:
 			self._drawline(data) 
 		#refresh
-		self.win.hline(self.height, 0, curses.ACS_HLINE, self.width)
+		self.win.hline(self.height, 0, curses.ACS_HLINE, curses.COLS)
 		self.win.refresh()
 	
 	#format expected: (string, coldic)
@@ -355,7 +354,7 @@ class chat:
 		self.lines.append(newmsg)
 		
 		self._drawline(newmsg)
-		self.win.hline(self.height, 0, curses.ACS_HLINE, self.width)
+		self.win.hline(self.height, 0, curses.ACS_HLINE, curses.COLS)
 		self.win.refresh()
 	
 	def push(self,newmsg):
@@ -370,7 +369,7 @@ class chat:
 			if not all(i(*newmsg[2]) for i in filters): return
 		except: pass
 		
-		newlines = splitMessage(newmsg[0],self.width)[-self.height:]
+		newlines = splitMessage(newmsg[0],curses.COLS)[-self.height:]
 		lenlines = len(newlines)
 		colors = newmsg[1]
 		
@@ -399,14 +398,13 @@ class chat:
 		self.numlines = min(self.height,self.numlines+lenlines)
 
 class chatinput:
-	def __init__(self, maxy, maxx):
+	def __init__(self, maxy):
 		self.args = ("","")
-		self.__call__(maxy,maxx)
+		self.__call__(maxy)
 
-	def __call__(self, maxy, maxx):
-		self.width = maxx
+	def __call__(self, maxy):
 		#create chat window, input window...
-		win = lambda x: curses.newwin(1, maxx, maxy + x, 0)
+		win = lambda x: curses.newwin(1, curses.COLS, maxy + x, 0)
 		
 		self.inputWin = win(0)			#two after chat
 		self.debugWin = win(1)			#three after chat
@@ -430,16 +428,16 @@ class chatinput:
 		else: return
 
 		try:
-			self.statWin.hline(' ',self.width-1)
+			self.statWin.hline(' ',curses.COLS-1)
 			self.statWin.addstr(0,0,args[0])
-			self.statWin.addstr(0,self.width-len(args[1])-1,args[1])
+			self.statWin.addstr(0,curses.COLS-len(args[1])-1,args[1])
 		except:
 			raise SizeException()
 		self.statWin.refresh()
 	
 	def _blurbrefresh(self,message):
 		self.debugWin.clear()
-		self.debugWin.addnstr(0,0,message,self.width)
+		self.debugWin.addnstr(0,0,message,curses.COLS)
 		self.debugWin.refresh()
 	
 	def inrefresh(self, input = None):
@@ -516,8 +514,8 @@ class client(cursesInput):
 		self.active = True
 		y,x = self.screen.getmaxyx()
 		self.text = scrollable(x-1)
-		self.chat = chat(y-3,x)
-		self.inputwin = chatinput(y-3,x)
+		self.chat = chat(y-3)
+		self.inputwin = chatinput(y-3)
 		curses.curs_set(0)
 
 	#simple method to output to the chat window
@@ -609,6 +607,17 @@ class client(cursesInput):
 		})
 		#direct input away from normal input
 		self.chat.subWindow(box)
+
+	def onKEY_RESIZE(self):
+		y, x = self.screen.getmaxyx()
+		curses.update_lines_cols()
+		self.text.width = x-1
+		self.chat(y-3)
+		self.inputwin(y-3)
+
+		self.inputwin.statrefresh()
+		self.inputwin.blurbrefresh()
+		self.chat.redraw()
 		
 	#threaded function that prints the current time every 10 minutes
 	#also handles erasing blurbs
