@@ -1,6 +1,3 @@
 todo:
-	stop using constructors, just remake windows
-	implement line scrolling
-		test new history method
 	color dictionary optimizer
 	ignore capabilities

@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 3.1.2
+Version 3.2
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -84,6 +84,11 @@ DEPENDENCIES
 
 CHANGELOG
 --------------------------
+># v3.2		*2016/2/29*
+>##	Implemented scrolling a la a text editor
+>##	Removed replacing links with "<LINK #>"
+>##	Fixed mouse again
+
 ># v3.1.2	*2016/2/21*
 >##	Finally fixed garbage control character injection. xterm seems to not flicker anymore.
 >##	Moved link functions to be dependent on chatango.py
@@ -92,14 +97,14 @@ CHANGELOG
 ># v3.1.1	*2016/2/20*
 >##	Added drawing currently unfiltered channels
 >##	Made color input window slightly more resize-friendly (read: made things more full out)
->## Daemonized threads should stop together
->## Made better API for listinterface keys. Now uses a dictionary of the same type as client.onkey wrappers. For example, 
+>##	Daemonized threads should stop together
+>##	Made better API for listinterface keys. Now uses a dictionary of the same type as client.onkey wrappers. For example, 
 >###		{'enter':func1,curses.KEY_UP:func2}
 
 ># v3.1	*2016/2/20*
 >##	Changed colorer arguments. Made client more generalized so that argument list is pulled from the bot.
 >##	Modified the name colorer to use intene colors on certain names. Should be easier to tell names apart
->## Added chat filtering (space in F5 menu)
+>##	Added chat filtering (space in F5 menu)
 >		Drawing filtered channels in the menu pending
 
 ># v3.0.1	*2016/2/17*

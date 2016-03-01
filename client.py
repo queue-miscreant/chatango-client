@@ -315,7 +315,11 @@ class colorInput(listInput):
 		self.mode = (self.mode - 1) % 3
 
 class chat:
-	def __init__(self, maxy, maxx, lines = []):
+	def __init__(self, maxy, maxx):
+		self.lines = []
+		self.__call__(maxy,maxx)
+
+	def __call__(self, maxy, maxx):
 		self.height = maxy-1
 		self.width = maxx
 
@@ -324,10 +328,10 @@ class chat:
 		self.win.setscrreg(0,maxy-2)
 		self.win.leaveok(1)
 
-		self.lines = lines
+		self.lines = []
 		self.numlines = 0
 		self.redraw()
-	
+			
 	def subWindow(self,subwin):
 		scheduler.bounce(True)
 		subwin.loop()
@@ -372,7 +376,9 @@ class chat:
 		
 		calc = min(self.numlines,self.height-lenlines)
 		#scroll some lines if needed
-		if self.numlines == self.height: self.win.scroll(lenlines)
+		scroll = self.numlines-self.height+lenlines
+		if scroll > 0: self.win.scroll(scroll)
+
 		wholetr = 0
 		for i,line in enumerate(newlines):
 			linetr = 0
@@ -393,10 +399,14 @@ class chat:
 		self.numlines = min(self.height,self.numlines+lenlines)
 
 class chatinput:
-	def __init__(self, height, width):
-		self.width = width
+	def __init__(self, maxy, maxx):
+		self.args = ("","")
+		self.__call__(maxy,maxx)
+
+	def __call__(self, maxy, maxx):
+		self.width = maxx
 		#create chat window, input window...
-		win = lambda x: curses.newwin(1, width, height + x, 0)
+		win = lambda x: curses.newwin(1, maxx, maxy + x, 0)
 		
 		self.inputWin = win(0)			#two after chat
 		self.debugWin = win(1)			#three after chat
@@ -404,8 +414,6 @@ class chatinput:
 		
 		self.debugWin.leaveok(1)
 		self.statWin.leaveok(1)
-		self.args = ("","")
-	
 		self.statWin.attron(curses.A_STANDOUT)
 	
 	def _inrefresh(self, input):

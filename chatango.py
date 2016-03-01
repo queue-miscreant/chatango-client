@@ -392,7 +392,7 @@ def mouse(self):
 		_, x, y, z, state = curses.getmouse()
 	except: return
 		
-	lineno = self.chat.nums-y
+	lineno = self.chat.numlines-y
 	#if not a release, or it's not in the chat window, return
 	if state > curses.BUTTON1_PRESSED: return
 	if lineno < 0: return
@@ -400,36 +400,31 @@ def mouse(self):
 	lines = self.chat.lines
 	length = len(lines)
 	pulled = 0
-	mlines = []
+	msg = ""
 	#read in reverse for links that appear, only the ones on screen
-	for i in reversed(range(max(length-self.chat.nums-1,0),length)):
+	for i in reversed(range(max(length-self.chat.numlines-1,0),length)):
 		#recalculate height of each message
-		mlines = client.splitMessage(lines[i][0],self.chat.width)
-		pulled += len(mlines)
+		msg = lines[i][0]
+		pulled += len(client.splitMessage(msg,self.chat.width))
 		if pulled >= lineno:
 			break
-	#get the exact line from the message
-	try:
-		line = mlines[pulled-lineno]
-	except: return
+	client.dbmsg(msg)
 	#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"
-	matches = {abs((i.start()+i.end())//2 - x):i.groups()[0] for i in re.finditer(r"<LINK (\d+?)>",line)}
+	matches = {abs((i.start()+i.end())//2 - (x+self.chat.width*(pulled-lineno))):i.groups()[0] for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg)}
 	if matches == {}: return
 	#get the closest capture
 	ret = matches[min(matches.keys())]
 	
 	#they begin with an index of 0, but appear beginning with 1 (i.e LINK 1 is lastlinks[0])
-	client.link_opener(self,self.lastlinks[int(ret)-1])
+	client.link_opener(self,ret)
 
 @client.onkey(curses.KEY_RESIZE)
 def resize(self):
 	y, x = self.screen.getmaxyx()
-	old = self.chat.lines
-	del self.chat
-	self.chat = client.chat(y-3, x, old)
-	args = self.inputwin.args
-	self.inputwin = client.chatinput(y-3, x)
-	self.inputwin.args = args
+	self.chat(y-3, x)
+	self.inputwin(y-3, x)
+	self.text.width = x-1
+
 	self.inputwin.statrefresh()
 	self.inputwin.blurbrefresh()
 	self.chat.redraw()
@@ -470,7 +465,7 @@ def greentext(msg,coldic,*args):
 @client.colorer
 def link(msg,coldic,*args):
 	default = coldic.get('default')
-	for i in re.finditer(r"<LINK \d+?>",msg):
+	for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg):
 		begin,end = i.span(0)[0],i.span(0)[1]
 		coldic[begin] = default
 		for j in coldic:
