@@ -387,7 +387,7 @@ class chat:
 					part = line[linetr:min(j,len(line))]
 					try:
 						self.win.addstr(calc+i, unitr+((i!=0) and indent), part, colors[j])
-					except:
+					except curses.error:
 						raise SizeException()
 					linetr = min(j,len(line))
 					unitr += len(bytes(part,'utf-8'))
@@ -430,7 +430,7 @@ class chatinput:
 			self.statWin.hline(' ',curses.COLS-1)
 			self.statWin.addstr(0,0,args[0])
 			self.statWin.addstr(0,curses.COLS-len(args[1])-1,args[1])
-		except:
+		except curses.error:
 			raise SizeException()
 		self.statWin.refresh()
 		self.inputWin.refresh()

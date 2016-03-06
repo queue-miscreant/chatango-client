@@ -172,17 +172,21 @@ class Group(object):
 		'''connect to socket'''
 		self.chSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.chSocket.setblocking(True)
-		if self.name != self.user:
-			self.chSocket.connect(("s"+str(self.snum)+".chatango.com", 443))
-			self.sendCmd("bauth", self.name, self.uid, self.user, self.password, firstcmd=True)
-		else:
-			self.chSocket.connect(("c1.chatango.com", 5222))
-			self.pmAuth = Generate.auth(self)
-			self.sendCmd("tlogin", self.pmAuth, "2", self.uid, firstcmd=True)
-		self.connected = True
-		self.manager.connected = True
-		Event(self.manager, self, self.name, 0.1, 0, "manage")
-		Event(self.manager, self, "ping", 20, 0, "ping")
+		try:
+			if self.name != self.user:
+				self.chSocket.connect(("s"+str(self.snum)+".chatango.com", 443))
+				self.sendCmd("bauth", self.name, self.uid, self.user, self.password, firstcmd=True)
+			else:
+				self.chSocket.connect(("c1.chatango.com", 5222))
+				self.pmAuth = Generate.auth(self)
+				self.sendCmd("tlogin", self.pmAuth, "2", self.uid, firstcmd=True)
+			self.connected = True
+			self.manager.connected = True
+			Event(self.manager, self, self.name, 0.1, 0, "manage")
+			Event(self.manager, self, "ping", 20, 0, "ping")
+		except:
+			self.connected = False
+			self.manager.connected = False
 
 	def manage(self):
 		rbuf = b""
