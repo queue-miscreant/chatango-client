@@ -31,7 +31,7 @@ _CURSES_KEYS[curses.KEY_ENTER] = 'enter'
 _CURSES_KEYS[curses.KEY_BACKSPACE] = 'backspace'
 
 indent = 4
-cursorchar = "_"
+cursorchar = "|"
 
 colorers = []
 commands = {}
@@ -126,7 +126,6 @@ def splitMessage(baseMessage, width):
 			lastSpace = wide.rfind(b' ',w//2,w+1)
 			if lastSpace + 1:
 				sub,split = unicodeWrap(split,wide,lastSpace)
-				split = split[1:]
 			else: #otherwise split at the last character in the row
 				sub, split = unicodeWrap(split,wide,w)
 
@@ -365,7 +364,8 @@ class chat:
 	def _drawline(self, newmsg):
 		#don't draw if filtered
 		try:
-			if not all(i(*newmsg[2]) for i in filters): return
+			if any(i(*newmsg[2]) for i in filters):
+				return
 		except: pass
 		
 		newlines = splitMessage(newmsg[0],curses.COLS)[-self.height:]
@@ -378,21 +378,25 @@ class chat:
 		if scroll > 0: self.win.scroll(scroll)
 
 		wholetr = 0
+		dbmsg(newmsg[0],colors)
 		for i,line in enumerate(newlines):
 			linetr = 0
 			unitr = 0
 			for j in sorted(colors.keys()):
-				if wholetr+linetr < j:
-					#error found
-					part = line[linetr:min(j,len(line))]
+				k = j-wholetr
+				if k > 0:
+					#grab the part of the line, unless that length is 0
+					part = line[linetr:min(k,len(line))]
+					if len(part) == 0: continue
 					try:
 						self.win.addstr(calc+i, unitr+((i!=0) and indent), part, colors[j])
-					except curses.error:
+					except curses.error as exc:
 						raise SizeException()
-					linetr = min(j,len(line))
+					linetr += len(part)
 					unitr += len(bytes(part,'utf-8'))
-					if j > len(line): break
-			wholetr += len(line)
+					if k > len(line): break
+					
+			wholetr += linetr - 1
 		
 		self.numlines = min(self.height,self.numlines+lenlines)
 

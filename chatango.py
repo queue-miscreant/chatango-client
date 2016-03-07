@@ -56,10 +56,10 @@ MPV_PATH = "mpv"
 #ignore list
 #needed here so that commands can access it
 ignores = []
-filtered_channels =	[1, #white
-			1, #red
-			1, #blue
-			1] #both
+filtered_channels =	[0, #white
+			0, #red
+			0, #blue
+			0] #both
 
 #read credentials from file
 def readFromFile(filePath):
@@ -537,7 +537,7 @@ def channelfilter(*args):
 	try:
 		return filtered_channels[args[2]]
 	except:
-		return False
+		return True
 #-------------------------------------------------------------------------------------------------------
 
 def begin(stdscr,creds):
