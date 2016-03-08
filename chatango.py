@@ -437,7 +437,7 @@ def defaultcolor(msg,coldic,*args):
 @client.colorer
 def greentext(msg,coldic,*args):
 	default = coldic.get('default')
-	lines = msg.split("\n")
+	lines = msg.split("\n") #don't forget to add back in a char
 	tracker = 0
 	for no,line in enumerate(lines):
 		try:
@@ -453,7 +453,7 @@ def greentext(msg,coldic,*args):
 			coldic[tracker+len(line)] = curses.color_pair(10)
 		else:
 			coldic[tracker+len(line)] = default
-		tracker += len(line)
+		tracker += len(line)+1 #add in the newline
 #links as white
 @client.colorer
 def link(msg,coldic,*args):

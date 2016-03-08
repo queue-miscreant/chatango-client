@@ -347,14 +347,16 @@ class chat:
 		self.win.move(self.height-1,1)
 		
 		for i,split in enumerate(newmsg[0].split('\n')):
+			#look for last space, with unicode tolerances
 			wide = bytes(split,'utf-8')
 			while len(wide) >= w:
 				last_space = wide.rfind(b' ',w//2,w+1)
 				if last_space + 1:
 					sub,split = unicodeWrap(split,wide,last_space)
 					split = split[1:]
-					self._line(sub,wholetr,colors,sorts,i!=0)
+					#one for the space
 					wholetr += 1
+					self._line(sub,wholetr,colors,sorts,i!=0)
 				else:
 					sub,split = unicodeWrap(split,wide,w)
 					self._line(sub,wholetr,colors,sorts,i!=0)
@@ -366,12 +368,14 @@ class chat:
 			
 			w = curses.COLS-indent
 			self._line(split,wholetr,colors,sorts,i!=0)
-			wholetr += len(split)
+			#add in the newline too
+			wholetr += len(split)+1
 	
 	#draw a line with the colors provided
 	def _line(self,line,whole,colors,sorts,isind):
 		linetr = 0
 		if len(line) == 0: return 
+		#scroll only if necssary
 		if self.win.getyx()[1] != 0:
 			self.win.scroll(1)
 		while linetr < len(line):
@@ -379,7 +383,7 @@ class chat:
 			part = line[linetr:end]
 			self.win.addstr(self.height-1,linetr+(isind and indent), part, colors[sorts[0]])
 			linetr = end
-			if sorts[0] < whole+len(line):
+			if sorts[0] <= whole+len(line):
 				sorts.pop(0)
 	
 class chatinput:
