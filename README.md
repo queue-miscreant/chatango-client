@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 3.2
+Version 3.3
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -13,7 +13,7 @@ FEATURES:
 --------------------------
 >##	Tab completion
 >##	Terminal-resize compatible
->## Links are mouse-clickable
+>##	Links are mouse-clickable
 >##	Tracking images and links posted (F2)
 >##	View members of a certain room (F3)
 >##	Alter formatting sent to the chatango (F4)
@@ -84,6 +84,12 @@ DEPENDENCIES
 
 CHANGELOG
 --------------------------
+># v3.3		*2016/3/7*
+>##	Removed messageSplit, now pushing a message and drawing lines are in the same process.
+>###	This eliminates machine coloring errors (such as those when a link would be white as well as text following it)
+>##	Fixed chatango thumbnails showing up in chat.
+>##	Reversed truth values for filters
+
 ># v3.2		*2016/2/29*
 >##	Implemented scrolling a la a text editor
 >##	Removed replacing links with "<LINK #>"

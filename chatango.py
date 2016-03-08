@@ -91,7 +91,11 @@ def formatRaw(raw):
 	#remove trailing \n's
 	while len(raw) and raw[-1] == "\n":
 		raw = raw[:-1]
-		
+	#thumbnail fix in chatango
+	for i in re.finditer(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)",raw):
+		cap = i.regs[0]
+		raw = raw[:cap[0]] + i.group(1) + 'l' + i.group(2) + raw[cap[1]:]
+
 	return raw
 
 #fucking HTML
@@ -196,7 +200,7 @@ class chat_bot(chlib.ConnectionManager):
 		#and is short-circuited
 		reply = me is not None and ("@"+me.lower() in post.raw.lower())
 		#sound bell
-		if reply and not history: print('\a');
+		if reply and not history: print('\a')
 		#format as ' user: message'
 		self.parent.msgPost(" {}: {}".format(post.user,formatRaw(post.raw)),
 		#extra arguments. use in colorers
@@ -392,7 +396,7 @@ def mouse(self):
 		_, x, y, z, state = curses.getmouse()
 	except: return
 		
-	lineno = self.chat.numlines-y
+	lineno = self.chat.height-y
 	#if not a release, or it's not in the chat window, return
 	if state > curses.BUTTON1_PRESSED: return
 	if lineno < 0: return
@@ -402,10 +406,10 @@ def mouse(self):
 	pulled = 0
 	msg = ""
 	#read in reverse for links that appear, only the ones on screen
-	for i in reversed(range(max(length-self.chat.numlines-1,0),length)):
+	for i in reversed(range(max(length-self.chat.height-1,0),length)):
 		#recalculate height of each message
 		msg = lines[i][0]
-		pulled += len(client.splitMessage(msg,curses.COLS))
+		pulled += 1+len(msg)//(curses.COLS-client.indent)
 		if pulled >= lineno:
 			break
 	#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"

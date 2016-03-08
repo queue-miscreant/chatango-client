@@ -83,7 +83,7 @@ def fromHexColor(hexStr):
 	return [int(hexStr[2*i:2*i+2],16) for i in range(3)]
 
 def colorPairs():
-	#control colors
+#control colors
 	curses.init_pair(1,curses.COLOR_RED,    curses.COLOR_WHITE)     # red on white for system
 	curses.init_pair(2,curses.COLOR_RED,    curses.COLOR_RED)       #drawing red boxes
 	curses.init_pair(3,curses.COLOR_GREEN,  curses.COLOR_GREEN)     #drawing green boxes
@@ -111,33 +111,6 @@ def unicodeWrap(fullString,byteString,width):
 	except:
 		return unicodeWrap(fullString,byteString,width-1)
 
-#split message into lines to add into the curses display
-def splitMessage(baseMessage, width):
-	#parts of the message
-	parts = []
-	w = width
-
-	for split in baseMessage.split('\n'):
-		#add an indent for messages after the first newline
-		#keep splitting up the words
-		wide = bytes(split,'utf-8')
-		while len(wide) >= w:
-			#look for a space in the later half of the string; if none, do a hard split
-			lastSpace = wide.rfind(b' ',w//2,w+1)
-			if lastSpace + 1:
-				sub,split = unicodeWrap(split,wide,lastSpace)
-			else: #otherwise split at the last character in the row
-				sub, split = unicodeWrap(split,wide,w)
-
-			parts.append(sub)
-			wide = bytes(split,'utf-8')
-			w = width-indent
-
-		if split.count(' ') != len(split):
-			parts.append(split)
-		w = width-indent
-
-	return parts
 #get the last "width" unicode bytes of fullString
 def easyWrap(fullString,width):
 	fullString = fullString[::-1]
@@ -326,7 +299,6 @@ class chat:
 		self.win.setscrreg(0,maxy-2)
 		self.win.leaveok(1)
 
-		self.numlines = 0
 		self.redraw()
 			
 	def subWindow(self,subwin):
@@ -339,7 +311,6 @@ class chat:
 	def _redraw(self):
 		#clear the window
 		self.win.clear()
-		self.numlines = 0
 		#draw all chat windows
 		for data in self.lines:
 			self._drawline(data) 
@@ -361,45 +332,56 @@ class chat:
 	def redraw(self):
 		scheduler(self._redraw)
 
-	def _drawline(self, newmsg):
+	def _drawline(self,newmsg):
 		#don't draw if filtered
 		try:
 			if any(i(*newmsg[2]) for i in filters):
 				return
 		except: pass
-		
-		newlines = splitMessage(newmsg[0],curses.COLS)[-self.height:]
-		lenlines = len(newlines)
-		colors = newmsg[1]
-		
-		calc = min(self.numlines,self.height-lenlines)
-		#scroll some lines if needed
-		scroll = self.numlines-self.height+lenlines
-		if scroll > 0: self.win.scroll(scroll)
 
+		lines = 0
 		wholetr = 0
-		dbmsg(newmsg[0],colors)
-		for i,line in enumerate(newlines):
-			linetr = 0
-			unitr = 0
-			for j in sorted(colors.keys()):
-				k = j-wholetr
-				if k > 0:
-					#grab the part of the line, unless that length is 0
-					part = line[linetr:min(k,len(line))]
-					if len(part) == 0: continue
-					try:
-						self.win.addstr(calc+i, unitr+((i!=0) and indent), part, colors[j])
-					except curses.error as exc:
-						raise SizeException()
-					linetr += len(part)
-					unitr += len(bytes(part,'utf-8'))
-					if k > len(line): break
-					
-			wholetr += linetr - 1
+		w = curses.COLS
+		colors = newmsg[1]
+		sorts = sorted(colors.keys())
+		self.win.move(self.height-1,1)
 		
-		self.numlines = min(self.height,self.numlines+lenlines)
+		for i,split in enumerate(newmsg[0].split('\n')):
+			wide = bytes(split,'utf-8')
+			while len(wide) >= w:
+				last_space = wide.rfind(b' ',w//2,w+1)
+				if last_space + 1:
+					sub,split = unicodeWrap(split,wide,last_space)
+					split = split[1:]
+					self._line(sub,wholetr,colors,sorts,i!=0)
+					wholetr += 1
+				else:
+					sub,split = unicodeWrap(split,wide,w)
+					self._line(sub,wholetr,colors,sorts,i!=0)
+				wholetr += len(sub)
 
+				w = curses.COLS-indent
+				wide = bytes(split,'utf-8')
+				i+=1
+			
+			w = curses.COLS-indent
+			self._line(split,wholetr,colors,sorts,i!=0)
+			wholetr += len(split)
+	
+	#draw a line with the colors provided
+	def _line(self,line,whole,colors,sorts,isind):
+		linetr = 0
+		if len(line) == 0: return 
+		if self.win.getyx()[1] != 0:
+			self.win.scroll(1)
+		while linetr < len(line):
+			end = min(sorts[0]-whole,len(line))
+			part = line[linetr:end]
+			self.win.addstr(self.height-1,linetr+(isind and indent), part, colors[sorts[0]])
+			linetr = end
+			if sorts[0] < whole+len(line):
+				sorts.pop(0)
+	
 class chatinput:
 	def __init__(self, maxy):
 		self.args = ("","")
@@ -484,7 +466,7 @@ class scrollable:
 	def movepos(self,dist):
 		self.pos = max(0,min(len(self._text),self.pos+dist))
 		if (self.pos == self.disp and self.pos != 0) or self.pos - self.disp >= self.width:
-			self.disp += dist
+			self.disp = max(0,min(self.pos-self.width+1,self.disp+dist))
 	
 	def display(self):
 		text = self._text[:self.pos] + cursorchar + self._text[self.pos:]
