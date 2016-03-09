@@ -427,6 +427,7 @@ def mouse(self):
 #color by user's name
 @client.colorer
 def defaultcolor(msg,coldic,*args):
+	client.dbmsg(coldic,msg)
 	name = msg[1:msg.find(":")]
 	total = 1
 	for i in name:
@@ -436,6 +437,7 @@ def defaultcolor(msg,coldic,*args):
 #color lines starting with '>' as green; ignore replies and ' user:'
 @client.colorer
 def greentext(msg,coldic,*args):
+	client.dbmsg(coldic)
 	default = coldic.get('default')
 	lines = msg.split("\n") #don't forget to add back in a char
 	tracker = 0
@@ -449,14 +451,17 @@ def greentext(msg,coldic,*args):
 			coldic[begin] = default
 		except:
 			begin = 0
-		if len(line[begin:]) and line[begin:][0] == ">":
-			coldic[tracker+len(line)] = curses.color_pair(10)
-		else:
-			coldic[tracker+len(line)] = default
+		
 		tracker += len(line)+1 #add in the newline
+		if not len(line[begin:]): continue
+		if line[begin] == ">":
+			coldic[tracker-1] = curses.color_pair(10)
+		else:
+			coldic[tracker-1] = default
 #links as white
 @client.colorer
 def link(msg,coldic,*args):
+	client.dbmsg(coldic,msg)
 	default = coldic.get('default')
 	for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg):
 		begin,end = i.span(0)[0],i.span(0)[1]
@@ -468,6 +473,7 @@ def link(msg,coldic,*args):
 #draw replies, history, and channel
 @client.colorer
 def chatcolors(msg,coldic,*args):
+	client.dbmsg(coldic,msg)
 	default = coldic.get('default')
 	for i in coldic:
 		if args[0]:
@@ -581,6 +587,12 @@ def begin(stdscr,creds):
 	
 	cl.active = False
 	chat.connected = False
+
+try:
+	import custom #custom plugins
+except ImportError as exc:
+	client.dbmsg(exc)
+	pass
 
 if __name__ == '__main__':
 	creds = readFromFile('creds')

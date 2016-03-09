@@ -339,14 +339,12 @@ class chat:
 				return
 		except: pass
 
-		lines = 0
 		wholetr = 0
 		w = curses.COLS
 		colors = newmsg[1]
 		sorts = sorted(colors.keys())
 		self.win.move(self.height-1,1)
 		
-		dbmsg(newmsg)
 		for i,split in enumerate(newmsg[0].split('\n')):
 			#look for last space, with unicode tolerances
 			wide = bytes(split,'utf-8')
@@ -368,7 +366,6 @@ class chat:
 				#start indenting
 				i=1
 			
-			dbmsg(split,wholetr,curses.COLS,colors,sorts)
 			w = curses.COLS-indent
 			self._line(split,wholetr,colors,sorts,i!=0)
 			#add in the newline too
@@ -377,14 +374,14 @@ class chat:
 	#draw a line with the colors provided
 	def _line(self,line,whole,colors,sorts,isind):
 		linetr = 0
-		if len(line) == 0: return 
 		#scroll only if necssary
 		if self.win.getyx()[1] != 0:
 			self.win.scroll(1)
 		while linetr < len(line):
 			end = min(sorts[0]-whole,len(line))
 			part = line[linetr:end]
-			self.win.addstr(self.height-1,linetr+(isind and indent), part, colors[sorts[0]])
+			if len(part) != 0:
+				self.win.addstr(self.height-1,linetr+(isind and indent), part, colors[sorts[0]])
 			linetr = end
 			if sorts[0] <= whole+len(line):
 				sorts.pop(0)
