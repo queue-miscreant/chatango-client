@@ -346,6 +346,7 @@ class chat:
 		sorts = sorted(colors.keys())
 		self.win.move(self.height-1,1)
 		
+		dbmsg(newmsg)
 		for i,split in enumerate(newmsg[0].split('\n')):
 			#look for last space, with unicode tolerances
 			wide = bytes(split,'utf-8')
@@ -354,18 +355,20 @@ class chat:
 				if last_space + 1:
 					sub,split = unicodeWrap(split,wide,last_space)
 					split = split[1:]
+					self._line(sub,wholetr,colors,sorts,i!=0)
 					#one for the space
 					wholetr += 1
-					self._line(sub,wholetr,colors,sorts,i!=0)
 				else:
 					sub,split = unicodeWrap(split,wide,w)
 					self._line(sub,wholetr,colors,sorts,i!=0)
 				wholetr += len(sub)
-
+				
 				w = curses.COLS-indent
 				wide = bytes(split,'utf-8')
-				i+=1
+				#start indenting
+				i=1
 			
+			dbmsg(split,wholetr,curses.COLS,colors,sorts)
 			w = curses.COLS-indent
 			self._line(split,wholetr,colors,sorts,i!=0)
 			#add in the newline too
@@ -552,7 +555,7 @@ class client(cursesInput):
 				finally:
 					return
 			self.text.appendhist(text)
-			self.chatBot.tryPost(text)
+			self.chatBot.tryPost(text.replace(r'\n','\n'))
 	
 	def oninput(self,chars):
 		#allow unicode input
