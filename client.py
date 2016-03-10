@@ -1,4 +1,13 @@
 from os import environ
+#!/usr/bin/env python
+#
+#chatango.py:
+#	Cube's ultra-meme CLI slightly general client
+#
+#Uses curses to display a chat, with colors supplied by "colorers"
+#Likewise, messages pushed will be also put through a filter
+#
+#
 import curses
 import time
 import re
@@ -289,6 +298,7 @@ class colorInput(listInput):
 class chat:
 	def __init__(self, maxy):
 		self.lines = []
+		self.scroll = True
 		self.__call__(maxy)
 
 	def __call__(self, maxy):
@@ -311,6 +321,7 @@ class chat:
 	def _redraw(self):
 		#clear the window
 		self.win.clear()
+		self.scroll = True
 		#draw all chat windows
 		for data in self.lines:
 			self._drawline(data) 
@@ -343,12 +354,11 @@ class chat:
 		w = curses.COLS
 		colors = newmsg[1]
 		sorts = sorted(colors.keys())
-		self.win.move(self.height-1,1)
 		
 		for i,split in enumerate(newmsg[0].split('\n')):
 			#look for last space, with unicode tolerances
 			wide = bytes(split,'utf-8')
-			while len(wide) >= w:
+			while len(wide) > w:
 				last_space = wide.rfind(b' ',w//2,w+1)
 				if last_space + 1:
 					sub,split = unicodeWrap(split,wide,last_space)
@@ -375,7 +385,7 @@ class chat:
 	def _line(self,line,whole,colors,sorts,isind):
 		linetr = 0
 		#scroll only if necssary
-		if self.win.getyx()[1] != 0:
+		if self.scroll:
 			self.win.scroll(1)
 		while linetr < len(line):
 			end = min(sorts[0]-whole,len(line))
@@ -385,6 +395,7 @@ class chat:
 			linetr = end
 			if sorts[0] <= whole+len(line):
 				sorts.pop(0)
+		self.scroll = linetr < curses.COLS
 	
 class chatinput:
 	def __init__(self, maxy):

@@ -427,7 +427,6 @@ def mouse(self):
 #color by user's name
 @client.colorer
 def defaultcolor(msg,coldic,*args):
-	client.dbmsg(coldic,msg)
 	name = msg[1:msg.find(":")]
 	total = 1
 	for i in name:
@@ -437,7 +436,6 @@ def defaultcolor(msg,coldic,*args):
 #color lines starting with '>' as green; ignore replies and ' user:'
 @client.colorer
 def greentext(msg,coldic,*args):
-	client.dbmsg(coldic)
 	default = coldic.get('default')
 	lines = msg.split("\n") #don't forget to add back in a char
 	tracker = 0
@@ -461,7 +459,6 @@ def greentext(msg,coldic,*args):
 #links as white
 @client.colorer
 def link(msg,coldic,*args):
-	client.dbmsg(coldic,msg)
 	default = coldic.get('default')
 	for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg):
 		begin,end = i.span(0)[0],i.span(0)[1]
@@ -473,7 +470,6 @@ def link(msg,coldic,*args):
 #draw replies, history, and channel
 @client.colorer
 def chatcolors(msg,coldic,*args):
-	client.dbmsg(coldic,msg)
 	default = coldic.get('default')
 	for i in coldic:
 		if args[0]:
@@ -591,7 +587,6 @@ def begin(stdscr,creds):
 try:
 	import custom #custom plugins
 except ImportError as exc:
-	client.dbmsg(exc)
 	pass
 
 if __name__ == '__main__':
