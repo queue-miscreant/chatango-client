@@ -386,7 +386,7 @@ class chat:
 		linetr = 0
 		#scroll only if necssary
 		if self.scroll:
-			self.win.scroll(1)
+			self.win.scroll()
 		while linetr < len(line):
 			end = min(sorts[0]-whole,len(line))
 			part = line[linetr:end]
@@ -395,7 +395,7 @@ class chat:
 			linetr = end
 			if sorts[0] <= whole+len(line):
 				sorts.pop(0)
-		self.scroll = linetr < curses.COLS
+		self.scroll = linetr+(isind and indent) < curses.COLS
 	
 class chatinput:
 	def __init__(self, maxy):
