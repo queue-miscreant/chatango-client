@@ -114,11 +114,12 @@ def parseLinks(raw,lastlinks):
 
 #new wrapping; better time efficiency
 def unicodeWrap(fullString,byteString,width):
-	try:
-		byted = len(byteString[:width].decode())
-		return fullString[:byted], fullString[byted:]
-	except:
-		return unicodeWrap(fullString,byteString,width-1)
+	for i in range(8):
+		try:
+			byted = len(byteString[:width-i].decode())
+			return fullString[:byted], fullString[byted:]
+		except:
+			continue
 
 #get the last "width" unicode bytes of fullString
 def easyWrap(fullString,width):
@@ -351,24 +352,24 @@ class chat:
 		except: pass
 
 		wholetr = 0
-		w = curses.COLS
 		colors = newmsg[1]
 		sorts = sorted(colors.keys())
 		
 		for i,split in enumerate(newmsg[0].split('\n')):
 			#look for last space, with unicode tolerances
 			wide = bytes(split,'utf-8')
+			w = curses.COLS - (i and indent)
 			while len(wide) > w:
 				last_space = wide.rfind(b' ',w//2,w+1)
 				if last_space + 1:
 					sub,split = unicodeWrap(split,wide,last_space)
 					split = split[1:]
-					self._line(sub,wholetr,colors,sorts,i!=0)
+					self._line(sub,wholetr,colors,sorts,i)
 					#one for the space
 					wholetr += 1
 				else:
 					sub,split = unicodeWrap(split,wide,w)
-					self._line(sub,wholetr,colors,sorts,i!=0)
+					self._line(sub,wholetr,colors,sorts,i)
 				wholetr += len(sub)
 				
 				w = curses.COLS-indent
@@ -376,8 +377,7 @@ class chat:
 				#start indenting
 				i=1
 			
-			w = curses.COLS-indent
-			self._line(split,wholetr,colors,sorts,i!=0)
+			self._line(split,wholetr,colors,sorts,i)
 			#add in the newline too
 			wholetr += len(split)+1
 	
@@ -553,13 +553,12 @@ class client(cursesInput):
 		#if it's not just spaces
 		text = self.text()
 		if text.count(" ") != len(text):
-			#good thing strings are scalars
 			self.text.clear()
 			#if it's a command
 			if text[0] == '/' and ' ' in text:
 				try:
-					command = getattr(commands,text[1:text.find(' ')])
-					command(text[text.find(' ')+1:].split(' '))
+					command = commands[text[1:text.find(' ')]]
+					command(self,text[text.find(' ')+1:].split(' '))
 				finally:
 					return
 			self.text.appendhist(text)

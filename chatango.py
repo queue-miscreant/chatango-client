@@ -28,11 +28,11 @@ try:
 except ImportError:
 	print("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 	exit()
+import chlib
 from threading import Thread
 import subprocess
 import re
 import json
-import chlib
 import os
 import time
 from webbrowser import open_new_tab
@@ -56,10 +56,38 @@ MPV_PATH = "mpv"
 #ignore list
 #needed here so that commands can access it
 ignores = []
-filtered_channels =	[0, #white
+filtered_channels = [0, #white
 			0, #red
 			0, #blue
 			0] #both
+
+def initColors():
+	client.colorPairs()
+	#user colors
+	curses.init_pair(5,curses.COLOR_BLUE,	curses.COLOR_BLACK)	# blue on black
+	curses.init_pair(6,curses.COLOR_CYAN,	curses.COLOR_BLACK)	# cyan on black
+	curses.init_pair(7,curses.COLOR_MAGENTA,curses.COLOR_BLACK)	# magenta on black
+	curses.init_pair(8,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
+	curses.init_pair(9,curses.COLOR_YELLOW,	curses.COLOR_BLACK)	# yellow on black
+	#user-defined colors
+	curses.init_pair(10,curses.COLOR_GREEN,	curses.COLOR_BLACK)	# green on black (greentext only)
+	curses.init_pair(11,curses.COLOR_BLACK,	curses.COLOR_BLACK)	# black on black (channel drawing)
+	curses.init_pair(12,curses.COLOR_BLACK, curses.COLOR_RED) #red
+	curses.init_pair(13,curses.COLOR_BLACK, curses.COLOR_BLUE) #blue
+	curses.init_pair(14,curses.COLOR_BLACK, curses.COLOR_MAGENTA) #both
+	curses.init_pair(15,curses.COLOR_WHITE, curses.COLOR_WHITE) #white for other
+
+def getColor(name, rot = 5, init = 7, split = 109):
+	total = init
+	for i in name:
+		n = ord(i)
+		total ^= (n > split) and n or ~n
+	total = (total-rot)%11
+
+	if total > 4:
+		return curses.color_pair(total)|curses.A_BOLD
+	else:
+		return curses.color_pair(total+5)
 
 #read credentials from file
 def readFromFile(filePath):
@@ -204,7 +232,7 @@ class chat_bot(chlib.ConnectionManager):
 		#format as ' user: message'
 		self.parent.msgPost(" {}: {}".format(post.user,formatRaw(post.raw)),
 		#extra arguments. use in colorers
-			reply, history, post.channel)
+			post.user, reply, history, post.channel)
 
 	def recvshow_fw(self, group):
 		self.parent.msgSystem("Flood ban warning issued")
@@ -370,7 +398,7 @@ def F5(self):
 	
 	def drawActive(me,h,w):
 		for i in range(4):
-			if filtered_channels[i]:
+			if not filtered_channels[i]:
 				me.display.addstr(i+1,w," ",curses.color_pair(i and i+11 or 15))
 					
 	box = client.listInput(self.screen,["None", "Red", "Blue", "Both"],drawActive)
@@ -387,7 +415,7 @@ def F5(self):
 #DEBUG ONLY
 @client.onkey(curses.KEY_F12)
 def F12(self):
-	pass
+	client.dbmsg(ignores)
 
 @client.onkey(curses.KEY_MOUSE)
 def mouse(self):
@@ -428,11 +456,7 @@ def mouse(self):
 @client.colorer
 def defaultcolor(msg,coldic,*args):
 	name = msg[1:msg.find(":")]
-	total = 1
-	for i in name:
-		n = ord(i)
-		total ^= (n > 109) and n or ~n
-	coldic['default'] = curses.color_pair(((total + 2) % 5) + 5) | (total&2 and curses.A_BOLD)
+	coldic['default'] = getColor(name)
 #color lines starting with '>' as green; ignore replies and ' user:'
 @client.colorer
 def greentext(msg,coldic,*args):
@@ -472,12 +496,12 @@ def link(msg,coldic,*args):
 def chatcolors(msg,coldic,*args):
 	default = coldic.get('default')
 	for i in coldic:
-		if args[0]:
+		if args[1]:
 			#remove the bolding if it's a reply
 			coldic[i] ^= coldic[i] & curses.A_BOLD and curses.A_BOLD
 			coldic[i] |= curses.A_STANDOUT
-		coldic[i] |= args[1] and curses.A_UNDERLINE
-	coldic[1] = curses.color_pair(args[2]+11)
+		coldic[i] |= args[2] and curses.A_UNDERLINE
+	coldic[1] = curses.color_pair(args[3]+11)
 #-------------------------------------------------------------------------------------------------------
 #OPENERS
 
@@ -527,7 +551,7 @@ def linked(client,link):
 
 #methods like this can be used in the form /[commandname]
 @client.command('ignore')
-def ignore(arglist):
+def ignore(client,arglist):
 	global ignores
 	person = arglist[0]
 	if '@' not in person: return
@@ -541,26 +565,20 @@ def ignore(arglist):
 @client.chatfilter
 def channelfilter(*args):
 	try:
-		return filtered_channels[args[2]]
+		return filtered_channels[args[3]]
+	except:
+		return True
+
+@client.chatfilter
+def ignorefilter(*args):
+	try:
+		return args[0] in ignores
 	except:
 		return True
 #-------------------------------------------------------------------------------------------------------
 
 def begin(stdscr,creds):
-	client.colorPairs()
-	#user colors
-	curses.init_pair(5,curses.COLOR_BLUE,	curses.COLOR_BLACK)	# blue on black
-	curses.init_pair(6,curses.COLOR_CYAN,	curses.COLOR_BLACK)	# cyan on black
-	curses.init_pair(7,curses.COLOR_MAGENTA,curses.COLOR_BLACK)	# magenta on black
-	curses.init_pair(8,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
-	curses.init_pair(9,curses.COLOR_YELLOW,	curses.COLOR_BLACK)	# yellow on black
-	#user-defined colors
-	curses.init_pair(10,curses.COLOR_GREEN,	curses.COLOR_BLACK)	# green on black (greentext only)
-	curses.init_pair(11,curses.COLOR_BLACK,	curses.COLOR_BLACK)	# black on black (channel drawing)
-	curses.init_pair(12,curses.COLOR_BLACK, curses.COLOR_RED) #red
-	curses.init_pair(13,curses.COLOR_BLACK, curses.COLOR_BLUE) #blue
-	curses.init_pair(14,curses.COLOR_BLACK, curses.COLOR_MAGENTA) #both
-	curses.init_pair(15,curses.COLOR_WHITE, curses.COLOR_WHITE) #white for other
+	initColors()
 	
 	curses.mousemask(1)
 	
@@ -587,7 +605,7 @@ def begin(stdscr,creds):
 try:
 	import custom #custom plugins
 except ImportError as exc:
-	pass
+	client.dbmsg(exc)
 
 if __name__ == '__main__':
 	creds = readFromFile('creds')
