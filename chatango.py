@@ -77,7 +77,7 @@ def initColors():
 	curses.init_pair(14,curses.COLOR_BLACK, curses.COLOR_MAGENTA) #both
 	curses.init_pair(15,curses.COLOR_WHITE, curses.COLOR_WHITE) #white for other
 
-def getColor(name, rot = 5, init = 7, split = 109):
+def getColor(name, rot = 5, init = 6, split = 109):
 	total = init
 	for i in name:
 		n = ord(i)
@@ -434,10 +434,10 @@ def mouse(self):
 	pulled = 0
 	msg = ""
 	#read in reverse for links that appear, only the ones on screen
-	for i in reversed(range(max(length-self.chat.height-1,0),length)):
+	for i in reversed(range(max(length-self.chat.height,0),length)):
 		#recalculate height of each message
 		msg = lines[i][0]
-		pulled += 1+len(msg)//(curses.COLS-client.indent)
+		pulled += 1+msg.count('\n')+len(msg)//(curses.COLS-client.indent)
 		if pulled >= lineno:
 			break
 	#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"
@@ -446,7 +446,6 @@ def mouse(self):
 	#get the closest capture
 	ret = matches[min(matches.keys())]
 	
-	#they begin with an index of 0, but appear beginning with 1 (i.e LINK 1 is lastlinks[0])
 	client.link_opener(self,ret)
 
 #-------------------------------------------------------------------------------------------------------

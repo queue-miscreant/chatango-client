@@ -73,14 +73,15 @@ class schedule:
 	
 	def bounce(self,newbounce):
 		prev = self.debounce
-		self.debounce = newbounce
 		if not newbounce:
+			self.debounce = True
 			while self.taskno < len(self.scheduler):
 				task = self.scheduler[self.taskno]
 				task[0](*task[1])
 				self.taskno+=1
 			self.scheduler = []
 			self.taskno = 0
+		self.debounce = newbounce
 		return prev
 
 scheduler = schedule()
