@@ -509,8 +509,8 @@ def chatcolors(msg,coldic,*args):
 @client.opener("jpeg")
 @client.opener("jpg")
 @client.opener("png")
-def images(client,link,ext):
-	client.newBlurb("Displaying image... ({})".format(ext))
+def images(cli,link,ext):
+	cli.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -524,8 +524,8 @@ def images(client,link,ext):
 @client.opener("webm")
 @client.opener("mp4")
 @client.opener("gif")
-def videos(client,link,ext):
-	client.newBlurb("Playing video... ({})".format(ext))
+def videos(cli,link,ext):
+	cli.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -536,8 +536,8 @@ def videos(client,link,ext):
 		raise Exception("failed to start video display")
 
 @client.opener("htmllink")
-def linked(client,link):
-	client.newBlurb("Opened new tab")
+def linked(cli,link):
+	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
 	savout = os.dup(1)
 	os.close(1)
@@ -551,7 +551,7 @@ def linked(client,link):
 
 #methods like this can be used in the form /[commandname]
 @client.command('ignore')
-def ignore(client,arglist):
+def ignore(cli,arglist):
 	global ignores
 	person = arglist[0]
 	if '@' not in person: return
