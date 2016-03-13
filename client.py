@@ -556,7 +556,7 @@ class client(cursesInput):
 		if text.count(" ") != len(text):
 			self.text.clear()
 			#if it's a command
-			if text[0] == '/' and ' ' in text:
+			if text[0] == ':' and ' ' in text:
 				try:
 					command = commands[text[1:text.find(' ')]]
 					command(self,text[text.find(' ')+1:].split(' '))

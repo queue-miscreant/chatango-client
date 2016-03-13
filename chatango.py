@@ -482,13 +482,14 @@ def greentext(msg,coldic,*args):
 #links as white
 @client.colorer
 def link(msg,coldic,*args):
-	default = coldic.get('default')
 	for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg):
 		begin,end = i.span(0)[0],i.span(0)[1]
-		coldic[begin] = default
-		for j in coldic:
-			if j in range(begin+1,end):
-				coldic[j] = curses.color_pair(0)
+		#find the closest color after the link
+		findcolor = {i-end:coldic[i] for i in coldic if type(i) is int and (i-end)>=0}
+		coldic[begin] = findcolor[min(findcolor)]
+#		for j in coldic:
+#			if j in range(begin+1,end):
+#				coldic[j] = curses.color_pair(0)
 		coldic[end] = curses.color_pair(0)
 #draw replies, history, and channel
 @client.colorer
