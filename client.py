@@ -1,4 +1,3 @@
-from os import environ
 #!/usr/bin/env python
 #
 #chatango.py:
@@ -8,6 +7,7 @@ from os import environ
 #Likewise, messages pushed will be also put through a filter
 #
 #
+from os import environ
 import curses
 import time
 import re
@@ -111,7 +111,6 @@ def parseLinks(raw,lastlinks):
 			newLinks.remove(i)
 	#lists are passed by reference
 	lastlinks += newLinks
-	return raw
 
 #new wrapping; better time efficiency
 def unicodeWrap(fullString,byteString,width):
@@ -132,11 +131,10 @@ def easyWrap(fullString,width):
 class cursesInput:
 	def __init__(self,screen):
 		self.screen = screen
-		self._debounce = False
 	#usually for loop control
 	def onescape(self):
 		return -1
-
+	#crux of input
 	def input(self):
 		chars = [self.screen.getch()]
 		#get as many chars as possible
@@ -149,7 +147,6 @@ class cursesInput:
 		self.screen.nodelay(0)
 		scheduler.bounce(prev)
 		#control sequences
-
 		curseAction = _CURSES_KEYS.get(chars[0])
 		try:
 			if curseAction and len(chars) == 2:
@@ -158,7 +155,7 @@ class cursesInput:
 				getattr(self,"oninput")(chars[:-1])
 		except AttributeError:
 			pass
-
+	#nice method to add keys whenever
 	def addKeys(self,newFunctions = {}):
 		for i,j in newFunctions.items():
 			if type(i) == str:
@@ -166,15 +163,11 @@ class cursesInput:
 			else:
 				setattr(self,"on"+_CURSES_KEYS[i],j)
 
-	def bounce(self,newbounce):
-		self._debounce = newbounce
-
 class listInput(cursesInput):
-	it = 0
-	mode = 0
-
 	def __init__(self, screen, outList, drawOther = None):
 		cursesInput.__init__(self, screen)
+		self.it = 0
+		self.mode = 0
 		self.outList = outList
 		height, width = screen.getmaxyx()
 		self.makeWindows(height, width)
@@ -182,14 +175,14 @@ class listInput(cursesInput):
 		curses.curs_set(0)
 		if drawOther:
 			setattr(self,'drawOther',drawOther)
-
 	def makeWindows(self, height, width):
 		#drawing calls are expensive, especially when drawing the chat
 		#which means that you have to live with fullscreen lists
 		#height,width,y,x = (int(i) for i in [height*.5, width*.8, height*.2, width*.1])
+		#|a...z| is seven characters, making it the minimum
+		#|a| (vertically) is the minimum
 		if width < 7 or height < 3 : raise SizeException()
 		self.display = curses.newwin(height-3,width,0,0)
-
 	#draw method for previous method's window
 	def draw(self):
 		display = self.display
@@ -212,9 +205,7 @@ class listInput(cursesInput):
 			display.addstr(i+1,1,value,(i+maxy*listNum == self.it) and curses.A_STANDOUT)
 		if hasattr(self,'drawOther'):
 			getattr(self,'drawOther')(self,maxy,maxx)
-
 		display.refresh()
-	
 	#predefined list iteration methods
 	def onKEY_UP(self):
 		self.it -= 1
@@ -222,7 +213,6 @@ class listInput(cursesInput):
 	def onKEY_DOWN(self):
 		self.it += 1
 		self.it %= len(self.outList)
-
 	#loop until escape
 	def loop(self):
 		self.draw()
@@ -233,67 +223,53 @@ class colorInput(listInput):
 	def __init__(self, screen,initcolor = [127,127,127]):
 		listInput.__init__(self,screen,[])
 		self.color = initcolor
-
+	#draw replacement
 	def draw(self):
 		display = self.display
-
 		display.clear()
 		display.border()
 		maxy,maxx = display.getmaxyx()
 		part = maxx//3-1
-
 		third = lambda x: x*(part)+x+1
 		centered = lambda x: x.rjust((part+len(x))//2).ljust(part)
 		try:
-			self.display.addstr(maxy-2,third(1),centered(toHexColor(self.color)))
-
+			#display color in hex
+			display.addstr(maxy-2,third(1),centered(toHexColor(self.color)))
 			for i in range(3):
 				#gibberish for "draw a pretty rectange of the color it represents"
 				for j in range(1+int((maxy-6)*(1 - self.color[i]/255)),maxy-6):
 					display.addstr(j,third(i)," "*part,curses.color_pair(i+2))
-
+				#display name and color
 				display.addstr(maxy - 5, third(i), centered(_COLOR_NAMES[i]),
 					self.mode == i and curses.A_REVERSE)
 				display.addstr(maxy - 4, third(i), centered(" %d"%self.color[i]),
 					self.mode == i and curses.A_REVERSE)
 		except curses.error:
 			raise SizeException()
-
 		display.refresh()
 	#color manipulation: mode represents color selected
-	#up/down: increment/decrement color
-	#left/right: select color
-	#pgup/pgdn: increment/decrement color by 10
-	#home/end: set color to 255/0
 	def onKEY_UP(self):
 		self.color[self.mode] += 1
 		if self.color[self.mode] > 255:
 			self.color[self.mode] = 255
-
 	def onKEY_DOWN(self):
 		self.color[self.mode] -= 1
 		if self.color[self.mode] < 0:
 			self.color[self.mode] = 0
-
 	def onKEY_PPAGE(self):
 		self.color[self.mode] += 10
 		if self.color[self.mode] > 255:
 			self.color[self.mode] = 255
-
 	def onKEY_NPAGE(self):
 		self.color[self.mode] -= 10
 		if self.color[self.mode] < 0:
 			self.color[self.mode] = 0
-
 	def onKEY_HOME(self):
 		self.color[self.mode] = 255
-
 	def onKEY_END(self):
 		self.color[self.mode] = 0
-
 	def onKEY_RIGHT(self):
 		self.mode = (self.mode + 1) % 3
-
 	def onKEY_LEFT(self):
 		self.mode = (self.mode - 1) % 3
 
@@ -302,60 +278,55 @@ class chat:
 		self.lines = []
 		self.scroll = True
 		self.__call__(maxy)
-
+	#no one will think to put the resize in the call :^)
 	def __call__(self, maxy):
 		self.height = maxy-1
-
 		self.win = curses.newwin(maxy,curses.COLS)
 		self.win.scrollok(1)
 		self.win.setscrreg(0,maxy-2)
 		self.win.leaveok(1)
-
 		self.redraw()
-			
+	#make subwindow (a colorInput or listInput)
 	def subWindow(self,subwin):
 		scheduler.bounce(True)
 		subwin.loop()
 		scheduler(self.win.redrawwin)
 		scheduler(self.win.refresh)
 		scheduler.bounce(False)
-
+	#push all lines to the window again
 	def _redraw(self):
 		#clear the window
 		self.win.clear()
 		self.scroll = True
 		#draw all chat windows
 		for data in self.lines:
-			self._drawline(data) 
+			self._drawmsg(data) 
 		#refresh
 		self.win.hline(self.height, 0, curses.ACS_HLINE, curses.COLS)
 		self.win.refresh()
-	
-	#format expected: (string, coldic)
+	#format expected: (string, coldic, args)
 	def _push(self, newmsg):
 		self.lines.append(newmsg)
-		
-		self._drawline(newmsg)
+		self._drawmsg(newmsg)
 		self.win.hline(self.height, 0, curses.ACS_HLINE, curses.COLS)
 		self.win.refresh()
-	
+	#schedule a push
 	def push(self,newmsg):
 		scheduler(self._push,newmsg)
-	
+	#schedule a redraw
 	def redraw(self):
 		scheduler(self._redraw)
-
-	def _drawline(self,newmsg):
+	#draw a message
+	def _drawmsg(self,newmsg):
 		#don't draw if filtered
 		try:
 			if any(i(*newmsg[2]) for i in filters):
 				return
 		except: pass
-
 		wholetr = 0
 		colors = newmsg[1]
+		#pop from this as the message is iterated
 		sorts = sorted(colors.keys())
-		
 		for i,split in enumerate(newmsg[0].split('\n')):
 			#look for last space, with unicode tolerances
 			wide = bytes(split,'utf-8')
@@ -402,32 +373,29 @@ class chatinput:
 	def __init__(self, maxy):
 		self.args = ("","")
 		self.__call__(maxy)
-
+	#see above comment :^)
 	def __call__(self, maxy):
 		#create chat window, input window...
 		win = lambda x: curses.newwin(1, curses.COLS, maxy + x, 0)
-		
 		self.inputWin = win(0)	#two after chat
 		self.debugWin = win(1)	#three after chat
 		self.statWin = win(2)	#last line for status
-		
 		self.debugWin.leaveok(1)
 		self.statWin.leaveok(1)
 		self.statWin.attron(curses.A_STANDOUT)
-	
+	#refresh the input stcreen
 	def _inrefresh(self, input):
 		if input is not None:
 			self.inputWin.clear()
 			self.inputWin.addstr(0,0,input)
 		self.inputWin.refresh()
-		
+	#refresh the status. args are the left and right hand side
 	def _statrefresh(self,*args):
 		if len(args) == 2: 
 			args = [i for i in map(str,args)]
 			self.args = args
 		elif len(args) == 0: args = self.args
 		else: return
-
 		try:
 			self.statWin.hline(' ',curses.COLS-1)
 			self.statWin.addstr(0,0,args[0])
@@ -436,73 +404,70 @@ class chatinput:
 			raise SizeException()
 		self.statWin.refresh()
 		self.inputWin.refresh()
-	
+	#add a new blurb
 	def _blurbrefresh(self,message):
 		self.debugWin.clear()
 		self.debugWin.addnstr(0,0,message,curses.COLS)
 		self.debugWin.refresh()
 		self.inputWin.refresh()
-	
+	#scheduled versions of the above events	
 	def inrefresh(self, input = None):
 		scheduler(self._inrefresh,input)
-	
 	def statrefresh(self,*args):
 		scheduler(self._statrefresh,*args)
-	
 	def blurbrefresh(self,message = ""):
 		scheduler(self._blurbrefresh,message)
 
 class scrollable:
-	_text = ""
-	pos = 0
-	disp = 0
-	history = []
-	selhis = 0
-	
 	def __init__(self,width):
+		_text = ""
+		pos = 0
+		disp = 0
+		history = []
+		selhis = 0
 		self.width = width
-	
+	#return the raw text contained within it
 	def __call__(self):
 		return self._text
-
+	#append new characters and move that length
 	def append(self,new):
 		self._text = self._text[:self.pos] + new + self._text[self.pos:]
 		self.movepos(len(new))
-	
+	#backspace
 	def backspace(self):
 		if not self.pos: return #don't backspace at the beginning of the line
 		self._text = self._text[:self.pos-1] + self._text[self.pos:]
 		self.movepos(-1)
-
+	#clear the window
 	def clear(self):
 		self._text = ""
 		self.pos = 0
 		self.disp = 0
-
+	#move the cursor and display
 	def movepos(self,dist):
 		self.pos = max(0,min(len(self._text),self.pos+dist))
 		if (self.pos == self.disp and self.pos != 0) or self.pos - self.disp >= self.width:
 			self.disp = max(0,min(self.pos-self.width+1,self.disp+dist))
-	
+	#display some text
 	def display(self):
 		text = self._text[:self.pos] + cursorchar + self._text[self.pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
 		text = text[self.disp:self.disp+self.width]
 		return easyWrap(text,self.width)
-
+	#history next
 	def nexthist(self):
 		if len(self.history) > 0:
 			self.selhis += (self.selhis < (len(self.history)))
 			self._text = self.history[-self.selhis]
 			self.pos = len(self._text)
-		
+	#history prev
 	def prevhist(self):
 		if len(self.history) > 0:
 			self.selhis -= (self.selhis > 0)
 			#the next element or an empty string
 			self._text = self.selhis and self.history[-self.selhis] or ""
 			self.pos = len(self._text)
-	
+	#add new history entry
 	def appendhist(self,new):
 		self.history.append(new)
 		self.history = self.history[-50:]
@@ -511,7 +476,6 @@ class scrollable:
 class client(cursesInput):
 	lastlinks = []
 	last = 0
-
 	def __init__(self,screen):
 		cursesInput.__init__(self,screen)
 		self.active = True
@@ -520,36 +484,34 @@ class client(cursesInput):
 		self.chat = chat(y-3)
 		self.inputwin = chatinput(y-3)
 		curses.curs_set(0)
-
-	#simple method to output to the chat window
+	#system message
 	def msgSystem(self, base):
 		self.chat.push((base,{len(base): curses.color_pair(1)}))
 		self.inputwin.inrefresh()
-	
+	#parse a message and format color dictionary
 	def msgPost(self, post, *args):
-		post = parseLinks(post,self.lastlinks)
-		
+		parseLinks(post,self.lastlinks)
+		#empty dictionary to start
 		coldic = {}
 		for i in colorers:
 			i(post,coldic,*args)
 		if coldic.get('default'):
 			coldic.pop('default')
 		coldic = {i:j for i,j in coldic.items() if j is not None}
-		
+		#push the message and move the cursor back to the input window
 		self.chat.push((post,coldic,list(args)))
 		self.inputwin.inrefresh()
-	
+	#push a system message of the time
 	def msgTime(self, numtime, predicate=""):
 		dtime = time.strftime("%H:%M:%S",time.localtime(numtime))
 		self.msgSystem(predicate+dtime)
-	
+	#5 second blurb
 	def newBlurb(self,message = ""):
 		self.last = time.time()
 		self.inputwin.blurbrefresh(message)
-				
+	#curses keys
 	def onbackspace(self):
 		self.text.backspace()
-	
 	def onenter(self):
 		#if it's not just spaces
 		text = self.text()
@@ -564,27 +526,22 @@ class client(cursesInput):
 					return
 			self.text.appendhist(text)
 			self.chatBot.tryPost(text.replace(r'\n','\n'))
-	
 	def oninput(self,chars):
 		#allow unicode input
 		self.text.append(bytes(chars).decode())
-
 	def onKEY_SHOME(self):
 		self.text.clear()
 		self.shistory = 0
-
+	#arrow keys
 	def onKEY_LEFT(self):
 		self.text.movepos(-1)
-	
 	def onKEY_RIGHT(self):
 		self.text.movepos(1)
-
 	def onKEY_UP(self):
 		self.text.nexthist()
-		
 	def onKEY_DOWN(self):
 		self.text.prevhist()
-		
+	#f2
 	def onKEY_F2(self):
 		#special wrapper to inject functionality for newlines in the list
 		def select(me):
@@ -611,18 +568,16 @@ class client(cursesInput):
 		})
 		#direct input away from normal input
 		self.chat.subWindow(box)
-
+	#resize
 	def onKEY_RESIZE(self):
 		y, x = self.screen.getmaxyx()
 		curses.update_lines_cols()
 		self.text.width = x-1
 		self.chat(y-3)
 		self.inputwin(y-3)
-
 		self.inputwin.statrefresh()
 		self.inputwin.blurbrefresh()
 		self.chat.redraw()
-		
 	#threaded function that prints the current time every 10 minutes
 	#also handles erasing blurbs
 	def timeloop(self):
