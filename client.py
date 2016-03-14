@@ -58,6 +58,7 @@ class link_opener:
 				getattr(self, 'htmllink')(client,link)
 		except AttributeError as exc:
 			pass
+
 class schedule:
 	def __init__(self):
 		self.scheduler = []
@@ -99,7 +100,7 @@ def colorPairs():
 	curses.init_pair(3,curses.COLOR_GREEN,  curses.COLOR_GREEN)     #drawing green boxes
 	curses.init_pair(4,curses.COLOR_BLUE,   curses.COLOR_BLUE)      #drawing blue boxes
 
-#add take out links, add them to a list
+#add links to a list
 def parseLinks(raw,lastlinks):
 	#in case the raw message ends wzith a link
 	newLinks = []
@@ -420,11 +421,11 @@ class chatinput:
 
 class scrollable:
 	def __init__(self,width):
-		_text = ""
-		pos = 0
-		disp = 0
-		history = []
-		selhis = 0
+		self._text = ""
+		self.pos = 0
+		self.disp = 0
+		self.history = []
+		self.selhis = 0
 		self.width = width
 	#return the raw text contained within it
 	def __call__(self):
@@ -443,6 +444,13 @@ class scrollable:
 		self._text = ""
 		self.pos = 0
 		self.disp = 0
+	#home and end functions
+	def home(self):
+		self.pos = 0
+		self.disp = 0
+	def end(self):
+		self.home()
+		self.movepos(len(self._text))
 	#move the cursor and display
 	def movepos(self,dist):
 		self.pos = max(0,min(len(self._text),self.pos+dist))
@@ -541,6 +549,10 @@ class client(cursesInput):
 		self.text.nexthist()
 	def onKEY_DOWN(self):
 		self.text.prevhist()
+	def onKEY_HOME(self):
+		self.text.home()
+	def onKEY_END(self):
+		self.text.end()
 	#f2
 	def onKEY_F2(self):
 		#special wrapper to inject functionality for newlines in the list
