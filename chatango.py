@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 #
-#
 #chatango.py:
 #		Chat bot that extends the ConnectionManager class in chlib and
 #		adds extensions to the client for chatango only.
@@ -25,6 +24,7 @@ Options:
 try:
 	import curses
 	import client
+	from client import dbmsg
 except ImportError:
 	print("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 	exit()
@@ -34,20 +34,19 @@ import subprocess
 import re
 import json
 import os
-import time
 from webbrowser import open_new_tab
 
 #constants for chatango
 FONT_FACES = ["Arial",
-			  "Comic Sans",
-			  "Georgia",
-			  "Handwriting",
-			  "Impact",
-			  "Palatino",
-			  "Papyrus",
-			  "Times New Roman",
-			  "Typewriter",
-			  ]
+		  "Comic Sans",
+		  "Georgia",
+		  "Handwriting",
+		  "Impact",
+		  "Palatino",
+		  "Papyrus",
+		  "Times New Roman",
+		  "Typewriter",
+		  ]
 FONT_SIZES = [9,10,11,12,13,14]
 
 IMG_PATH = "feh"
@@ -61,33 +60,31 @@ filtered_channels = [0, #white
 			0, #blue
 			0] #both
 
-def initColors():
-	client.colorPairs()
-	#user colors
-	curses.init_pair(5,curses.COLOR_BLUE,	curses.COLOR_BLACK)	# blue on black
-	curses.init_pair(6,curses.COLOR_CYAN,	curses.COLOR_BLACK)	# cyan on black
-	curses.init_pair(7,curses.COLOR_MAGENTA,curses.COLOR_BLACK)	# magenta on black
-	curses.init_pair(8,curses.COLOR_RED,	curses.COLOR_BLACK)	# red on black
-	curses.init_pair(9,curses.COLOR_YELLOW,	curses.COLOR_BLACK)	# yellow on black
-	#user-defined colors
-	curses.init_pair(10,curses.COLOR_GREEN,	curses.COLOR_BLACK)	# green on black (greentext only)
-	curses.init_pair(11,curses.COLOR_BLACK,	curses.COLOR_BLACK)	# black on black (channel drawing)
-	curses.init_pair(12,curses.COLOR_BLACK, curses.COLOR_RED) #red
-	curses.init_pair(13,curses.COLOR_BLACK, curses.COLOR_BLUE) #blue
-	curses.init_pair(14,curses.COLOR_BLACK, curses.COLOR_MAGENTA) #both
-	curses.init_pair(15,curses.COLOR_WHITE, curses.COLOR_WHITE) #white for other
-
-def getColor(name, rot = 5, init = 6, split = 109):
+def getColor(name,rot = 6,init = 6,split = 109):
 	total = init
 	for i in name:
 		n = ord(i)
 		total ^= (n > split) and n or ~n
-	total = (total-rot)%11
+	return (total+rot)%11
 
-	if total > 4:
-		return curses.color_pair(total)|curses.A_BOLD
-	else:
-		return curses.color_pair(total+5)
+def init_colors():
+	ordering = (
+		'blue',
+		'cyan',
+		'magenta',
+		'red',
+		'yellow',
+		)
+	ordlen = 5
+	for i in range(ordlen*2):
+		client.coloring.definepair(ordering[i%ordlen],i//ordlen) #0-10: user text
+	client.coloring.definepair('green',True)
+	client.coloring.definepair('green')		#11: >meme arrow
+	client.coloring.definepair('none',False,'none')	#12-15: channels
+	client.coloring.definepair('red',False,'red')
+	client.coloring.definepair('blue',False,'blue')
+	client.coloring.definepair('magenta',False,'magenta')
+	client.coloring.definepair('white',False,'white')	#16: extra drawing
 
 #read credentials from file
 def readFromFile(filePath):
@@ -166,9 +163,11 @@ class chat_bot(chlib.ConnectionManager):
 		self.channel = 0
 		self.addGroup(creds['room'])
 		
-	def setFormatting(self, group = None):
-		if group is None:
-			 group = self.joinedGroup
+	def setFormatting(self, newFormat = None):
+		group = self.joinedGroup
+		
+		if newFormat is not None:
+			self.creds['formatting'] = newFormat
 		
 		if self.creds.get('formatting') is None:
 			self.creds['formatting'] = {'fc': "DD9211",
@@ -185,7 +184,7 @@ class chat_bot(chlib.ConnectionManager):
 	
 	def start(self,*args):
 		self.parent.msgSystem('Connecting')
-		self.parent.inputwin.statrefresh()
+		self.parent.updateinfo(None,self.creds.get('user'))
 	
 	def tryPost(self,text):
 		try:
@@ -198,7 +197,7 @@ class chat_bot(chlib.ConnectionManager):
 	def recvinited(self, group):
 		self.parent.msgSystem("Connected to "+group.name)
 		self.joinedGroup = group
-		self.setFormatting(group)
+		self.setFormatting()
 		#I modified the library to pull history messages, and put them in the group's message array
 		#this organizes them by time and pushes the message
 		past = group.pArray.values()
@@ -207,15 +206,15 @@ class chat_bot(chlib.ConnectionManager):
 			self.recvPost(group, i.user, i, 1)
 		
 		self.parent.msgTime(float(past[-1].time),"Last message at ")
-		self.parent.msgTime(time.time())
+		self.parent.msgTime()
 
 	def recvRemove(self,group):
-		raise KeyboardInterrupt
+		self.stop()
 
 	#on disconnect
 	def stop(self):
 		chlib.ConnectionManager.stop(self)
-		self.parent.stop()
+		self.parent.active = False
 		
 	#on message
 	def recvPost(self, group, user, post, history = 0):
@@ -230,7 +229,7 @@ class chat_bot(chlib.ConnectionManager):
 		#sound bell
 		if reply and not history: print('\a')
 		#format as ' user: message'
-		self.parent.msgPost(" {}: {}".format(post.user,formatRaw(post.raw)),
+		self.parent.msgPost("{}: {}".format(post.user,formatRaw(post.raw)),
 		#extra arguments. use in colorers
 			post.user, reply, history, post.channel)
 
@@ -246,7 +245,7 @@ class chat_bot(chlib.ConnectionManager):
 	#pull members when any of these are invoked
 	def recvparticipant(self, group, bit, user, uid):
 		self.members = group.users
-		self.parent.inputwin.statrefresh(self.creds.get('user'),int(group.unum,16))
+		self.parent.updateinfo(str(int(group.unum,16)))
 		if user == "none": user = "anon"
 		bit = (bit == "1" and 1) or -1
 		#notifications
@@ -254,16 +253,16 @@ class chat_bot(chlib.ConnectionManager):
 	
 	def recvg_participants(self,group):
 		self.members = group.users
-		self.parent.inputwin.statrefresh(self.creds.get('user'),int(group.unum,16))
+		self.parent.updateinfo(str(int(group.unum,16)))
+
 #-------------------------------------------------------------------------------------------------------
 #KEYS
-	
+
 @client.onkey("tab")
 def ontab(self):
 	#only search after the last space
 	lastSpace = self.text().rfind(" ")
 	search = self.text()[lastSpace + 1 and lastSpace:]
-
 	#find the last @
 	reply = search.rfind("@")
 	if reply+1:
@@ -278,23 +277,24 @@ def F3(self):
 	#special wrapper to manipulate inject functionality for newlines in the list
 	def select(me):
 		def ret():
-			current = me.outList[me.it]
+			current = me.list[me.it]
 			current = current.split(' ')[0]
 			if current[0] in "!#":
 				current = current[1:]
 			#reply
 			self.text.append("@%s " % current)
+			return -1
 		return ret
 	
 	dispList = {i:self.chatBot.members.count(i) for i in self.chatBot.members}
 	dispList = [str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()]
-	box = client.listInput(self.screen, sorted(dispList))
+	box = client.listOverlay(sorted(dispList))
 	box.addKeys({
 		'enter':select(box),
 		curses.KEY_RESIZE:client.resize(box,self)
 	})
 	
-	self.chat.subWindow(box)
+	self.addOverlay(box)
 
 @client.onkey(curses.KEY_F4)
 def F4(self):
@@ -302,83 +302,79 @@ def F4(self):
 	def select(me):
 		def ret():
 			formatting = self.chatBot.creds['formatting']
+			furtherInput = None
 			#ask for font color
 			if me.it == 0:
-				def enter(self):
+				def enter(me):
 					def ret():
-						return client.toHexColor(self.color)
+						formatting['fc'] = client.toHexColor(me.color)
+						self.chatBot.setFormatting(formatting)
+						return -1
 					return ret
-			
-				furtherInput = client.colorInput(self.screen,client.fromHexColor(formatting['fc']))
+
+				furtherInput = client.colorOverlay(client.fromHexColor(formatting['fc']))
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
 					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
-			
-				loop = furtherInput.loop()
-				if loop != -1:
-					formatting['fc'] = loop
 			#ask for name color
 			elif me.it == 1:
-				def enter(self):
+				def enter(me):
 					def ret():
-						return client.toHexColor(self.color)
+						formatting['nc'] = client.toHexColor(me.color)
+						self.chatBot.setFormatting(formatting)
+						return -1
 					return ret
 			
-				furtherInput = client.colorInput(self.screen,client.fromHexColor(formatting['nc']))
+				furtherInput = client.colorOverlay(client.fromHexColor(formatting['nc']))
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
 					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
-			
-				loop = furtherInput.loop()
-				if loop != -1:
-					formatting['nc'] = loop
-			#ask for font face
+			#font face
 			elif me.it == 2:
-				def enter(self):
+				def enter(me):
 					def ret():
-						return self.it
+						formatting['ff'] = str(me.it)
+						self.chatBot.setFormatting(formatting)
+						return -1
 					return ret
 				
-				furtherInput = client.listInput(self.screen,FONT_FACES)
+				furtherInput = client.listOverlay(FONT_FACES)
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
 					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
 				furtherInput.it = int(formatting['ff'])
-			
-				loop = furtherInput.loop()
-				if loop + 1:
-					formatting['ff'] = str(loop)
 			#ask for font size
 			elif me.it == 3:
-				def enter(self):
+				def enter(me):
 					def ret():
-						return FONT_SIZES[self.it]
+						formatting['fz'] = FONT_SIZES[me.it]
+						self.chatBot.setFormatting(formatting)
+						return -1
 					return ret
 					
-				furtherInput = client.listInput(self.screen,[i for i in map(str,FONT_SIZES)])
+				furtherInput = client.listOverlay([i for i in map(str,FONT_SIZES)])
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
 					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
 				furtherInput.it = FONT_SIZES.index(formatting['fz'])
-			
-				loop = furtherInput.loop()
-				if loop + 1:
-					formatting['fz'] = loop
+			#insurance
+			if furtherInput is None: raise Exception("How is this error even possible?")
+			#add the overlay
+			self.addOverlay(furtherInput)
 			#set formatting, even if changes didn't occur
-			self.chatBot.setFormatting()
 		return ret
 		
-	box = client.listInput(self.screen,["Font Color", "Name Color", "Font Face", "Font Size"])
+	box = client.listOverlay(["Font Color", "Name Color", "Font Face", "Font Size"])
 	box.addKeys({
 		'enter':select(box),
 		curses.KEY_RESIZE:client.resize(box,self)
 	})
 	
-	self.chat.subWindow(box)
+	self.addOverlay(box)
 
 @client.onkey(curses.KEY_F5)
 def F5(self):
@@ -396,12 +392,16 @@ def F5(self):
 			filtered_channels[me.it] = not filtered_channels[me.it]
 		return ret
 	
-	def drawActive(me,h,w):
-		for i in range(4):
-			if not filtered_channels[i]:
-				me.display.addstr(i+1,w," ",curses.color_pair(i and i+11 or 15))
+	def drawActive(string,i):
+		string.insertColor(0,0,False)
+		a = client._BOX_JUST(string())
+		if filtered_channels[i]: return string.ljust(a)
+		col = i and i+12 or 16
+		string.ljust(a-1)
+		string.insertColor(a-1,col)
+		string.append(' ')
 					
-	box = client.listInput(self.screen,["None", "Red", "Blue", "Both"],drawActive)
+	box = client.listOverlay(["None", "Red", "Blue", "Both"],drawActive)
 	box.addKeys({
 		'enter':select(box),
 		'input':oninput(box),
@@ -409,102 +409,62 @@ def F5(self):
 	})
 	box.it = self.chatBot.channel
 	
-	self.chat.subWindow(box)
-	self.chat.redraw()
-
-#DEBUG ONLY
-@client.onkey(curses.KEY_F12)
-def F12(self):
-	client.dbmsg(ignores)
-
-@client.onkey(curses.KEY_MOUSE)
-def mouse(self):
-	#try to pull mouse event
-	try:
-		_, x, y, z, state = curses.getmouse()
-	except: return
-		
-	lineno = self.chat.height-y
-	#if not a release, or it's not in the chat window, return
-	if state > curses.BUTTON1_PRESSED: return
-	if lineno < 0: return
-	
-	lines = self.chat.lines
-	length = len(lines)
-	pulled = 0
-	msg = ""
-	#read in reverse for links that appear, only the ones on screen
-	for i in reversed(range(max(length-self.chat.height,0),length)):
-		#recalculate height of each message
-		msg = lines[i][0]
-		pulled += 1+msg.count('\n')+len(msg)//(curses.COLS-client.indent)
-		if pulled >= lineno:
-			break
-	#line noise for "make a dictionary with keys as distance from x-positon and values as regex capture"
-	matches = {abs((i.start()+i.end())//2 - (x+curses.COLS*(pulled-lineno))):i.groups()[0] for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg)}
-	if matches == {}: return
-	#get the closest capture
-	ret = matches[min(matches.keys())]
-	
-	client.link_opener(self,ret)
-
+	self.addOverlay(box)
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
-
 #color by user's name
 @client.colorer
 def defaultcolor(msg,coldic,*args):
-	name = msg[1:msg.find(":")]
-	coldic['default'] = getColor(name)
+	msg.default = getColor(msg()[:msg().find(':')])
+
 #color lines starting with '>' as green; ignore replies and ' user:'
 @client.colorer
-def greentext(msg,coldic,*args):
-	default = coldic.get('default')
-	lines = msg.split("\n") #don't forget to add back in a char
+def greentext(msg,*args):
+	lines = msg().split("\n") #don't forget to add back in a char
 	tracker = 0
 	for no,line in enumerate(lines):
 		try:
 			#user:
-			begin = re.match(r"^ \w+?: ",line).span(0)[1]
+			begin = re.match(r"^\w+?: ",line).end(0)
 			#@user
 			reply = re.match(r"^@\w+? ",line[begin:])
-			if reply: begin += reply.span(0)[1]
-			coldic[begin] = default
+			if reply: begin += reply.end(0)
+			tracker += msg.insertColor(0)
 		except:
 			begin = 0
 		
-		tracker += len(line)+1 #add in the newline
 		if not len(line[begin:]): continue
 		if line[begin] == ">":
-			coldic[tracker-1] = curses.color_pair(10)
+			tracker += msg.insertColor(begin+tracker,11)
 		else:
-			coldic[tracker-1] = default
+			tracker += msg.insertColor(begin+tracker)
+		tracker += len(line)+1 #add in the newline
 #links as white
 @client.colorer
-def link(msg,coldic,*args):
-	for i in re.finditer("(https?://.+?\\.[^ \n]+)",msg):
-		begin,end = i.span(0)[0],i.span(0)[1]
-		#find the closest color after the link
-		findcolor = {i-end:coldic[i] for i in coldic if type(i) is int and (i-end)>=0}
-		coldic[begin] = findcolor[min(findcolor)]
-#		for j in coldic:
-#			if j in range(begin+1,end):
-#				coldic[j] = curses.color_pair(0)
-		coldic[end] = curses.color_pair(0)
+def link(msg,*args):
+	tracker = 0
+	linkre = re.compile("(https?://.+?\\.[^ \n]+)")
+	find = linkre.search(msg())
+	while find:
+		begin,end = tracker+find.start(0),tracker+find.end(0)
+		#find the most recent escape sequence
+		findcolor = {end-i.end(0):i.group(0) for i in client.ANSI_ESC_RE.finditer(msg()) if (end-i.end(0))>=0}
+		last = findcolor[min(findcolor)]
+		end += msg.insertColor(begin,0,False)
+		tracker = msg.insertColor(end,last) + end
+		find = linkre.search(msg()[tracker:])
+		
+
 #draw replies, history, and channel
 @client.colorer
-def chatcolors(msg,coldic,*args):
-	default = coldic.get('default')
-	for i in coldic:
-		if args[1]:
-			#remove the bolding if it's a reply
-			coldic[i] ^= coldic[i] & curses.A_BOLD and curses.A_BOLD
-			coldic[i] |= curses.A_STANDOUT
-		coldic[i] |= args[2] and curses.A_UNDERLINE
-	coldic[1] = curses.color_pair(args[3]+11)
+def chatcolors(msg,*args):
+	msg.addEffect(0,args[1])
+	msg.addEffect(1,args[2])
+	msg.insertColor(0,0)
+	msg.prepend(" ")
+	msg.insertColor(0,args[3]+12)
 #-------------------------------------------------------------------------------------------------------
 #OPENERS
-
 #start and daemonize feh (or replaced image viewing program)
 @client.opener("jpeg")
 @client.opener("jpg")
@@ -576,36 +536,31 @@ def ignorefilter(*args):
 	except:
 		return True
 #-------------------------------------------------------------------------------------------------------
-
 def begin(stdscr,creds):
-	initColors()
+	init_colors()
+	#curses.mousemask(1)
 	
-	curses.mousemask(1)
-	
-	cl = client.client(stdscr)
-	chat = chat_bot(cl,creds)
+	input = client.main(stdscr)
+	chatbot = chat_bot(input,creds)
 	
 	#daemonize functions
-	bot_thread = Thread(target=chat.main)
+	bot_thread = Thread(target=chatbot.main)
 	bot_thread.daemon = True
-	printtime = Thread(target=cl.timeloop)
+	printtime = Thread(target=input.timeloop)
 	printtime.daemon = True
 	#start threads
-	bot_thread.start()
 	printtime.start()
+	bot_thread.start()
 
-	while chat.connected:
-		if cl.input():
-			break
-		cl.inputwin.inrefresh(cl.text.display())
+	input.loop()
 	
-	cl.active = False
-	chat.connected = False
+	input.active = False
+	chatbot.connected = False
 
 try:
 	import custom #custom plugins
 except ImportError as exc:
-	client.dbmsg(exc)
+	dbmsg(exc)
 
 if __name__ == '__main__':
 	creds = readFromFile('creds')
@@ -637,11 +592,4 @@ if __name__ == '__main__':
 		creds['passwd'] = input("Enter your password: ")
 		creds['room'] = input("Enter the group name: ")
 		
-	try:
-		curses.wrapper(begin,creds)
-	except client.SizeException:
-		print("TERMINAL SIZE TOO SMALL")
-	except client.DisconnectException:
-		print("DISCONNECTED")
-	except KeyboardInterrupt:
-		pass
+	curses.wrapper(begin,creds)

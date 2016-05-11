@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 3.3
+Version 4.0
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -18,7 +18,7 @@ FEATURES:
 >##	View members of a certain room (F3)
 >##	Alter formatting sent to the chatango (F4)
 >##	Change channel (F5)
->###		Supports white, red, and blue channels
+>###		Supports white, red, and blue channels (and the apparently forgotten "both" channel)
 >	
 >##	Alterable "colorers"
 >###		Color text matching a regex or so
@@ -28,27 +28,35 @@ DEPENDENCIES
 --------------------------
 >###    Feh image viewer
 >###    MPV
->###    Curses
 >###    Python 3
+>###    Curses (You probably already have this)
 
 ""API""
 --------------------------
 >##	It's nowhere near comprehensive enough to be called an API,
 >##	but this section might help demonstrate the abilities of the client.
+>#	__client.coloring__
+>##		A container that holds a string to be colored.
+>###		Members:
+>			str:		String being colored
+>			default:	Default color to be applied
+>###		Methods:
+>			__call__():	Return the string contained
+>			prepend(new):	Prepend new to the message
+>			append(new):	Append new to the message
+>			insertColor(position, color = self.default,
+>				 add = True):	Insert color pair "color" at position "position".
+>						"add" signifies whether to use the predefined colors (default don't)
+
 >#	__DECORATORS__
 >##	client.colorer
 >###		Adds a colorer to be applied to the client.
 >###		Decorated function arguments:
->			msg:		The message. Look for patterns here
->			coldic:		The color dictionary; this is retained between colorers since it is passed by reference
+>			msg:		The message as a coloring object. See coloring.
 >			*args:		The rest of the arguments. Currently:
 >					0:		reply (boolean)
 >					1:		history (boolean)
 >					2:		channel number
-		
->###		Format for color dictionary is {draw_before_location:color}
->###		Where draw_before_location is a position in the string the color stops drawing at
->###			and color is the curses color (e.g., ones that have been pulled with color_pair)
 		
 >##	client.onkey(keyname or curses key value)
 >###		Causes a function to be run on keypress.
@@ -69,7 +77,7 @@ DEPENDENCIES
 >			ext:	(Optional for 'htmllink') The extension captured
 
 >##	client.chatfilter
->###		Function run on attempt to push message. If any filter returns false, the message is not pushed
+>###		Function run on attempt to push message. If any filter returns false, the message is not displayed
 >###		Decorated function arguments:
 >			*args:	Same arguments as in client.colorer
 
@@ -84,6 +92,11 @@ DEPENDENCIES
 
 CHANGELOG
 --------------------------
+># v4.0		*2016/5/10*
+>##	Completely new display and input methods
+>##	No longer relies on curses drawing; everything is done with variations of print()
+>##	F4 format selector works now
+
 ># v3.3		*2016/3/7*
 >##	Removed messageSplit, now pushing a message and drawing lines are in the same process.
 >###	This eliminates machine coloring errors (such as those when a link would be white as well as text following it)

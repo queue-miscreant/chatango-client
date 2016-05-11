@@ -1,29 +1,50 @@
-#!/usr/bin/env python
-#
-#chatango.py:
-#	Cube's ultra-meme CLI slightly general client
-#
-#Uses curses to display a chat, with colors supplied by "colorers"
-#Likewise, messages pushed will be also put through a filter
-#
-#
 from os import environ
-import curses
-import time
 import re
+import time
+import curses
 
 environ.setdefault('ESCDELAY', '25')
 
-_COLOR_NAMES = [" Red","Green"," Blue"]
+WORD_RE = re.compile("[^ ]* ")
+ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")
+INDENT_LEN = 4
+INDENT_STR = ""
+#guessed terminal dimensions
+DIM_X = 40
+DIM_Y = 70
+RESERVE_LINES = 3
 
-#debug stuff
-def dbmsg(*args):
-	with open("debug","a+") as a:
-		for i in args:
-			a.write(str(i)+"\t")
-		a.write("\n")
-		a.close()
+#------------------------------------------------------------------------------
+#valid colors to add
+COLORS = ['black','red','green','yellow','blue','magenta','cyan','white','','none']
+#0 = reverse; 1 = underline
+_EFFECTS = ['\x1b[7m','\x1b[4m']
+#		Normal/Normal	Red/White	Red		Green		Blue
+_COLOR_PAIRS = ['\x1b[39;49m','\x1b[31;47m','\x1b[31;41m','\x1b[32;42m','\x1b[34;44m']
+_CLEAR_FORMATTING = '\x1b[m'
+_NUM_PREDEFINED = len(_COLOR_PAIRS)
 
+_SELECTED = lambda x: _EFFECTS[0] + x + _CLEAR_FORMATTING
+_MOVE_CURSOR = lambda x: print("\x1b[%d;f"%x,end=_CLEAR_FORMATTING)
+_DELETE_REST_OF_LINE = lambda x: print(x,end="\x1b[K\n\r")
+
+#------------------------------------------------------------------------------
+#overlay formatting
+CHAR_HSPACE = "─"
+CHAR_VSPACE = "│"
+CHAR_TLCORNER = "┌"
+CHAR_TRCORNER = "┐"
+CHAR_BLCORNER = "└"
+CHAR_BRCORNER = "┘"
+CHAR_CURSOR = "|"
+
+_BOX_TOP = lambda: CHAR_TLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_TRCORNER
+_BOX_JUST = lambda x: DIM_X-2+sum([i.end(0)-i.start(0) for i in ANSI_ESC_RE.finditer(x)])
+_BOX_PART = lambda x: CHAR_VSPACE + x.ljust(_BOX_JUST(x)) + CHAR_VSPACE
+_BOX_NOFORM = lambda x: CHAR_VSPACE + x + CHAR_VSPACE
+_BOX_BOTTOM = lambda: CHAR_BLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_BRCORNER
+
+#------------------------------------------------------------------------------
 #list of curses keys
 #used internally to redirect curses keys
 _CURSES_KEYS = {
@@ -38,13 +59,24 @@ for i in dir(curses):
 		_CURSES_KEYS[getattr(curses,i)] = i
 _CURSES_KEYS[curses.KEY_ENTER] = 'enter'
 _CURSES_KEYS[curses.KEY_BACKSPACE] = 'backspace'
+_CURSES_KEYS[curses.KEY_RESIZE] = 'resize'
 
-indent = 4
-cursorchar = "|"
+
+#conversions to and from hex strings ([255,255,255] <-> FFFFFF)
+toHexColor = lambda rgb: ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
+fromHexColor = lambda hexStr: [int(hexStr[2*i:2*i+2],16) for i in range(3)]
 
 colorers = []
 commands = {}
 filters = []
+
+#debug stuff
+def dbmsg(*args):
+	with open("debug","a+") as a:
+		for i in args:
+			a.write(str(i)+"\t")
+		a.write("\n")
+		a.close()
 
 class link_opener:
 #	__init__ is like a static __call__
@@ -59,46 +91,51 @@ class link_opener:
 		except AttributeError as exc:
 			pass
 
-class schedule:
-	def __init__(self):
-		self.scheduler = []
-		self.taskno = 0
-		self.debounce = False
+class ColoringException(Exception):
+	pass
+
+class DisplayException(Exception):
+	pass
+
+class coloring:
+	default = None
+	def __init__(self,string):
+		self.str = string
 	
-	def __call__(self,func,*args):
-		if self.debounce:
-			self.scheduler.append((func,args))
-			return True
-		func(*args)
-		self.taskno+=1
+	def __call__(self):
+		return self.str
+
+	#insert color at position p with color c
+	def insertColor(self,p,c=-1,add = True):
+		c = self.default if c == -1 else c
+		try:
+			c = type(c) != str and _COLOR_PAIRS[c + (add and _NUM_PREDEFINED)] or c 
+		except IndexError:
+			raise ColoringException("Foreground/Background pair not defined")
+		self.str = self.str[:p] + c + self.str[p:]
+		#return length of c to adjust trackers
+		return len(c)
 	
-	def bounce(self,newbounce):
-		prev = self.debounce
-		if not newbounce:
-			self.debounce = True
-			while self.taskno < len(self.scheduler):
-				task = self.scheduler[self.taskno]
-				task[0](*task[1])
-				self.taskno+=1
-			self.scheduler = []
-			self.taskno = 0
-		self.debounce = newbounce
-		return prev
+	def prepend(self,new):
+		self.str = new + self.str
+	
+	def append(self,new):
+		self.str = self.str + new 
 
-scheduler = schedule()
-
-#conversions to and from hex strings ([255,255,255] <-> FFFFFF)
-def toHexColor(rgb):
-	return ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
-def fromHexColor(hexStr):
-	return [int(hexStr[2*i:2*i+2],16) for i in range(3)]
-
-def colorPairs():
-#control colors
-	curses.init_pair(1,curses.COLOR_RED,    curses.COLOR_WHITE)     # red on white for system
-	curses.init_pair(2,curses.COLOR_RED,    curses.COLOR_RED)       #drawing red boxes
-	curses.init_pair(3,curses.COLOR_GREEN,  curses.COLOR_GREEN)     #drawing green boxes
-	curses.init_pair(4,curses.COLOR_BLUE,   curses.COLOR_BLUE)      #drawing blue boxes
+	#add effect to string (if test is true)
+	def addEffect(self, number, test = True):
+		self.str = (test and _EFFECTS[number] or "") + self.str
+	
+	def ljust(self,spacing):
+		self.str = self.str.ljust(spacing)
+	
+	@staticmethod
+	def definepair(fore, bold = None, back = 'none'):
+		global _COLOR_PAIRS
+		pair = '\x1b[3%d' % COLORS.index(fore);
+		pair += bold and ";1" or ";22"
+		pair += ';4%d' % COLORS.index(back) or ""
+		_COLOR_PAIRS.append(pair+'m')
 
 #add links to a list
 def parseLinks(raw,lastlinks):
@@ -113,49 +150,148 @@ def parseLinks(raw,lastlinks):
 	#lists are passed by reference
 	lastlinks += newLinks
 
-#new wrapping; better time efficiency
-def unicodeWrap(fullString,byteString,width):
-	for i in range(8):
-		try:
-			byted = len(byteString[:width-i].decode())
-			return fullString[:byted], fullString[byted:]
-		except:
+#byte length of string (sans escape sequences)
+def strlen(string):
+	init = len(bytes(string,'utf-8'))
+	for i in ANSI_ESC_RE.finditer(string):
+		init += i.start(0) - i.end(0)
+	return init
+
+#fit word to byte length
+def fitwordtolength(string,length):
+	add = True
+	#byte count
+	trace = 0
+	for lentr,i in enumerate(string):
+		char = len(bytes(i,"utf-8"))
+		#escapes (FSM-style)
+		if add:
+			add = i != '\x1b'
+			trace += char
+			if trace > length:
+				break
 			continue
+		add = i.isalpha()
+		if add and ((trace+char) > length):
+			break
+	return lentr
+		
 
-#get the last "width" unicode bytes of fullString
-def easyWrap(fullString,width):
-	fullString = fullString[::-1]
-	ret,_ = unicodeWrap(fullString,bytes(fullString,'utf-8'),width)
-	#unicode wrapping
-	return ret[::-1]
+def breaklines(string, length = 0, tab = None):
+	#if this is in the function args, it can't be changed later
+	if not length:
+		length = DIM_X
+	if tab is None:
+		tab = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
+	THRESHOLD = length/2
+	TABSPACE = length - len(tab)
 
-class cursesInput:
-	def __init__(self,screen):
-		self.screen = screen
-	#usually for loop control
+	broken = []
+	for i,line in enumerate(string.split("\n")):
+		line += " " #ensurance that the last word will capture
+		#tab the next lines
+		space = (i and TABSPACE) or length
+		newline = (i and tab) or ""
+		while line != "":
+			match = WORD_RE.match(line)
+			word = match.group(0)
+			wordlen = strlen(word)
+			newspace = space - wordlen
+			if wordlen < space:
+				space = newspace
+				newline += word
+				line = line[match.end(0):]
+			#if there's room for some of the word, and we're not past a threshold
+			elif space >= THRESHOLD:
+				fitsize = fitwordtolength(word, space)
+				line = line[fitsize-1:]
+				newline += word[:fitsize]
+			
+			if newspace <= 0:
+				broken.append(newline)
+				newline = tab
+				space = TABSPACE
+		if newline != "":
+			broken.append(newline)
+	return broken
+
+class display:
+	allMessages = []
+	lines = []
+	bottom_edges = [" "," "]
+	overlay = None
+
+	def __init__(self):
+		pass
+	
+	def redoLines(self):
+		newlines = []
+		#get the last terminal line number of messages (worst case)
+		for i in self.allMessages[-(DIM_Y-RESERVE_LINES):]:
+			try:
+				if any(j(*i[1]) for j in filters):
+					continue
+			except: pass
+			newlines += breaklines(i[0])
+		self.lines = newlines
+	
+	def display(self):
+		#if this is a replacement overlay, display that instead
+		if self.overlay and self.overlay.replace:
+			self.overlay.display()
+			return
+		_MOVE_CURSOR(0)
+		size = DIM_Y-RESERVE_LINES-1
+		#draw each line in lines
+		i = 0
+		for i,j in enumerate(self.lines[-size:]):
+			_DELETE_REST_OF_LINE(j)
+		
+		for k in range(size - i - 1):
+			_DELETE_REST_OF_LINE("")
+		
+		#draw the overlay
+		if self.overlay:
+			self.overlay.display()
+		#fancy line
+		_DELETE_REST_OF_LINE(CHAR_HSPACE*DIM_X)
+	
+	def append(self,newline,args = None):
+		self.allMessages.append((newline,args))
+		try:
+			if any(i(*args) for i in filters):
+				return
+		except: pass
+		self.lines += breaklines(newline)
+	
+	def printinput(self,string):
+		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+1)
+		_DELETE_REST_OF_LINE(string)
+		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
+		#for some reason, it won't update input drawing (in IME) until I print something
+		print('')
+	
+	def printblurb(self,string):
+		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+2)
+		_DELETE_REST_OF_LINE(string)
+		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
+		print('')
+
+	def printinfo(self,right,left):
+		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+3)
+		self.bottom_edges[0] = left or self.bottom_edges[0]
+		self.bottom_edges[1] = right or self.bottom_edges[1]
+		room = DIM_X - len(self.bottom_edges[0]) - len(self.bottom_edges[1])
+		print("\x1b[7m{}{}{}\x1b[0m".format(self.bottom_edges[0]," "*room,self.bottom_edges[1]),end="")
+		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
+		print('')
+
+#overlays
+class overlayBase:
 	def onescape(self):
 		return -1
-	#crux of input
-	def input(self):
-		chars = [self.screen.getch()]
-		#get as many chars as possible
-		prev = scheduler.bounce(True)
-		self.screen.nodelay(1)
-		next = 0
-		while next+1:
-			next = self.screen.getch()
-			chars.append(next)
-		self.screen.nodelay(0)
-		scheduler.bounce(prev)
-		#control sequences
-		curseAction = _CURSES_KEYS.get(chars[0])
-		try:
-			if curseAction and len(chars) == 2:
-				return getattr(self,"on"+curseAction)()
-			elif chars[0] in range(32,255):
-				getattr(self,"oninput")(chars[:-1])
-		except AttributeError:
-			pass
+	def display(self):
+		raise DisplayException("Overlay without corresponding display")
 	#nice method to add keys whenever
 	def addKeys(self,newFunctions = {}):
 		for i,j in newFunctions.items():
@@ -164,90 +300,99 @@ class cursesInput:
 			else:
 				setattr(self,"on"+_CURSES_KEYS[i],j)
 
-class listInput(cursesInput):
-	def __init__(self, screen, outList, drawOther = None):
-		cursesInput.__init__(self, screen)
+class listOverlay(overlayBase):
+	replace = True
+	def __init__(self,outList,drawOther = None):
 		self.it = 0
 		self.mode = 0
-		self.outList = outList
-		height, width = screen.getmaxyx()
-		self.makeWindows(height, width)
-		#turn the cursor off
-		curses.curs_set(0)
+		self.list = outList
 		if drawOther:
-			setattr(self,'drawOther',drawOther)
-	def makeWindows(self, height, width):
-		#drawing calls are expensive, especially when drawing the chat
-		#which means that you have to live with fullscreen lists
-		#height,width,y,x = (int(i) for i in [height*.5, width*.8, height*.2, width*.1])
-		#|a...z| is seven characters, making it the minimum
-		#|a| (vertically) is the minimum
-		if width < 7 or height < 3 : raise SizeException()
-		self.display = curses.newwin(height-3,width,0,0)
-	#draw method for previous method's window
-	def draw(self):
-		display = self.display
-		#make sure the display is legitimate
-		maxy,maxx = display.getmaxyx()
-		maxy-=2
-		maxx-=2
-		#clear, make a border
-		display.erase()
-		display.border()
-		#which portion of the list is currently displaced
-		listNum = self.it//maxy
-		subList = self.outList[maxy*listNum:min(maxy*(listNum+1),len(self.outList))]
+			setattr(self,"drawOther",drawOther)
+	
+	def display(self):
+		_MOVE_CURSOR(0)
+		_DELETE_REST_OF_LINE(_BOX_TOP())
+		size = DIM_Y-RESERVE_LINES-2
+		maxx = DIM_X-2
+		#which portion of the lmaxyist is currently displaced
+		partition = self.it//size
+		#get the partition of the list we're at
+		subList = self.list[size*partition:size*(partition+1)]
 		#display
+		i = 0
 		for i,value in enumerate(subList):
-			#add an elipsis in the middle of the string if it can't be displayed
-			if len(value) > maxx:
-				half = maxx//2
-				value = value[:half - 3] + "..." + value[-half:]
-			display.addstr(i+1,1,value,(i+maxy*listNum == self.it) and curses.A_STANDOUT)
-		if hasattr(self,'drawOther'):
-			getattr(self,'drawOther')(self,maxy,maxx)
-		display.refresh()
+			half = maxx//2
+			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
+			value = (len(value) > maxx) and value[:half-3] + "..." + value[-half:] or value
+			value += _CLEAR_FORMATTING
+			if hasattr(self,'drawOther'):
+				value = coloring(value)
+				self.drawOther(value,i)
+				value = value()
+
+			if i+size*partition == self.it:
+				value = _SELECTED(value)
+			else:
+				value += _CLEAR_FORMATTING
+
+			_DELETE_REST_OF_LINE(_BOX_PART(value))
+		#DIM_Y - RESERVE_LINES is the number of lines
+		#fill out the rest of the overlay
+		for j in range(size-len(subList)):
+			_DELETE_REST_OF_LINE(_BOX_PART(" "))
+		
+		_DELETE_REST_OF_LINE(_BOX_BOTTOM())
 	#predefined list iteration methods
 	def onKEY_UP(self):
 		self.it -= 1
-		self.it %= len(self.outList)
+		self.it %= len(self.list)
 	def onKEY_DOWN(self):
 		self.it += 1
-		self.it %= len(self.outList)
+		self.it %= len(self.list)
 	#loop until escape
 	def loop(self):
-		self.draw()
+		self.display()
 		while self.input() != -1:
-			self.draw()
+			self.display()
 
-class colorInput(listInput):
-	def __init__(self, screen,initcolor = [127,127,127]):
-		listInput.__init__(self,screen,[])
+class colorOverlay(overlayBase):
+	replace = True
+	names = ["Red","Green","Blue"]
+	def __init__(self,initcolor = [127,127,127]):
 		self.color = initcolor
+		self.mode = 0
 	#draw replacement
-	def draw(self):
-		display = self.display
-		display.clear()
-		display.border()
-		maxy,maxx = display.getmaxyx()
-		part = maxx//3-1
-		third = lambda x: x*(part)+x+1
-		centered = lambda x: x.rjust((part+len(x))//2).ljust(part)
-		try:
-			#display color in hex
-			display.addstr(maxy-2,third(1),centered(toHexColor(self.color)))
-			for i in range(3):
-				#gibberish for "draw a pretty rectange of the color it represents"
-				for j in range(1+int((maxy-6)*(1 - self.color[i]/255)),maxy-6):
-					display.addstr(j,third(i)," "*part,curses.color_pair(i+2))
-				#display name and color
-				display.addstr(maxy - 5, third(i), centered(_COLOR_NAMES[i]),
-					self.mode == i and curses.A_REVERSE)
-				display.addstr(maxy - 4, third(i), centered(" %d"%self.color[i]),
-					self.mode == i and curses.A_REVERSE)
-		except curses.error:
-			raise SizeException()
-		display.refresh()
+	def display(self):
+		_MOVE_CURSOR(0)
+		wide = (DIM_X-2)//3 - 1
+		space = DIM_Y-RESERVE_LINES-7
+		
+		def centered(x,y):
+			pre = x.rjust((wide+len(x))//2).ljust(wide)
+			if y==self.mode: pre = _SELECTED(pre)
+			return pre
+
+		_DELETE_REST_OF_LINE(_BOX_TOP())
+		for i in range(space):
+			string = ""
+			#draw on this line? (ratio of space alotted to line number = ratio of number to 255)
+			for j in range(3):
+				string += ((space-i)*255 < (self.color[j]*space)) and _COLOR_PAIRS[j+2] or ""
+				string += " " * wide + _CLEAR_FORMATTING + " "
+			#justify (including escape sequence length)
+			just = _BOX_JUST(string)
+
+			_DELETE_REST_OF_LINE(_BOX_NOFORM(string.rjust(just-1).ljust(just)))
+		
+		_DELETE_REST_OF_LINE(_BOX_PART(""))
+		names = "{}{}{}".format(*[centered(j,i) for i,j in enumerate(self.names)])
+		vals = "{}{}{}".format(*[centered(str(j),i) for i,j in enumerate(self.color)])
+		_DELETE_REST_OF_LINE(_BOX_PART(names)) #4 lines
+		_DELETE_REST_OF_LINE(_BOX_PART(vals)) #3 line
+		_DELETE_REST_OF_LINE(_BOX_PART("")) #2 lines
+		_DELETE_REST_OF_LINE(_BOX_PART(toHexColor(self.color).rjust(int(wide*1.5)+3))) #1 line
+		_DELETE_REST_OF_LINE(_BOX_BOTTOM()) #last line
+		
 	#color manipulation: mode represents color selected
 	def onKEY_UP(self):
 		self.color[self.mode] += 1
@@ -257,10 +402,12 @@ class colorInput(listInput):
 		self.color[self.mode] -= 1
 		if self.color[self.mode] < 0:
 			self.color[self.mode] = 0
+	#pageup
 	def onKEY_PPAGE(self):
 		self.color[self.mode] += 10
 		if self.color[self.mode] > 255:
 			self.color[self.mode] = 255
+	#pagedown
 	def onKEY_NPAGE(self):
 		self.color[self.mode] -= 10
 		if self.color[self.mode] < 0:
@@ -273,151 +420,6 @@ class colorInput(listInput):
 		self.mode = (self.mode + 1) % 3
 	def onKEY_LEFT(self):
 		self.mode = (self.mode - 1) % 3
-
-class chat:
-	def __init__(self, maxy):
-		self.lines = []
-		self.scroll = True
-		self.__call__(maxy)
-	#no one will think to put the resize in the call :^)
-	def __call__(self, maxy):
-		self.height = maxy-1
-		self.win = curses.newwin(maxy,curses.COLS)
-		self.win.scrollok(1)
-		self.win.setscrreg(0,maxy-2)
-		self.win.leaveok(1)
-		self.redraw()
-	#make subwindow (a colorInput or listInput)
-	def subWindow(self,subwin):
-		scheduler.bounce(True)
-		subwin.loop()
-		scheduler(self.win.redrawwin)
-		scheduler(self.win.refresh)
-		scheduler.bounce(False)
-	#push all lines to the window again
-	def _redraw(self):
-		#clear the window
-		self.win.clear()
-		self.scroll = True
-		#draw all chat windows
-		for data in self.lines:
-			self._drawmsg(data) 
-		#refresh
-		self.win.hline(self.height, 0, curses.ACS_HLINE, curses.COLS)
-		self.win.refresh()
-	#format expected: (string, coldic, args)
-	def _push(self, newmsg):
-		self.lines.append(newmsg)
-		self._drawmsg(newmsg)
-		self.win.hline(self.height, 0, curses.ACS_HLINE, curses.COLS)
-		self.win.refresh()
-	#schedule a push
-	def push(self,newmsg):
-		scheduler(self._push,newmsg)
-	#schedule a redraw
-	def redraw(self):
-		scheduler(self._redraw)
-	#draw a message
-	def _drawmsg(self,newmsg):
-		#don't draw if filtered
-		try:
-			if any(i(*newmsg[2]) for i in filters):
-				return
-		except: pass
-		wholetr = 0
-		colors = newmsg[1]
-		#pop from this as the message is iterated
-		sorts = sorted(colors.keys())
-		for i,split in enumerate(newmsg[0].split('\n')):
-			#look for last space, with unicode tolerances
-			wide = bytes(split,'utf-8')
-			w = curses.COLS - (i and indent)
-			while len(wide) > w:
-				last_space = wide.rfind(b' ',w//2,w+1)
-				if last_space + 1:
-					sub,split = unicodeWrap(split,wide,last_space)
-					split = split[1:]
-					self._line(sub,wholetr,colors,sorts,i)
-					#one for the space
-					wholetr += 1
-				else:
-					sub,split = unicodeWrap(split,wide,w)
-					self._line(sub,wholetr,colors,sorts,i)
-				wholetr += len(sub)
-				
-				w = curses.COLS-indent
-				wide = bytes(split,'utf-8')
-				#start indenting
-				i=1
-			
-			self._line(split,wholetr,colors,sorts,i)
-			#add in the newline too
-			wholetr += len(split)+1
-	
-	#draw a line with the colors provided
-	def _line(self,line,whole,colors,sorts,isind):
-		linetr = 0
-		#scroll only if necssary
-		if self.scroll:
-			self.win.scroll()
-		while linetr < len(line):
-			end = min(sorts[0]-whole,len(line))
-			part = line[linetr:end]
-			if len(part) != 0:
-				self.win.addstr(self.height-1,linetr+(isind and indent), part, colors[sorts[0]])
-			linetr = end
-			if sorts[0] <= whole+len(line):
-				sorts.pop(0)
-		self.scroll = linetr+(isind and indent) < curses.COLS
-	
-class chatinput:
-	def __init__(self, maxy):
-		self.args = ("","")
-		self.__call__(maxy)
-	#see above comment :^)
-	def __call__(self, maxy):
-		#create chat window, input window...
-		win = lambda x: curses.newwin(1, curses.COLS, maxy + x, 0)
-		self.inputWin = win(0)	#two after chat
-		self.debugWin = win(1)	#three after chat
-		self.statWin = win(2)	#last line for status
-		self.debugWin.leaveok(1)
-		self.statWin.leaveok(1)
-		self.statWin.attron(curses.A_STANDOUT)
-	#refresh the input stcreen
-	def _inrefresh(self, input):
-		if input is not None:
-			self.inputWin.clear()
-			self.inputWin.addstr(0,0,input)
-		self.inputWin.refresh()
-	#refresh the status. args are the left and right hand side
-	def _statrefresh(self,*args):
-		if len(args) == 2: 
-			args = [i for i in map(str,args)]
-			self.args = args
-		elif len(args) == 0: args = self.args
-		else: return
-		try:
-			self.statWin.hline(' ',curses.COLS-1)
-			self.statWin.addstr(0,0,args[0])
-			self.statWin.addstr(0,curses.COLS-len(args[1])-1,args[1])
-		except curses.error:
-			raise SizeException()
-		self.statWin.refresh()
-		self.inputWin.refresh()
-	#add a new blurb
-	def _blurbrefresh(self,message):
-		self.debugWin.clear()
-		self.debugWin.addnstr(0,0,message,curses.COLS)
-		self.debugWin.refresh()
-		self.inputWin.refresh()
-	#scheduled versions of the above events	
-	def inrefresh(self, input = None):
-		scheduler(self._inrefresh,input)
-	def statrefresh(self,*args):
-		scheduler(self._statrefresh,*args)
-	def blurbrefresh(self,message = ""):
-		scheduler(self._blurbrefresh,message)
 
 class scrollable:
 	def __init__(self,width):
@@ -458,10 +460,10 @@ class scrollable:
 			self.disp = max(0,min(self.pos-self.width+1,self.disp+dist))
 	#display some text
 	def display(self):
-		text = self._text[:self.pos] + cursorchar + self._text[self.pos:]
+		text = self._text[:self.pos] + CHAR_CURSOR + self._text[self.pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
 		text = text[self.disp:self.disp+self.width]
-		return easyWrap(text,self.width)
+		return text[-fitwordtolength(text[::-1],self.width)-1:]
 	#history next
 	def nexthist(self):
 		if len(self.history) > 0:
@@ -481,62 +483,102 @@ class scrollable:
 		self.history = self.history[-50:]
 		self.selhis = 0
 	
-class client(cursesInput):
+
+class main:
 	lastlinks = []
+	chatBot = None
 	last = 0
 	def __init__(self,screen):
-		cursesInput.__init__(self,screen)
+		self.screen = screen
+		self.text = scrollable(DIM_X-1)
+		self.ins = []
 		self.active = True
-		y,x = self.screen.getmaxyx()
-		self.text = scrollable(x-1)
-		self.chat = chat(y-3)
-		self.inputwin = chatinput(y-3)
+		self._chat = display()
+		self.onresize()
 		curses.curs_set(0)
+	#=------------------------------=
+	#|	DISPLAY FRONTENDS	|
+	#=------------------------------=
 	#system message
 	def msgSystem(self, base):
-		self.chat.push((base,{len(base): curses.color_pair(1)}))
-		self.inputwin.inrefresh()
-	#parse a message and format color dictionary
+		self._chat.append(_COLOR_PAIRS[1]+base+_CLEAR_FORMATTING)
+		self._chat.display()
+	#parse a message and color it
 	def msgPost(self, post, *args):
 		parseLinks(post,self.lastlinks)
+		post = coloring(post)
 		#empty dictionary to start
-		coldic = {}
 		for i in colorers:
-			i(post,coldic,*args)
-		if coldic.get('default'):
-			coldic.pop('default')
-		coldic = {i:j for i,j in coldic.items() if j is not None}
+			i(post,*args)
 		#push the message and move the cursor back to the input window
-		self.chat.push((post,coldic,list(args)))
-		self.inputwin.inrefresh()
+		self._chat.append(post(),list(args))
+		self._chat.display()
 	#push a system message of the time
-	def msgTime(self, numtime, predicate=""):
-		dtime = time.strftime("%H:%M:%S",time.localtime(numtime))
+	def msgTime(self, numtime = None, predicate=""):
+		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
 		self.msgSystem(predicate+dtime)
 	#5 second blurb
 	def newBlurb(self,message = ""):
 		self.last = time.time()
-		self.inputwin.blurbrefresh(message)
-	#curses keys
+		self._chat.printblurb(message)
+	#update input
+	def updateinput(self):
+		self._chat.printinput(self.text.display())
+	def updateinfo(self,right=None,left=None):
+		self._chat.printinfo(right,left)
+	#=------------------------------=
+	#|	INPUT METHODS   	|
+	#=------------------------------=
+	#crux of input
+	def input(self):
+		try:
+			chars = [self.screen.getch()]
+		except KeyboardInterrupt:
+			return -1
+		#get as many chars as possible
+		self.screen.nodelay(1)
+		next = 0
+		while next+1:
+			next = self.screen.getch()
+			chars.append(next)
+		self.screen.nodelay(0)
+		#control sequences
+		curseAction = _CURSES_KEYS.get(chars[0])
+		#delegate to display stack
+		if self.ins:
+			self = self.ins[-1]
+
+		if curseAction and len(chars) == 2 and hasattr(self,"on"+curseAction):
+			return getattr(self,"on"+curseAction)()
+
+		if chars[0] in range(32,255) and hasattr(self,"oninput"):
+			getattr(self,"oninput")(chars[:-1])
+	#backspace
 	def onbackspace(self):
 		self.text.backspace()
+	#enter
 	def onenter(self):
 		#if it's not just spaces
 		text = self.text()
 		if text.count(" ") != len(text):
 			self.text.clear()
+			self.text.appendhist(text)
 			#if it's a command
-			if text[0] == ':' and ' ' in text:
+			if text[0] == '~' and ' ' in text:
 				try:
 					command = commands[text[1:text.find(' ')]]
 					command(self,text[text.find(' ')+1:].split(' '))
 				finally:
 					return
-			self.text.appendhist(text)
 			self.chatBot.tryPost(text.replace(r'\n','\n'))
+	#any other key
 	def oninput(self,chars):
 		#allow unicode input
 		self.text.append(bytes(chars).decode())
+	#escape
+	def onescape(self):
+		return -1
+	#home
 	def onKEY_SHOME(self):
 		self.text.clear()
 		self.shistory = 0
@@ -573,23 +615,37 @@ class client(cursesInput):
 		#link number: link, but in reverse
 		dispList = ["{}: {}".format(len(self.lastlinks)-i,j) for i,j in enumerate(dispList)] 
 	
-		box = listInput(self.screen, dispList)
+		box = listOverlay(dispList)
 		box.addKeys({
 			'enter':select(box),
 			curses.KEY_RESIZE:resize(box,self)
 		})
-		#direct input away from normal input
-		self.chat.subWindow(box)
+		self.addOverlay(box)
 	#resize
-	def onKEY_RESIZE(self):
-		y, x = self.screen.getmaxyx()
-		curses.update_lines_cols()
-		self.text.width = x-1
-		self.chat(y-3)
-		self.inputwin(y-3)
-		self.inputwin.statrefresh()
-		self.inputwin.blurbrefresh()
-		self.chat.redraw()
+	def onresize(self):
+		global DIM_X,DIM_Y
+		DIM_Y, DIM_X = self.screen.getmaxyx()
+		self.text.width = DIM_X-1
+		self._chat.redoLines()
+		self._chat.display()
+		self.updateinput()
+		self.updateinfo()
+	#=------------------------------=
+	#|	Loop Frontends		|
+	#=------------------------------=
+	def loop(self):
+		while self.active:
+			if self.input() == -1:
+				if not self.ins: break
+				self.ins.pop()
+				self._chat.overlay = (None if not self.ins else self.ins[-1])
+				self.onresize()
+				
+			if self.ins:
+				self._chat.display()
+			else:
+				self.updateinput()
+		
 	#threaded function that prints the current time every 10 minutes
 	#also handles erasing blurbs
 	def timeloop(self):
@@ -603,27 +659,28 @@ class client(cursesInput):
 			if not i % 300:
 				self.msgTime(time.time())
 				i=0
+	#=------------------------------=
+	#|	Window Frontend 	|
+	#=------------------------------=
+	def addOverlay(self,new):
+		self.ins.append(new)
+		self._chat.overlay = new
 
 #generic wrapper for redrawing listinputs
 def resize(self,replace):
 	def ret():
-		y, x = self.screen.getmaxyx()
-		replace.onKEY_RESIZE()
-		self.makeWindows(y,x)
+		global DIM_X,DIM_Y
+		DIM_Y, DIM_X = self.screen.getmaxyx()
+		self.text.width = DIM_X-1
 	return ret
 
 #DID SOMEONE SAY DECORATORS?
 def onkey(keyname):
 	def wrapper(func):
 		if type(keyname) == str:
-			setattr(client,"on"+keyname,func)
+			setattr(main,"on"+keyname,func)
 		else:
-			setattr(client,"on"+_CURSES_KEYS[keyname],func)
-	return wrapper
-
-def command(commandname):
-	def wrapper(func):
-		commands[commandname] = func
+			setattr(main,"on"+_CURSES_KEYS[keyname],func)
 	return wrapper
 
 def colorer(func):
@@ -632,6 +689,11 @@ def colorer(func):
 def chatfilter(func):
 	filters.append(func)
 
+def command(commandname):
+	def wrapper(func):
+		commands[commandname] = func
+	return wrapper
+
 def opener(extension):
 	def wrap(func):
 		setattr(link_opener,extension,staticmethod(func))
@@ -639,9 +701,7 @@ def opener(extension):
 		return func
 	return wrap
 
-#exceptions
-class DisconnectException(Exception):
-	pass
-
-class SizeException(Exception):
-	pass
+#clear formatting (reverse, etc)
+@colorer
+def removeFormatting(msg,*args):
+	msg.append(_CLEAR_FORMATTING)
