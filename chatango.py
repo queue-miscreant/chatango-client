@@ -20,9 +20,8 @@ Options:
 	""")
 	exit()
 	
-#try importing curses
+#try importing client
 try:
-	import curses
 	import client
 	from client import dbmsg
 except ImportError:
@@ -77,14 +76,14 @@ def init_colors():
 		)
 	ordlen = 5
 	for i in range(ordlen*2):
-		client.coloring.definepair(ordering[i%ordlen],i//ordlen) #0-10: user text
-	client.coloring.definepair('green',True)
-	client.coloring.definepair('green')		#11: >meme arrow
-	client.coloring.definepair('none',False,'none')	#12-15: channels
-	client.coloring.definepair('red',False,'red')
-	client.coloring.definepair('blue',False,'blue')
-	client.coloring.definepair('magenta',False,'magenta')
-	client.coloring.definepair('white',False,'white')	#16: extra drawing
+		client.definepair(ordering[i%ordlen],i//ordlen) #0-10: user text
+	client.definepair('green',True)
+	client.definepair('green')		#11: >meme arrow
+	client.definepair('none',False,'none')	#12-15: channels
+	client.definepair('red',False,'red')
+	client.definepair('blue',False,'blue')
+	client.definepair('magenta',False,'magenta')
+	client.definepair('white',False,'white')	#16: extra drawing
 
 #read credentials from file
 def readFromFile(filePath):
@@ -260,7 +259,6 @@ class chat_bot(chlib.ConnectionManager):
 
 #-------------------------------------------------------------------------------------------------------
 #KEYS
-
 @client.onkey("tab")
 def ontab(self):
 	#only search after the last space
@@ -275,7 +273,7 @@ def ontab(self):
 			#up until the @
 			self.text.append(findName(afterReply,self.chatBot.members) + " ")
 
-@client.onkey(curses.KEY_F3)
+@client.onkey('KEY_F3')
 def F3(self):
 	#special wrapper to manipulate inject functionality for newlines in the list
 	def select(me):
@@ -294,12 +292,11 @@ def F3(self):
 	box = client.listOverlay(sorted(dispList))
 	box.addKeys({
 		'enter':select(box),
-		curses.KEY_RESIZE:client.resize(box,self)
 	})
 	
 	self.addOverlay(box)
 
-@client.onkey(curses.KEY_F4)
+@client.onkey('KEY_F4')
 def F4(self):
 	#select which further input to display
 	def select(me):
@@ -318,7 +315,6 @@ def F4(self):
 				furtherInput = client.colorOverlay(client.fromHexColor(formatting['fc']))
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
-					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
 			#ask for name color
 			elif me.it == 1:
@@ -332,7 +328,6 @@ def F4(self):
 				furtherInput = client.colorOverlay(client.fromHexColor(formatting['nc']))
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
-					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
 			#font face
 			elif me.it == 2:
@@ -346,7 +341,6 @@ def F4(self):
 				furtherInput = client.listOverlay(FONT_FACES)
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
-					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
 				furtherInput.it = int(formatting['ff'])
 			#ask for font size
@@ -361,7 +355,6 @@ def F4(self):
 				furtherInput = client.listOverlay([i for i in map(str,FONT_SIZES)])
 				furtherInput.addKeys({
 					'enter':enter(furtherInput),
-					curses.KEY_RESIZE:client.resize(furtherInput,me)
 				})
 				furtherInput.it = FONT_SIZES.index(formatting['fz'])
 			#insurance
@@ -374,12 +367,11 @@ def F4(self):
 	box = client.listOverlay(["Font Color", "Name Color", "Font Face", "Font Size"])
 	box.addKeys({
 		'enter':select(box),
-		curses.KEY_RESIZE:client.resize(box,self)
 	})
 	
 	self.addOverlay(box)
 
-@client.onkey(curses.KEY_F5)
+@client.onkey('KEY_F5')
 def F5(self):
 	def select(me):
 		def ret():
@@ -408,11 +400,11 @@ def F5(self):
 	box.addKeys({
 		'enter':select(box),
 		'input':oninput(box),
-		curses.KEY_RESIZE:client.resize(box,self)
 	})
 	box.it = self.chatBot.channel
 	
 	self.addOverlay(box)
+
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
 #color by user's name
@@ -421,6 +413,7 @@ def defaultcolor(msg,coldic,*args):
 	msg.default = getColor(msg()[:msg().find(':')])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
+#also color lines by default
 @client.colorer
 def greentext(msg,*args):
 	lines = msg().split("\n") #don't forget to add back in a char
@@ -442,6 +435,7 @@ def greentext(msg,*args):
 		else:
 			tracker += msg.insertColor(begin+tracker)
 		tracker += len(line)+1 #add in the newline
+
 #links as white
 @client.colorer
 def link(msg,*args):
@@ -450,14 +444,13 @@ def link(msg,*args):
 	find = linkre.search(msg())
 	while find:
 		begin,end = tracker+find.start(0),tracker+find.end(0)
-		#find the most recent escape sequence
-		findcolor = {end-i.end(0):i.group(0) for i in client.ANSI_ESC_RE.finditer(msg()) if (end-i.end(0))>=0}
-		last = findcolor[min(findcolor)]
+		#find the most recent color
+		last = client.findcolor(msg(),end)
 		end += msg.insertColor(begin,0,False)
 		tracker = msg.insertColor(end,last) + end
 		find = linkre.search(msg()[tracker:])
-		
 
+		
 #draw replies, history, and channel
 @client.colorer
 def chatcolors(msg,*args):
@@ -466,6 +459,7 @@ def chatcolors(msg,*args):
 	msg.insertColor(0,0)
 	msg.prepend(" ")
 	msg.insertColor(0,args[3]+12)
+
 #-------------------------------------------------------------------------------------------------------
 #OPENERS
 #start and daemonize feh (or replaced image viewing program)
@@ -509,6 +503,7 @@ def linked(cli,link):
 		open_new_tab(link)
 	finally:
 		os.dup2(savout, 1)
+
 #-------------------------------------------------------------------------------------------------------
 #COMMANDS
 
@@ -517,10 +512,17 @@ def linked(cli,link):
 def ignore(cli,arglist):
 	global ignores
 	person = arglist[0]
-	if '@' not in person: return
-	person = person[1:]
+	if '@' == person[1]: person = person[1:]
 	if person in ignores: return
 	ignores.append(person)
+
+def unignore(cli,arglist):
+	global ignores
+	person = arglist[0]
+	if '@' == person[1]: person = person[1:]
+	if person not in ignores: return
+	ignores.pop(person)
+
 #-------------------------------------------------------------------------------------------------------
 #FILTERS
 
@@ -539,13 +541,6 @@ def ignorefilter(*args):
 	except:
 		return True
 #-------------------------------------------------------------------------------------------------------
-def begin(stdscr,creds):
-	#curses.mousemask(1)
-	
-
-	input.loop()
-	
-
 try:
 	import custom #custom plugins
 except ImportError as exc:
@@ -580,7 +575,8 @@ if __name__ == '__main__':
 		creds['user'] = input("Enter your username: ")
 		creds['passwd'] = input("Enter your password: ")
 		creds['room'] = input("Enter the group name: ")
-		
+
+	#initialize colors and chat bot
 	init_colors()
 	chatbot = chat_bot(creds)
 	#start

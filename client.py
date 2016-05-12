@@ -8,27 +8,28 @@ environ.setdefault('ESCDELAY', '25')
 
 WORD_RE = re.compile("[^ ]* ")
 ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")
+_LAST_COLOR_RE = re.compile("\x1b"+r"\[[^A-z]*3[^A-z]*m")
 INDENT_LEN = 4
 INDENT_STR = ""
 #guessed terminal dimensions
 DIM_X = 40
 DIM_Y = 70
 RESERVE_LINES = 3
-
 #------------------------------------------------------------------------------
 #valid colors to add
-COLORS = ['black','red','green','yellow','blue','magenta','cyan','white','','none']
+_COLORS = ['black','red','green','yellow','blue','magenta','cyan','white','','none']
 #0 = reverse; 1 = underline
 _EFFECTS = ['\x1b[7m','\x1b[4m']
+#storage for defined pairs
 #		Normal/Normal	Red/White	Red		Green		Blue
 _COLOR_PAIRS = ['\x1b[39;49m','\x1b[31;47m','\x1b[31;41m','\x1b[32;42m','\x1b[34;44m']
-_CLEAR_FORMATTING = '\x1b[m'
 _NUM_PREDEFINED = len(_COLOR_PAIRS)
-
+#clear formatting
+_CLEAR_FORMATTING = '\x1b[m'
+#lambdas
 _SELECTED = lambda x: _EFFECTS[0] + x + _CLEAR_FORMATTING
 _MOVE_CURSOR = lambda x: print("\x1b[%d;f"%x,end=_CLEAR_FORMATTING)
 _DELETE_REST_OF_LINE = lambda x: print(x,end="\x1b[K\n\r")
-
 #------------------------------------------------------------------------------
 #overlay formatting
 CHAR_HSPACE = "─"
@@ -38,13 +39,11 @@ CHAR_TRCORNER = "┐"
 CHAR_BLCORNER = "└"
 CHAR_BRCORNER = "┘"
 CHAR_CURSOR = "|"
-
-_BOX_TOP = lambda: CHAR_TLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_TRCORNER
-_BOX_JUST = lambda x: DIM_X-2+sum([i.end(0)-i.start(0) for i in ANSI_ESC_RE.finditer(x)])
-_BOX_PART = lambda x: CHAR_VSPACE + x.ljust(_BOX_JUST(x)) + CHAR_VSPACE
-_BOX_NOFORM = lambda x: CHAR_VSPACE + x + CHAR_VSPACE
-_BOX_BOTTOM = lambda: CHAR_BLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_BRCORNER
-
+_BOX_TOP = lambda: CHAR_TLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_TRCORNER			#top
+_BOX_JUST = lambda x: DIM_X-2+sum([i.end(0)-i.start(0) for i in ANSI_ESC_RE.finditer(x)])	#just the number of spaces to justify
+_BOX_PART = lambda x: CHAR_VSPACE + x.ljust(_BOX_JUST(x)) + CHAR_VSPACE				#formatted and sandwiched
+_BOX_NOFORM = lambda x: CHAR_VSPACE + x + CHAR_VSPACE						#sandwiched between verticals
+_BOX_BOTTOM = lambda: CHAR_BLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_BRCORNER			#bottom
 #------------------------------------------------------------------------------
 #list of curses keys
 #used internally to redirect curses keys
@@ -63,23 +62,16 @@ _CURSES_KEYS[curses.KEY_ENTER] = 'enter'
 _CURSES_KEYS[curses.KEY_BACKSPACE] = 'backspace'
 _CURSES_KEYS[curses.KEY_RESIZE] = 'resize'
 
-
+#------------------------------------------------------------------------------
 #conversions to and from hex strings ([255,255,255] <-> FFFFFF)
 toHexColor = lambda rgb: ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
 fromHexColor = lambda hexStr: [int(hexStr[2*i:2*i+2],16) for i in range(3)]
 
+#------------------------------------------------------------------------------
+#useful containers for certain contexts
 colorers = []
 commands = {}
 filters = []
-
-#debug stuff
-def dbmsg(*args):
-	with open("debug","a+") as a:
-		for i in args:
-			a.write(str(i)+"\t")
-		a.write("\n")
-		a.close()
-
 class link_opener:
 #	__init__ is like a static __call__
 	def __init__(self,client,link):
@@ -92,56 +84,24 @@ class link_opener:
 				getattr(self, 'htmllink')(client,link)
 		except AttributeError as exc:
 			pass
-
-class ColoringException(Exception):
-	pass
-
-class DisplayException(Exception):
-	pass
-
-class coloring:
-	default = None
-	def __init__(self,string):
-		self.str = string
-	
-	def __call__(self):
-		return self.str
-
-	#insert color at position p with color c
-	def insertColor(self,p,c=-1,add = True):
-		c = self.default if c == -1 else c
-		try:
-			c = type(c) != str and _COLOR_PAIRS[c + (add and _NUM_PREDEFINED)] or c 
-		except IndexError:
-			raise ColoringException("Foreground/Background pair not defined")
-		self.str = self.str[:p] + c + self.str[p:]
-		#return length of c to adjust trackers
-		return len(c)
-	
-	def prepend(self,new):
-		self.str = new + self.str
-	
-	def append(self,new):
-		self.str = self.str + new 
-
-	#add effect to string (if test is true)
-	def addEffect(self, number, test = True):
-		self.str = (test and _EFFECTS[number] or "") + self.str
-	
-	def ljust(self,spacing):
-		self.str = self.str.ljust(spacing)
-	
-	@staticmethod
-	def definepair(fore, bold = None, back = 'none'):
-		global _COLOR_PAIRS
-		pair = '\x1b[3%d' % COLORS.index(fore);
-		pair += bold and ";1" or ";22"
-		pair += ';4%d' % COLORS.index(back) or ""
-		_COLOR_PAIRS.append(pair+'m')
+#decorators for containers
+def colorer(func):
+	colorers.append(func)
+def chatfilter(func):
+	filters.append(func)
+def command(commandname):
+	def wrapper(func):
+		commands[commandname] = func
+	return wrapper
+def opener(extension):
+	def wrap(func):
+		setattr(link_opener,extension,staticmethod(func))
+		#allow stacking wrappers
+		return func
+	return wrap
 
 #add links to a list
 def parseLinks(raw,lastlinks):
-	#in case the raw message ends wzith a link
 	newLinks = []
 	#look for whole word links starting with http:// or https://
 	newLinks = [i for i in re.findall("(https?://.+?\\.[^ \n]+)[\n ]",raw+" ")]
@@ -151,6 +111,63 @@ def parseLinks(raw,lastlinks):
 			newLinks.remove(i)
 	#lists are passed by reference
 	lastlinks += newLinks
+#------------------------------------------------------------------------------
+#COLORING METHODS
+
+#exception raised when errors occur in this segment
+class ColoringException(Exception):
+	pass
+
+#coloring objects contain a string and default color
+class coloring:
+	def __init__(self,string,default=None):
+		self.str = string
+		self.default = default
+	def __call__(self):
+		return self.str
+	#insert color at position p with color c
+	def insertColor(self,p,c=-1,add = True):
+		c = self.default if c == -1 else c
+		try:
+			c = type(c) != str and _COLOR_PAIRS[c + (add and _NUM_PREDEFINED)] or c 
+		except IndexError:
+			raise ColoringException("Foreground/Background pair not defined")
+		self.str = self.str[:p] + c + self.str[p:]
+		#return length of c to adjust tracker variables in colorers
+		return len(c)
+	#prebuilts
+	def prepend(self,new):
+		self.str = new + self.str
+	def append(self,new):
+		self.str = self.str + new 
+	def ljust(self,spacing):
+		self.str = self.str.ljust(spacing)
+	#add effect to string (if test is true)
+	def addEffect(self, number, test = True):
+		self.str = (test and _EFFECTS[number] or "") + self.str
+
+def definepair(fore, bold = None, back = 'none'):
+	global _COLOR_PAIRS
+	pair = '\x1b[3%d' % _COLORS.index(fore);
+	pair += bold and ";1" or ";22"
+	pair += ';4%d' % _COLORS.index(back) or ""
+	_COLOR_PAIRS.append(pair+'m')
+
+#most recent color before start
+def findcolor(message,end):
+	lastcolor = {end-i.end(0):i.group(0) for i in _LAST_COLOR_RE.finditer(message) if (end-i.end(0))>=0}
+	try:
+		return lastcolor[min(lastcolor)]
+	except:
+		return ''
+
+#clear formatting (reverse, etc) after each message
+@colorer
+def removeFormatting(msg,*args):
+	msg.append(_CLEAR_FORMATTING)
+
+#------------------------------------------------------------------------------
+#DISPLAY FITTING
 
 #byte length of string (sans escape sequences)
 def strlen(string):
@@ -177,7 +194,19 @@ def fitwordtolength(string,length):
 		if add and ((trace+char) > length):
 			break
 	return lentr
-		
+
+#preserve formatting. this isn't necessary, but it looks better
+def preserveFormatting(line):
+	ret = ''
+	#only fetch after the last clear
+	lastClear = line.rfind(_CLEAR_FORMATTING)
+	if lastClear+1: line = line[:lastClear]
+	for i in _EFFECTS:
+		if i in line:
+			ret += i
+	try:
+		return ret + _LAST_COLOR_RE.findall(line)[-1] #return the last (assumed to be color) ANSI escape used
+	except exc: return ret
 
 def breaklines(string, length = 0, tab = None):
 	#if this is in the function args, it can't be changed later
@@ -189,16 +218,18 @@ def breaklines(string, length = 0, tab = None):
 	TABSPACE = length - len(tab)
 
 	broken = []
+	form = ''
 	for i,line in enumerate(string.split("\n")):
 		line += " " #ensurance that the last word will capture
 		#tab the next lines
 		space = (i and TABSPACE) or length
-		newline = (i and tab) or ""
+		newline = ((i and tab) or "") + form
 		while line != "":
 			match = WORD_RE.match(line)
 			word = match.group(0)
 			wordlen = strlen(word)
 			newspace = space - wordlen
+			#just add the word
 			if wordlen < space:
 				space = newspace
 				newline += word
@@ -206,25 +237,28 @@ def breaklines(string, length = 0, tab = None):
 			#if there's room for some of the word, and we're not past a threshold
 			elif space >= THRESHOLD:
 				fitsize = fitwordtolength(word, space)
-				line = line[fitsize-1:]
+				line = line[fitsize:]
 				newline += word[:fitsize]
 			
 			if newspace <= 0:
-				broken.append(newline)
-				newline = tab
+				broken.append(newline+_CLEAR_FORMATTING)
+				newline = tab+preserveFormatting(newline)
 				space = TABSPACE
 		if newline != "":
-			broken.append(newline)
+			broken.append(newline+_CLEAR_FORMATTING)
+			form = preserveFormatting(newline)
 	return broken
 
-class display:
-	allMessages = []
-	lines = []
-	bottom_edges = [" "," "]
-	overlay = None
+#------------------------------------------------------------------------------
+#DISPLAY/OVERLAY CLASSES
 
+#main display. handles all output
+class display:
 	def __init__(self):
-		pass
+		self.allMessages = []
+		self.lines = []
+		self.bottom_edges = [" "," "]
+		self.overlay = None
 	
 	def redoLines(self):
 		newlines = []
@@ -242,13 +276,13 @@ class display:
 		if self.overlay and self.overlay.replace:
 			self.overlay.display()
 			return
+		#main display method: move to top of screen
 		_MOVE_CURSOR(0)
 		size = DIM_Y-RESERVE_LINES-1
 		#draw each line in lines
 		i = 0
 		for i,j in enumerate(self.lines[-size:]):
 			_DELETE_REST_OF_LINE(j)
-		
 		for k in range(size - i - 1):
 			_DELETE_REST_OF_LINE("")
 		
@@ -256,8 +290,9 @@ class display:
 		if self.overlay:
 			self.overlay.display()
 		#fancy line
+		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
 		_DELETE_REST_OF_LINE(CHAR_HSPACE*DIM_X)
-	
+	#add new messages to main output
 	def append(self,newline,args = None):
 		self.allMessages.append((newline,args))
 		try:
@@ -265,20 +300,20 @@ class display:
 				return
 		except: pass
 		self.lines += breaklines(newline)
-	
+	#display string in input
 	def printinput(self,string):
 		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+1)
 		_DELETE_REST_OF_LINE(string)
 		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
 		#for some reason, it won't update input drawing (in IME) until I print something
 		print('')
-	
+	#display a blurb
 	def printblurb(self,string):
 		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+2)
 		_DELETE_REST_OF_LINE(string)
 		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
 		print('')
-
+	#display info window
 	def printinfo(self,right,left):
 		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+3)
 		self.bottom_edges[0] = left or self.bottom_edges[0]
@@ -289,6 +324,9 @@ class display:
 		print('')
 
 #overlays
+class DisplayException(Exception):
+	pass
+
 class overlayBase:
 	def onescape(self):
 		return -1
@@ -301,6 +339,8 @@ class overlayBase:
 				setattr(self,"on"+i,j)
 			else:
 				setattr(self,"on"+_CURSES_KEYS[i],j)
+	def addResize(self,other):
+		setattr(self,"onresize",other.onresize)
 
 class listOverlay(overlayBase):
 	replace = True
@@ -423,6 +463,10 @@ class colorOverlay(overlayBase):
 	def onKEY_LEFT(self):
 		self.mode = (self.mode - 1) % 3
 
+#------------------------------------------------------------------------------
+#INPUT
+
+#scrollable text input
 class scrollable:
 	def __init__(self,width):
 		self._text = ""
@@ -481,74 +525,40 @@ class scrollable:
 		if len(self.history) > 0:
 			self.selhis += (self.selhis < (len(self.history)))
 			self._text = self.history[-self.selhis]
-			self.pos = len(self._text)
+			self.movepos(len(self._text))
 	#history prev
 	def prevhist(self):
 		if len(self.history) > 0:
 			self.selhis -= (self.selhis > 0)
 			#the next element or an empty string
 			self._text = self.selhis and self.history[-self.selhis] or ""
-			self.pos = len(self._text)
+			self.movepos(len(self._text))
 	#add new history entry
 	def appendhist(self,new):
 		self.history.append(new)
 		self.history = self.history[-50:]
 		self.selhis = 0
-	
 
+class BotException(Exception):
+	pass
+
+#main class 
 class main:
 	lastlinks = []
 	chatBot = None
 	screen = None
 	last = 0
 	def __init__(self):
+		#text input
 		self.text = scrollable(DIM_X-1)
+		#input stack
 		self.ins = []
 		self.active = True
 		self._chat = display()
-	def start(self,screen,*args):
-		self.screen = screen
-		self.onresize()
-		curses.curs_set(0)
-		for i in args:
-			i.start()
-		self.loop()
-	#=------------------------------=
-	#|	DISPLAY FRONTENDS	|
-	#=------------------------------=
-	#system message
-	def msgSystem(self, base):
-		self._chat.append(_COLOR_PAIRS[1]+base+_CLEAR_FORMATTING)
-		self._chat.display()
-	#parse a message and color it
-	def msgPost(self, post, *args):
-		parseLinks(post,self.lastlinks)
-		post = coloring(post)
-		#empty dictionary to start
-		for i in colorers:
-			i(post,*args)
-		#push the message and move the cursor back to the input window
-		self._chat.append(post(),list(args))
-		self._chat.display()
-	#push a system message of the time
-	def msgTime(self, numtime = None, predicate=""):
-		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
-		self.msgSystem(predicate+dtime)
-	#5 second blurb
-	def newBlurb(self,message = ""):
-		self.last = time.time()
-		self._chat.printblurb(message)
-	#update input
-	def updateinput(self):
-		self._chat.printinput(self.text.display())
-	def updateinfo(self,right=None,left=None):
-		self._chat.printinfo(right,left)
+
 	#=------------------------------=
 	#|	INPUT METHODS   	|
 	#=------------------------------=
-	def unget(self):
-		curses.ungetch("\x26")
-
 	#crux of input
 	def input(self):
 		try:
@@ -566,10 +576,10 @@ class main:
 		#delegate to display stack
 		if self.ins:
 			self = self.ins[-1]
-
+		#run onKEY function
 		if curseAction and len(chars) == 2 and hasattr(self,"on"+curseAction):
 			return getattr(self,"on"+curseAction)()
-
+		#otherwise, just grab input characters
 		if chars[0] in range(32,255) and hasattr(self,"oninput"):
 			getattr(self,"oninput")(chars[:-1])
 	#backspace
@@ -589,7 +599,8 @@ class main:
 					command(self,text[text.find(' ')+1:].split(' '))
 				finally:
 					return
-			self.chatBot.tryPost(text.replace(r'\n','\n'))
+			try: self.chatBot.tryPost(text.replace(r'\n','\n'))
+			except: raise BotException("Attempted to send post with no bot")
 	#any other key
 	def oninput(self,chars):
 		#allow unicode input
@@ -640,7 +651,6 @@ class main:
 		box = listOverlay(dispList)
 		box.addKeys({
 			'enter':select(box),
-			curses.KEY_RESIZE:resize(box,self)
 		})
 		self.addOverlay(box)
 	#resize
@@ -649,9 +659,11 @@ class main:
 		DIM_Y, DIM_X = self.screen.getmaxyx()
 		self.text.width = DIM_X-1
 		self._chat.redoLines()
-		self._chat.display()
 		self.updateinput()
 		self.updateinfo()
+		self.newBlurb()
+		self._chat.display()
+
 	#=------------------------------=
 	#|	Loop Frontends		|
 	#=------------------------------=
@@ -681,22 +693,57 @@ class main:
 			if not i % 300:
 				self.msgTime(time.time())
 				i=0
+
 	#=------------------------------=
-	#|	Window Frontend 	|
+	#|	Frontends		|
 	#=------------------------------=
+	#system message
+	def msgSystem(self, base):
+		self._chat.append(_COLOR_PAIRS[1]+base+_CLEAR_FORMATTING)
+		self._chat.display()
+	#parse a message and color it
+	def msgPost(self, post, *args):
+		parseLinks(post,self.lastlinks)
+		post = coloring(post)
+		#empty dictionary to start
+		for i in colorers:
+			i(post,*args)
+		#push the message and move the cursor back to the input window
+		self._chat.append(post(),list(args))
+		self._chat.display()
+	#push a system message of the time
+	def msgTime(self, numtime = None, predicate=""):
+		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
+		self.msgSystem(predicate+dtime)
+	#5 second blurb
+	def newBlurb(self,message = ""):
+		self.last = time.time()
+		self._chat.printblurb(message)
+	#update input
+	def updateinput(self):
+		self._chat.printinput(self.text.display())
+	def updateinfo(self,right=None,left=None):
+		self._chat.printinfo(right,left)
+
+	#unget to exit loop
+	def unget(self):
+		curses.ungetch("\x1b")
+
+	#window frontend
 	def addOverlay(self,new):
+		new.addResize(self)
 		self.ins.append(new)
 		self._chat.overlay = new
+	
+	def start(self,screen,*args):
+		self.screen = screen
+		self.onresize()
+		curses.curs_set(0)
+		for i in args:
+			i.start()
+		self.loop()
 
-#generic wrapper for redrawing listinputs
-def resize(self,replace):
-	def ret():
-		global DIM_X,DIM_Y
-		DIM_Y, DIM_X = self.screen.getmaxyx()
-		self.text.width = DIM_X-1
-	return ret
-
-#DID SOMEONE SAY DECORATORS?
+#wrapper for adding keys to the main interface
 def onkey(keyname):
 	def wrapper(func):
 		if type(keyname) == str:
@@ -705,28 +752,14 @@ def onkey(keyname):
 			setattr(main,"on"+_CURSES_KEYS[keyname],func)
 	return wrapper
 
-def colorer(func):
-	colorers.append(func)
-
-def chatfilter(func):
-	filters.append(func)
-
-def command(commandname):
-	def wrapper(func):
-		commands[commandname] = func
-	return wrapper
-
-def opener(extension):
-	def wrap(func):
-		setattr(link_opener,extension,staticmethod(func))
-		#allow stacking wrappers
-		return func
-	return wrap
-
-#clear formatting (reverse, etc)
-@colorer
-def removeFormatting(msg,*args):
-	msg.append(_CLEAR_FORMATTING)
+#------------------------------------------------------------------------------
+#debug stuff
+def dbmsg(*args):
+	with open("debug","a+") as a:
+		for i in args:
+			a.write(str(i)+"\t")
+		a.write("\n")
+		a.close()
 
 def start(bot_object,main_function):
 	inp = main()
