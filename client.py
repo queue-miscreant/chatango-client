@@ -2,6 +2,7 @@ from os import environ
 import re
 import time
 import curses
+from threading import Thread
 
 environ.setdefault('ESCDELAY', '25')
 
@@ -53,6 +54,7 @@ _CURSES_KEYS = {
 	13: 'enter',	#carriage return
 	27: 'escape',	#escape
 	127:'backspace',#delete character
+	519:'altdel',	#alt+delete
 }
 for i in dir(curses):
 	if "KEY" in i:
@@ -441,6 +443,16 @@ class scrollable:
 		if not self.pos: return #don't backspace at the beginning of the line
 		self._text = self._text[:self.pos-1] + self._text[self.pos:]
 		self.movepos(-1)
+	#delete word
+	def delword(self):
+		pos = (' '+self._text[:self.pos]).rfind(' ')
+		if not pos+1: return
+		if not pos:
+			self._text = self._text[self.pos:]
+			self.movepos(0)
+			return
+		self._text = self._text[:pos-1] + self._text[self.pos:]
+		self.movepos(pos-1)
 	#clear the window
 	def clear(self):
 		self._text = ""
@@ -487,15 +499,20 @@ class scrollable:
 class main:
 	lastlinks = []
 	chatBot = None
+	screen = None
 	last = 0
-	def __init__(self,screen):
-		self.screen = screen
+	def __init__(self):
 		self.text = scrollable(DIM_X-1)
 		self.ins = []
 		self.active = True
 		self._chat = display()
+	def start(self,screen,*args):
+		self.screen = screen
 		self.onresize()
 		curses.curs_set(0)
+		for i in args:
+			i.start()
+		self.loop()
 	#=------------------------------=
 	#|	DISPLAY FRONTENDS	|
 	#=------------------------------=
@@ -529,6 +546,9 @@ class main:
 	#=------------------------------=
 	#|	INPUT METHODS   	|
 	#=------------------------------=
+	def unget(self):
+		curses.ungetch("\x26")
+
 	#crux of input
 	def input(self):
 		try:
@@ -542,7 +562,6 @@ class main:
 			next = self.screen.getch()
 			chars.append(next)
 		self.screen.nodelay(0)
-		#control sequences
 		curseAction = _CURSES_KEYS.get(chars[0])
 		#delegate to display stack
 		if self.ins:
@@ -595,6 +614,9 @@ class main:
 		self.text.home()
 	def onKEY_END(self):
 		self.text.end()
+	#shifted delete = backspace word
+	def onaltdel(self):
+		self.text.delword()
 	#f2
 	def onKEY_F2(self):
 		#special wrapper to inject functionality for newlines in the list
@@ -705,3 +727,17 @@ def opener(extension):
 @colorer
 def removeFormatting(msg,*args):
 	msg.append(_CLEAR_FORMATTING)
+
+def start(bot_object,main_function):
+	inp = main()
+	bot_object.wrap(inp)
+	#daemonize functions
+	bot_thread = Thread(target=main_function)
+	bot_thread.daemon = True
+	printtime = Thread(target=inp.timeloop)
+	printtime.daemon = True
+	#start
+	curses.wrapper(inp.start, bot_thread, printtime)
+	#end the threads
+	inp.active = False
+	bot_object.connected = False

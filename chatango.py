@@ -155,14 +155,16 @@ class chat_bot(chlib.ConnectionManager):
 	parent = None
 	members = []
 
-	def __init__(self, wrapper,creds):
+	def __init__(self,creds):
 		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
-		self.parent = wrapper
-		self.parent.chatBot = self
 		self.creds = creds
 		self.channel = 0
 		self.addGroup(creds['room'])
 		
+	def wrap(self,wrapper):
+		self.parent = wrapper
+		self.parent.chatBot = self
+
 	def setFormatting(self, newFormat = None):
 		group = self.joinedGroup
 		
@@ -215,6 +217,7 @@ class chat_bot(chlib.ConnectionManager):
 	def stop(self):
 		chlib.ConnectionManager.stop(self)
 		self.parent.active = False
+		self.parent.unget()
 		
 	#on message
 	def recvPost(self, group, user, post, history = 0):
@@ -537,25 +540,11 @@ def ignorefilter(*args):
 		return True
 #-------------------------------------------------------------------------------------------------------
 def begin(stdscr,creds):
-	init_colors()
 	#curses.mousemask(1)
 	
-	input = client.main(stdscr)
-	chatbot = chat_bot(input,creds)
-	
-	#daemonize functions
-	bot_thread = Thread(target=chatbot.main)
-	bot_thread.daemon = True
-	printtime = Thread(target=input.timeloop)
-	printtime.daemon = True
-	#start threads
-	printtime.start()
-	bot_thread.start()
 
 	input.loop()
 	
-	input.active = False
-	chatbot.connected = False
 
 try:
 	import custom #custom plugins
@@ -592,4 +581,8 @@ if __name__ == '__main__':
 		creds['passwd'] = input("Enter your password: ")
 		creds['room'] = input("Enter the group name: ")
 		
-	curses.wrapper(begin,creds)
+	init_colors()
+	chatbot = chat_bot(creds)
+	#start
+	client.start(chatbot,chatbot.main)
+

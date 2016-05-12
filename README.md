@@ -44,9 +44,8 @@ DEPENDENCIES
 >			__call__():	Return the string contained
 >			prepend(new):	Prepend new to the message
 >			append(new):	Append new to the message
->			insertColor(position, color = self.default,
->				 add = True):	Insert color pair "color" at position "position".
->						"add" signifies whether to use the predefined colors (default don't)
+>			insertColor(position, color = self.default, add = True):
+>				Insert color pair "color" at position "position". "add" signifies whether to use the predefined colors (default don't)
 
 >#	__DECORATORS__
 >##	client.colorer
