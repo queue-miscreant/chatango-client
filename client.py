@@ -181,7 +181,7 @@ def strlen(string):
 def fitwordtolength(string,length):
 	add = True
 	#byte count
-	trace = 0
+	trace,lentr = 0,0
 	for lentr,i in enumerate(string):
 		char = len(bytes(i,"utf-8"))
 		#escapes (FSM-style)
@@ -274,7 +274,9 @@ class display:
 	
 	def display(self):
 		size = DIM_Y-RESERVE_LINES-1
-		lines = self.lines + ["" for i in range(size - len(self.lines))]
+		#justify number of lines
+		lines = self.lines[-size:] + ["" for i in range(size - len(self.lines))]
+
 		#if this is a replacement overlay, display that instead
 		if self.overlay:
 			if self.overlay.replace:
@@ -284,11 +286,8 @@ class display:
 		#main display method: move to top of screen
 		_MOVE_CURSOR(0)
 		#draw each line in lines
-		i = 0
-		for i,j in enumerate(lines[-size:]):
-			_DELETE_REST_OF_LINE(j)
-		for k in range(size - i - 1):
-			_DELETE_REST_OF_LINE("")
+		for i in lines:
+			_DELETE_REST_OF_LINE(i)
 		
 		#fancy line
 		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
@@ -490,7 +489,7 @@ class inputOverlay(overlayBase):
 	#run in alternate thread to get input
 	def waitForInput(self):
 		while not self.done:
-			pass
+			time.sleep(.3)
 		return self.inpstr
 
 #------------------------------------------------------------------------------
@@ -697,6 +696,7 @@ class main:
 	def loop(self):
 		try:
 			while self.active:
+				dbmsg("GET INPUT")
 				if self.input() == -1:
 					if not self.ins: break
 					self.ins.pop()
@@ -756,14 +756,16 @@ class main:
 		self._chat.printinfo(right,left)
 
 	#unget to exit loop
-	def unget(self):
-		curses.ungetch("\x1b")
+	def unget(self,char="\x1b"):
+		curses.ungetch(char)
 
 	#window frontend
 	def addOverlay(self,new):
 		new.addResize(self)
 		self.ins.append(new)
 		self._chat.overlay = new
+		time.sleep(.01) #for some reason this is too fast otherwise. a hundredth of a second isn't very noticeable anyway
+		self._chat.display()
 	
 	def start(self,screen,*args):
 		self.screen = screen

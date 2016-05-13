@@ -477,6 +477,7 @@ def chatcolors(msg,*args):
 #start and daemonize feh (or replaced image viewing program)
 @client.opener("jpeg")
 @client.opener("jpg")
+@client.opener("jpg:large")
 @client.opener("png")
 def images(cli,link,ext):
 	cli.newBlurb("Displaying image... ({})".format(ext))
