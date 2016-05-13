@@ -11,6 +11,7 @@ ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")
 _LAST_COLOR_RE = re.compile("\x1b"+r"\[[^A-z]*3[^A-z]*m")
 INDENT_LEN = 4
 INDENT_STR = ""
+LAST_INPUT = ""
 #guessed terminal dimensions
 DIM_X = 40
 DIM_Y = 70
@@ -272,23 +273,23 @@ class display:
 		self.lines = newlines
 	
 	def display(self):
+		size = DIM_Y-RESERVE_LINES-1
+		lines = self.lines + ["" for i in range(size - len(self.lines))]
 		#if this is a replacement overlay, display that instead
-		if self.overlay and self.overlay.replace:
-			self.overlay.display()
-			return
+		if self.overlay:
+			if self.overlay.replace:
+				self.overlay.display()
+				return
+			self.overlay.display(lines)
 		#main display method: move to top of screen
 		_MOVE_CURSOR(0)
-		size = DIM_Y-RESERVE_LINES-1
 		#draw each line in lines
 		i = 0
-		for i,j in enumerate(self.lines[-size:]):
+		for i,j in enumerate(lines[-size:]):
 			_DELETE_REST_OF_LINE(j)
 		for k in range(size - i - 1):
 			_DELETE_REST_OF_LINE("")
 		
-		#draw the overlay
-		if self.overlay:
-			self.overlay.display()
 		#fancy line
 		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
 		_DELETE_REST_OF_LINE(CHAR_HSPACE*DIM_X)
@@ -463,6 +464,35 @@ class colorOverlay(overlayBase):
 	def onKEY_LEFT(self):
 		self.mode = (self.mode - 1) % 3
 
+class inputOverlay(overlayBase):
+	replace = False
+	def __init__(self,prompt,password = False):
+		self.prompt = prompt
+		self.password = password
+		self.inpstr = ''
+		self.done = False
+	def display(self,lines):
+		start = DIM_Y//2 - 2
+		lines[start] = _BOX_TOP()
+		inp = self.password and '*'*len(self.inpstr) or self.inpstr
+		out = '    ' + self.prompt + ': ' + inp
+		lines[start+1] = _BOX_PART(out)
+		lines[start+2] = _BOX_BOTTOM()
+	def oninput(self,chars):
+		self.inpstr += bytes(chars).decode()
+	def onbackspace(self):
+		self.inpstr = self.inpstr[:-1]
+	def onenter(self):
+		self.done = True
+		return -1
+	def onescape(self):
+		raise KeyboardInterrupt
+	#run in alternate thread to get input
+	def waitForInput(self):
+		while not self.done:
+			pass
+		return self.inpstr
+
 #------------------------------------------------------------------------------
 #INPUT
 
@@ -561,10 +591,7 @@ class main:
 	#=------------------------------=
 	#crux of input
 	def input(self):
-		try:
-			chars = [self.screen.getch()]
-		except KeyboardInterrupt:
-			return -1
+		chars = [self.screen.getch()]
 		#get as many chars as possible
 		self.screen.nodelay(1)
 		next = 0
@@ -577,7 +604,7 @@ class main:
 		if self.ins:
 			self = self.ins[-1]
 		#run onKEY function
-		if curseAction and len(chars) == 2 and hasattr(self,"on"+curseAction):
+		if curseAction and hasattr(self,"on"+curseAction):
 			return getattr(self,"on"+curseAction)()
 		#otherwise, just grab input characters
 		if chars[0] in range(32,255) and hasattr(self,"oninput"):
@@ -668,17 +695,20 @@ class main:
 	#|	Loop Frontends		|
 	#=------------------------------=
 	def loop(self):
-		while self.active:
-			if self.input() == -1:
-				if not self.ins: break
-				self.ins.pop()
-				self._chat.overlay = (None if not self.ins else self.ins[-1])
-				self.onresize()
-				
-			if self.ins:
-				self._chat.display()
-			else:
-				self.updateinput()
+		try:
+			while self.active:
+				if self.input() == -1:
+					if not self.ins: break
+					self.ins.pop()
+					self._chat.overlay = (None if not self.ins else self.ins[-1])
+					self.onresize()
+					
+				if self.ins:
+					self._chat.display()
+				else:
+					self.updateinput()
+		except KeyboardInterrupt:
+			pass
 		
 	#threaded function that prints the current time every 10 minutes
 	#also handles erasing blurbs

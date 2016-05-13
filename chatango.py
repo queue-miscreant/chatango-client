@@ -155,14 +155,26 @@ class chat_bot(chlib.ConnectionManager):
 	members = []
 
 	def __init__(self,creds):
-		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
 		self.creds = creds
 		self.channel = 0
-		self.addGroup(creds['room'])
 		
 	def wrap(self,wrapper):
 		self.parent = wrapper
 		self.parent.chatBot = self
+	
+	def main(self):
+		for num,i in enumerate(['user','passwd','room']):
+			if creds.get(i):
+				continue
+			prompt = ['username', 'password', 'group name'][num]
+			inp = client.inputOverlay("Enter your " + prompt, num == 1)
+			self.parent.addOverlay(inp)
+			creds[i] = inp.waitForInput();
+
+		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
+
+		self.addGroup(creds['room'])
+		chlib.ConnectionManager.main(self)
 
 	def setFormatting(self, newFormat = None):
 		group = self.joinedGroup
@@ -570,15 +582,8 @@ if __name__ == '__main__':
 		except:
 			raise Exception("Improper argument formatting")
 			
-	#input if missing information
-	if not all((creds.get('user'),creds.get('passwd'),creds.get('room'))):
-		creds['user'] = input("Enter your username: ")
-		creds['passwd'] = input("Enter your password: ")
-		creds['room'] = input("Enter the group name: ")
-
 	#initialize colors and chat bot
 	init_colors()
 	chatbot = chat_bot(creds)
 	#start
 	client.start(chatbot,chatbot.main)
-
