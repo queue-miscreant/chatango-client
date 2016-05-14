@@ -15,6 +15,7 @@ LAST_INPUT = ""
 #guessed terminal dimensions
 DIM_X = 40
 DIM_Y = 70
+SIZE_THRESHOLD = 10
 RESERVE_LINES = 3
 #------------------------------------------------------------------------------
 #valid colors to add
@@ -29,8 +30,6 @@ _NUM_PREDEFINED = len(_COLOR_PAIRS)
 _CLEAR_FORMATTING = '\x1b[m'
 #lambdas
 _SELECTED = lambda x: _EFFECTS[0] + x + _CLEAR_FORMATTING
-_MOVE_CURSOR = lambda x: print("\x1b[%d;f"%x,end=_CLEAR_FORMATTING)
-_DELETE_REST_OF_LINE = lambda x: print(x,end="\x1b[K\n\r")
 #------------------------------------------------------------------------------
 #overlay formatting
 CHAR_HSPACE = "─"
@@ -171,11 +170,7 @@ def removeFormatting(msg,*args):
 #DISPLAY FITTING
 
 #byte length of string (sans escape sequences)
-def strlen(string):
-	init = len(bytes(string,'utf-8'))
-	for i in ANSI_ESC_RE.finditer(string):
-		init += i.start(0) - i.end(0)
-	return init
+strlen = lambda string: len(bytes(string,'utf-8')) - sum([i.end(0) - i.start(0) for i in ANSI_ESC_RE.finditer(string)])
 
 #fit word to byte length
 def fitwordtolength(string,length):
@@ -253,14 +248,52 @@ def breaklines(string, length = 0, tab = None):
 #------------------------------------------------------------------------------
 #DISPLAY/OVERLAY CLASSES
 
+class DisplayException(Exception):
+	pass
+
+def moveCursor(x=0):
+	print("\x1b[%d;f"%x,end=_CLEAR_FORMATTING)
+
+def printLine(x):
+	print(x,end="\x1b[K\n\r")
+
+class schedule:
+	def __init__(self):
+		self.scheduler = []
+		self.taskno = 0
+		self.debounce = False
+	
+	def __call__(self,func,*args):
+		if self.debounce:
+			self.scheduler.append((func,args))
+			return True
+		self.bounce(True)
+		func(*args)
+		self.bounce(False)
+	
+	def bounce(self,newbounce):
+		prev = self.debounce
+		if not newbounce:
+			self.debounce = True
+			while self.taskno < len(self.scheduler):
+				task = self.scheduler[self.taskno]
+				task[0](*task[1])
+				self.taskno+=1
+			self.scheduler = []
+			self.taskno = 0
+		self.debounce = newbounce
+		return prev
+
+
 #main display. handles all output
 class display:
 	def __init__(self):
+		self.schedule = schedule()
 		self.allMessages = []
 		self.lines = []
 		self.bottom_edges = [" "," "]
 		self.overlay = None
-	
+	#does what it says
 	def redoLines(self):
 		newlines = []
 		#get the last terminal line number of messages (worst case)
@@ -271,27 +304,6 @@ class display:
 			except: pass
 			newlines += breaklines(i[0])
 		self.lines = newlines
-	
-	def display(self):
-		size = DIM_Y-RESERVE_LINES-1
-		#justify number of lines
-		lines = self.lines[-size:] + ["" for i in range(size - len(self.lines))]
-
-		#if this is a replacement overlay, display that instead
-		if self.overlay:
-			if self.overlay.replace:
-				self.overlay.display()
-				return
-			self.overlay.display(lines)
-		#main display method: move to top of screen
-		_MOVE_CURSOR(0)
-		#draw each line in lines
-		for i in lines:
-			_DELETE_REST_OF_LINE(i)
-		
-		#fancy line
-		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
-		_DELETE_REST_OF_LINE(CHAR_HSPACE*DIM_X)
 	#add new messages to main output
 	def append(self,newline,args = None):
 		self.allMessages.append((newline,args))
@@ -300,33 +312,63 @@ class display:
 				return
 		except: pass
 		self.lines += breaklines(newline)
+	#display backend
+	def _display(self):
+		size = DIM_Y-RESERVE_LINES-1
+		if size < SIZE_THRESHOLD:
+			raise DisplayException("Terminal size too small")
+		#justify number of lines
+		lines = self.lines[-size:] + ["" for i in range(size - len(self.lines))]
+		#if this is a replacement overlay, display that instead
+		if self.overlay:
+			if self.overlay.replace:
+				self.overlay.display()
+				return
+			self.overlay.display(lines)
+		#main display method: move to top of screen
+		moveCursor()
+		#draw each line in lines
+		for i in lines:
+			printLine(i)
+		
+		#fancy line
+		moveCursor(DIM_Y-RESERVE_LINES)
+		printLine(CHAR_HSPACE*DIM_X)
+	#schedule
+	def display(self):
+		self.schedule(self._display)
 	#display string in input
-	def printinput(self,string):
-		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+1)
-		_DELETE_REST_OF_LINE(string)
-		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
+	def _printinput(self,string):
+		moveCursor(DIM_Y-RESERVE_LINES+1)
+		printLine(string)
+		moveCursor(DIM_Y-RESERVE_LINES)
 		#for some reason, it won't update input drawing (in IME) until I print something
 		print('')
+	def printinput(self,string):
+		self.schedule(self._printinput,string)
 	#display a blurb
-	def printblurb(self,string):
-		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+2)
-		_DELETE_REST_OF_LINE(string)
-		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
+	def _printblurb(self,string):
+		moveCursor(DIM_Y-RESERVE_LINES+2)
+		printLine(string)
+		moveCursor(DIM_Y-RESERVE_LINES)
 		print('')
+	def printblurb(self,string):
+		self.schedule(self._printblurb,string)
 	#display info window
-	def printinfo(self,right,left):
-		_MOVE_CURSOR(DIM_Y-RESERVE_LINES+3)
+	def _printinfo(self,right,left):
+		moveCursor(DIM_Y-RESERVE_LINES+3)
 		self.bottom_edges[0] = left or self.bottom_edges[0]
 		self.bottom_edges[1] = right or self.bottom_edges[1]
 		room = DIM_X - len(self.bottom_edges[0]) - len(self.bottom_edges[1])
+		if room < 1:
+			raise DisplayException("Terminal size too small")
 		print("\x1b[7m{}{}{}\x1b[0m".format(self.bottom_edges[0]," "*room,self.bottom_edges[1]),end="")
-		_MOVE_CURSOR(DIM_Y-RESERVE_LINES)
+		moveCursor(DIM_Y-RESERVE_LINES)
 		print('')
+	def printinfo(self,right,left):
+		self.schedule(self._printinfo,right,left)
 
 #overlays
-class DisplayException(Exception):
-	pass
-
 class overlayBase:
 	def onescape(self):
 		return -1
@@ -352,10 +394,12 @@ class listOverlay(overlayBase):
 			setattr(self,"drawOther",drawOther)
 	
 	def display(self):
-		_MOVE_CURSOR(0)
-		_DELETE_REST_OF_LINE(_BOX_TOP())
+		moveCursor()
+		printLine(_BOX_TOP())
 		size = DIM_Y-RESERVE_LINES-2
 		maxx = DIM_X-2
+		if maxx < 7 or size < 3:
+			raise DisplayException("Terminal size too small")
 		#which portion of the lmaxyist is currently displaced
 		partition = self.it//size
 		#get the partition of the list we're at
@@ -365,6 +409,8 @@ class listOverlay(overlayBase):
 		for i,value in enumerate(subList):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
+			#worst case: (col)(value[0])...(value[1])(col)
+			#		1	2   345	6	  7
 			value = (len(value) > maxx) and value[:half-3] + "..." + value[-half:] or value
 			value += _CLEAR_FORMATTING
 			if hasattr(self,'drawOther'):
@@ -377,13 +423,13 @@ class listOverlay(overlayBase):
 			else:
 				value += _CLEAR_FORMATTING
 
-			_DELETE_REST_OF_LINE(_BOX_PART(value))
+			printLine(_BOX_PART(value))
 		#DIM_Y - RESERVE_LINES is the number of lines
 		#fill out the rest of the overlay
 		for j in range(size-len(subList)):
-			_DELETE_REST_OF_LINE(_BOX_PART(" "))
+			printLine(_BOX_PART(" "))
 		
-		_DELETE_REST_OF_LINE(_BOX_BOTTOM())
+		printLine(_BOX_BOTTOM())
 	#predefined list iteration methods
 	def onKEY_UP(self):
 		self.it -= 1
@@ -405,16 +451,18 @@ class colorOverlay(overlayBase):
 		self.mode = 0
 	#draw replacement
 	def display(self):
-		_MOVE_CURSOR(0)
+		moveCursor()
 		wide = (DIM_X-2)//3 - 1
 		space = DIM_Y-RESERVE_LINES-7
+		if wide < 4 or space < 5:
+			raise DisplayException("Terminal size too small")
 		
 		def centered(x,y):
 			pre = x.rjust((wide+len(x))//2).ljust(wide)
 			if y==self.mode: pre = _SELECTED(pre)
 			return pre
 
-		_DELETE_REST_OF_LINE(_BOX_TOP())
+		printLine(_BOX_TOP())
 		for i in range(space):
 			string = ""
 			#draw on this line? (ratio of space alotted to line number = ratio of number to 255)
@@ -424,16 +472,16 @@ class colorOverlay(overlayBase):
 			#justify (including escape sequence length)
 			just = _BOX_JUST(string)
 
-			_DELETE_REST_OF_LINE(_BOX_NOFORM(string.rjust(just-1).ljust(just)))
+			printLine(_BOX_NOFORM(string.rjust(just-1).ljust(just)))
 		
-		_DELETE_REST_OF_LINE(_BOX_PART(""))
+		printLine(_BOX_PART(""))
 		names = "{}{}{}".format(*[centered(j,i) for i,j in enumerate(self.names)])
 		vals = "{}{}{}".format(*[centered(str(j),i) for i,j in enumerate(self.color)])
-		_DELETE_REST_OF_LINE(_BOX_PART(names)) #4 lines
-		_DELETE_REST_OF_LINE(_BOX_PART(vals)) #3 line
-		_DELETE_REST_OF_LINE(_BOX_PART("")) #2 lines
-		_DELETE_REST_OF_LINE(_BOX_PART(toHexColor(self.color).rjust(int(wide*1.5)+3))) #1 line
-		_DELETE_REST_OF_LINE(_BOX_BOTTOM()) #last line
+		printLine(_BOX_PART(names)) #4 lines
+		printLine(_BOX_PART(vals)) #3 line
+		printLine(_BOX_PART("")) #2 lines
+		printLine(_BOX_PART(toHexColor(self.color).rjust(int(wide*1.5)+3))) #1 line
+		printLine(_BOX_BOTTOM()) #last line
 		
 	#color manipulation: mode represents color selected
 	def onKEY_UP(self):
@@ -457,7 +505,7 @@ class colorOverlay(overlayBase):
 	def onKEY_HOME(self):
 		self.color[self.mode] = 255
 	def onKEY_END(self):
-		self.color[self.mode] = 0
+		 self.color[self.mode] = 0
 	def onKEY_RIGHT(self):
 		self.mode = (self.mode + 1) % 3
 	def onKEY_LEFT(self):
@@ -473,8 +521,12 @@ class inputOverlay(overlayBase):
 	def display(self,lines):
 		start = DIM_Y//2 - 2
 		lines[start] = _BOX_TOP()
+		out = self.prompt + ': '
+		#make sure we're not too long
+		if len(out) > DIM_X:
+			raise DisplayException("Terminal size too small")
 		inp = self.password and '*'*len(self.inpstr) or self.inpstr
-		out = '    ' + self.prompt + ': ' + inp
+		out += inp[:DIM_X-len(out)+2]
 		lines[start+1] = _BOX_PART(out)
 		lines[start+2] = _BOX_BOTTOM()
 	def oninput(self,chars):
@@ -489,7 +541,7 @@ class inputOverlay(overlayBase):
 	#run in alternate thread to get input
 	def waitForInput(self):
 		while not self.done:
-			time.sleep(.3)
+			time.sleep(.1)
 		return self.inpstr
 
 #------------------------------------------------------------------------------
@@ -696,7 +748,6 @@ class main:
 	def loop(self):
 		try:
 			while self.active:
-				dbmsg("GET INPUT")
 				if self.input() == -1:
 					if not self.ins: break
 					self.ins.pop()
@@ -766,6 +817,7 @@ class main:
 		self._chat.overlay = new
 		time.sleep(.01) #for some reason this is too fast otherwise. a hundredth of a second isn't very noticeable anyway
 		self._chat.display()
+		self.updateinfo() #this looks ugly otherwise
 	
 	def start(self,screen,*args):
 		self.screen = screen
