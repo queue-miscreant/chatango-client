@@ -475,10 +475,10 @@ def chatcolors(msg,*args):
 #-------------------------------------------------------------------------------------------------------
 #OPENERS
 #start and daemonize feh (or replaced image viewing program)
-@client.opener("jpeg")
-@client.opener("jpg")
-@client.opener("jpg:large")
-@client.opener("png")
+@client.opener("ext|jpeg")
+@client.opener("ext|jpg")
+@client.opener("ext|jpg:large")
+@client.opener("ext|png")
 def images(cli,link,ext):
 	cli.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
@@ -491,9 +491,9 @@ def images(cli,link,ext):
 		raise Exception("failed to start image display")
 	
 #start and daemonize mpv (or replaced video playing program)
-@client.opener("webm")
-@client.opener("mp4")
-@client.opener("gif")
+@client.opener("ext|webm")
+@client.opener("ext|mp4")
+@client.opener("ext|gif")
 def videos(cli,link,ext):
 	cli.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
@@ -505,7 +505,7 @@ def videos(cli,link,ext):
 	except Exception as exc:
 		raise Exception("failed to start video display")
 
-@client.opener("htmllink")
+@client.opener("link")
 def linked(cli,link):
 	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
@@ -557,7 +557,7 @@ def ignorefilter(*args):
 try:
 	import custom #custom plugins
 except ImportError as exc:
-	dbmsg(exc)
+	pass
 
 if __name__ == '__main__':
 	creds = readFromFile('creds')

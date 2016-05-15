@@ -73,17 +73,27 @@ colorers = []
 commands = {}
 filters = []
 class link_opener:
+	sites = {}
 #	__init__ is like a static __call__
-	def __init__(self,client,link):
+	def __init__(self,client,link,forcelink=False):
 		#extension
 		ext = link[link.rfind(".")+1:].lower()
-		try:
-			if len(ext) <= 4 and hasattr(self,ext):
-				getattr(self, ext)(client,link,ext)
-			else:
-				getattr(self, 'htmllink')(client,link)
-		except AttributeError as exc:
-			pass
+		if forcelink:
+			self.link(client,link)
+			return
+
+		if hasattr(self,ext):
+			getattr(self, ext)(client,link,ext)
+		else:
+			for i,j in self.sites.items():
+				if 1+link.find(i):
+					j(client,link)
+					return
+			getattr(self, 'link')(client,link)
+	#raise exception if not overloaded
+	def link(self):
+		raise Exception("No regular link handler defined")
+
 #decorators for containers
 def colorer(func):
 	colorers.append(func)
@@ -95,7 +105,10 @@ def command(commandname):
 	return wrapper
 def opener(extension):
 	def wrap(func):
-		setattr(link_opener,extension,staticmethod(func))
+		args = extension.split("|")
+		if args[0] == "ext": setattr(link_opener,args[1],staticmethod(func))
+		elif args[0] == "site": link_opener.sites[args[1]] = func
+		elif extension == "link": setattr(link_opener,extension,staticmethod(func))
 		#allow stacking wrappers
 		return func
 	return wrap
@@ -356,7 +369,7 @@ class display:
 		self.schedule(self._printblurb,string)
 	#display info window
 	def _printinfo(self,right,left):
-		moveCursor(DIM_Y-RESERVE_LINES+3)
+		moveCursor(DIM_Y)
 		self.bottom_edges[0] = left or self.bottom_edges[0]
 		self.bottom_edges[1] = right or self.bottom_edges[1]
 		room = DIM_X - len(self.bottom_edges[0]) - len(self.bottom_edges[1])
@@ -386,12 +399,14 @@ class overlayBase:
 
 class listOverlay(overlayBase):
 	replace = True
-	def __init__(self,outList,drawOther = None):
+	def __init__(self,outList,drawOther = None,modes = [""]):
 		self.it = 0
 		self.mode = 0
 		self.list = outList
 		if drawOther:
 			setattr(self,"drawOther",drawOther)
+		self.modes = modes
+		self.nummodes = len(modes)
 	
 	def display(self):
 		moveCursor()
@@ -429,7 +444,11 @@ class listOverlay(overlayBase):
 		for j in range(size-len(subList)):
 			printLine(_BOX_PART(" "))
 		
-		printLine(_BOX_BOTTOM())
+		if self.nummodes - 1:
+			printmode = self.modes[self.mode]
+			printLine("{}{}{}{}".format(CHAR_BLCORNER,printmode,CHAR_HSPACE*(maxx-len(printmode)),CHAR_BRCORNER))
+		else:
+			printLine(_BOX_BOTTOM())
 	#predefined list iteration methods
 	def onKEY_UP(self):
 		self.it -= 1
@@ -437,11 +456,10 @@ class listOverlay(overlayBase):
 	def onKEY_DOWN(self):
 		self.it += 1
 		self.it %= len(self.list)
-	#loop until escape
-	def loop(self):
-		self.display()
-		while self.input() != -1:
-			self.display()
+	def onKEY_RIGHT(self):
+		self.mode = (self.mode + 1) % self.nummodes
+	def onKEY_LEFT(self):
+		self.mode = (self.mode - 1) % self.nummodes
 
 class colorOverlay(overlayBase):
 	replace = True
@@ -520,13 +538,15 @@ class inputOverlay(overlayBase):
 		self.done = False
 	def display(self,lines):
 		start = DIM_Y//2 - 2
+		room = DIM_X-2
 		lines[start] = _BOX_TOP()
 		out = self.prompt + ': '
 		#make sure we're not too long
-		if len(out) > DIM_X:
+		lenout = len(out)
+		if lenout > room-2:
 			raise DisplayException("Terminal size too small")
 		inp = self.password and '*'*len(self.inpstr) or self.inpstr
-		out += inp[:DIM_X-len(out)+2]
+		out += inp[(len(inp)+lenout > room) and (len(inp)-room+lenout):]
 		lines[start+1] = _BOX_PART(out)
 		lines[start+2] = _BOX_BOTTOM()
 	def oninput(self,chars):
@@ -712,11 +732,12 @@ class main:
 		def select(me):
 			def ret():
 				if not len(self.lastlinks): return
-				current = self.lastlinks[len(self.lastlinks) - 1 - me.it]
+				current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
+				current = self.lastlinks[int(current)-1] #this enforces the wanted link is selected
 				if not me.mode:
 					link_opener(self,current)
 				else:
-					paste(current)
+					link_opener(self,current,True)
 				#exit
 				return -1
 			return ret
@@ -726,7 +747,7 @@ class main:
 		#link number: link, but in reverse
 		dispList = ["{}: {}".format(len(self.lastlinks)-i,j) for i,j in enumerate(dispList)] 
 	
-		box = listOverlay(dispList)
+		box = listOverlay(dispList,None,["open","force"])
 		box.addKeys({
 			'enter':select(box),
 		})
@@ -739,7 +760,6 @@ class main:
 		self._chat.redoLines()
 		self.updateinput()
 		self.updateinfo()
-		self.newBlurb()
 		self._chat.display()
 
 	#=------------------------------=
@@ -857,4 +877,6 @@ def start(bot_object,main_function):
 	curses.wrapper(inp.start, bot_thread, printtime)
 	#end the threads
 	inp.active = False
-	bot_object.connected = False
+	try:
+		bot_object.stop()
+	except: pass
