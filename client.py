@@ -89,9 +89,9 @@ class link_opener:
 				if 1+link.find(i):
 					j(client,link)
 					return
-			getattr(self, 'link')(client,link)
+			getattr(self, 'default')(client,link)
 	#raise exception if not overloaded
-	def link(self):
+	def default(self):
 		raise Exception("No regular link handler defined")
 
 #decorators for containers
@@ -531,11 +531,12 @@ class colorOverlay(overlayBase):
 
 class inputOverlay(overlayBase):
 	replace = False
-	def __init__(self,prompt,password = False):
-		self.prompt = prompt
-		self.password = password
+	def __init__(self,prompt,password = False,end=False):
 		self.inpstr = ''
 		self.done = False
+		self.prompt = prompt
+		self.password = password
+		self.end = end
 	def display(self,lines):
 		start = DIM_Y//2 - 2
 		room = DIM_X-2
@@ -557,7 +558,10 @@ class inputOverlay(overlayBase):
 		self.done = True
 		return -1
 	def onescape(self):
-		raise KeyboardInterrupt
+		if self.end:
+			raise SystemExit
+		self.inpstr = ''
+		return -1
 	#run in alternate thread to get input
 	def waitForInput(self):
 		while not self.done:
@@ -865,11 +869,21 @@ def dbmsg(*args):
 		a.write("\n")
 		a.close()
 
+#catch error and end client
+def catcherr(client,fun,*args):
+	def wrap():
+		try:
+			fun(*args)
+		except Exception as e:
+			dbmsg("HALTED DUE TO",exc)
+			client.active = False
+	return wrap
+
 def start(bot_object,main_function):
 	inp = main()
 	bot_object.wrap(inp)
 	#daemonize functions
-	bot_thread = Thread(target=main_function)
+	bot_thread = Thread(target=catcherr(inp,main_function))
 	bot_thread.daemon = True
 	printtime = Thread(target=inp.timeloop)
 	printtime.daemon = True

@@ -164,13 +164,15 @@ class chat_bot(chlib.ConnectionManager):
 	
 	def main(self):
 		for num,i in enumerate(['user','passwd','room']):
+			#skip if supplied
 			if creds.get(i):
 				continue
 			prompt = ['username', 'password', 'group name'][num]
-			inp = client.inputOverlay("Enter your " + prompt, num == 1)
+			inp = client.inputOverlay("Enter your " + prompt, num == 1,True)
 			self.parent.addOverlay(inp)
 			creds[i] = inp.waitForInput();
 
+		#wait until now to initialize the object, since now the information exists
 		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
 
 		self.addGroup(creds['room'])
@@ -505,17 +507,17 @@ def videos(cli,link,ext):
 	except Exception as exc:
 		raise Exception("failed to start video display")
 
-@client.opener("link")
+@client.opener("default")
 def linked(cli,link):
 	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
-	savout = os.dup(1)
-	os.close(1)
-	os.open(os.devnull, os.O_RDWR)
+	savout = os.dup(1)	#get another header for stdout
+	os.close(1)		#close stdout briefly because open_new_tab doesn't pipe stdout to null
+	os.open(os.devnull, os.O_RDWR)	#open devnull for writing
 	try:
-		open_new_tab(link)
+		open_new_tab(link)	#do thing
 	finally:
-		os.dup2(savout, 1)
+		os.dup2(savout, 1)	#reopen stdout
 
 #-------------------------------------------------------------------------------------------------------
 #COMMANDS

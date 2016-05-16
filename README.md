@@ -13,7 +13,6 @@ FEATURES:
 --------------------------
 >##	Tab completion
 >##	Terminal-resize compatible
->##	Links are mouse-clickable
 >##	Tracking images and links posted (F2)
 >##	View members of a certain room (F3)
 >##	Alter formatting sent to the chatango (F4)
@@ -22,30 +21,22 @@ FEATURES:
 >	
 >##	Alterable "colorers"
 >###		Color text matching a regex or so
->## Chat filters based on message attributes
+>##	Chat filters based on message attributes
+>##	Custom script: http://puu.sh/oTHh0/be6418c801.py
+>###		Requires livestreamer and youtube-dl
 
 DEPENDENCIES
 --------------------------
->###    Feh image viewer
->###    MPV
 >###    Python 3
 >###    Curses (You probably already have this)
+>##	(Technically these are optional since you can change how they open)
+>###    Feh image viewer
+>###    MPV
 
 ""API""
 --------------------------
 >##	It's nowhere near comprehensive enough to be called an API,
 >##	but this section might help demonstrate the abilities of the client.
->#	__client.coloring__
->##		A container that holds a string to be colored.
->###		Members:
->			str:		String being colored
->			default:	Default color to be applied
->###		Methods:
->			__call__():	Return the string contained
->			prepend(new):	Prepend new to the message
->			append(new):	Append new to the message
->			insertColor(position, color = self.default, add = True):
->				Insert color pair "color" at position "position". "add" signifies whether to use the predefined colors (default don't)
 
 >#	__DECORATORS__
 >##	client.colorer
@@ -81,16 +72,49 @@ DEPENDENCIES
 >			*args:	Same arguments as in client.colorer
 
 >##	__CLASSES__
->###	client.listinput(screen,string iterable)
+>#	__client.coloring__
+>##		A container that holds a string to be colored.
+>###		Members:
+>			str:		String being colored
+>			default:	Default color to be applied
+>###		Methods:
+>			__call__():	Return the string contained
+>			prepend(new):	Prepend new to the message
+>			append(new):	Append new to the message
+>			insertColor(position, color = self.default, add = True):
+>				Insert color pair "color" at position "position". "add" signifies whether to use the predefined colors (default don't)
+
+>###	client.listOverlay(screen,string iterable,drawOther = None,modes = [""])
 >###		Class that draws a list that covers the chat.
->		
->###	client.colorinput(screen,string iterable)
+>		string iterable:	List to draw. These will be properly formatted with appropriate spacing.
+>		drawOther:		Extra coloring to be done on each entry in the list before displaying
+>		modes:			List of modes available. If more than two exist, then the bottom line of the box will display the mode
+		
+>###	client.colorOverlay(screen,initcolor)
 >###		Class that draws a color selector over the chat.
->		
+
+>###	client.inputOverlay(self,prompt,password = False, end=False):
+>###		Class that draws an input box over (but not instead of) chat.
+>		prompt:			Prompt to supply to the overlay
+>		password:		Whether to draw input as stars, obfuscating what is typed
+>		end:			Whether to raise SystemExit, ending the program
+		
 >###	*See how these are called in chatango.py, such as in F3()*
 
 CHANGELOG
 --------------------------
+># v4.1		*2016/5/16*
+>##	Added "modes" for listinput. Allows different functions to handle data depending on current
+>##	Changed F2 menu to pull number from string. This confirms the wanted link is selected
+>##	Altered the way the client starts up. client.start expects the object that retreives messages to start,
+>##		That object's main method
+>##	link_openers have two types now:
+>###		ext|(extension name):	Open extension with 'extension name'
+>###		site|(pattern):		Open link with pattern 'pattern'
+>###		default:		Default
+>##	New input window. Due to the new start feature, it is now possible to start the client before the chat bot.
+>##	Exceptions in the chat bot thread (ie, the functionality supplied to client) should now halt the client
+
 ># v4.0		*2016/5/10*
 >##	Completely new display and input methods
 >##	No longer relies on curses drawing; everything is done with variations of print()
