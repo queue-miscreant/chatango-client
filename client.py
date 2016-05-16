@@ -79,7 +79,7 @@ class link_opener:
 		#extension
 		ext = link[link.rfind(".")+1:].lower()
 		if forcelink:
-			self.link(client,link)
+			self.default(client,link)
 			return
 
 		if hasattr(self,ext):
@@ -103,12 +103,12 @@ def command(commandname):
 	def wrapper(func):
 		commands[commandname] = func
 	return wrapper
-def opener(extension):
+def opener(extension = 'default'):
 	def wrap(func):
 		args = extension.split("|")
 		if args[0] == "ext": setattr(link_opener,args[1],staticmethod(func))
 		elif args[0] == "site": link_opener.sites[args[1]] = func
-		elif extension == "link": setattr(link_opener,extension,staticmethod(func))
+		elif extension == "default": setattr(link_opener,extension,staticmethod(func))
 		#allow stacking wrappers
 		return func
 	return wrap

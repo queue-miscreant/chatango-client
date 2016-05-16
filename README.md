@@ -22,7 +22,7 @@ FEATURES:
 >##	Alterable "colorers"
 >###		Color text matching a regex or so
 >##	Chat filters based on message attributes
->##	Custom script: http://puu.sh/oTHh0/be6418c801.py
+>##	Custom script: http://puu.sh/oTJR8/ca83bf5e85.py
 >###		Requires livestreamer and youtube-dl
 
 DEPENDENCIES
@@ -59,12 +59,12 @@ DEPENDENCIES
 >			arglist:	Space-delimited values following the command name
 
 
->##	client.opener(extension)
->###		Function run on attempt to open link. Special case 'htmllink' is run on unhandled extensions
+>##	client.opener(extension = 'default')
+>###		Function run on attempt to open link. Special case 'default' is run on unhandled extensions
 >###		Decorated function arguments:
 >			client:	The client object. Passed so that blurbs can be printed from within functions
 >			link:	The link retrieved
->			ext:	(Optional for 'htmllink') The extension captured
+>			ext:	(Optional for 'default') The extension captured
 
 >##	client.chatfilter
 >###		Function run on attempt to push message. If any filter returns false, the message is not displayed
@@ -72,7 +72,7 @@ DEPENDENCIES
 >			*args:	Same arguments as in client.colorer
 
 >##	__CLASSES__
->#	__client.coloring__
+>#	client.coloring
 >##		A container that holds a string to be colored.
 >###		Members:
 >			str:		String being colored

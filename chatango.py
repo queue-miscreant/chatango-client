@@ -507,17 +507,20 @@ def videos(cli,link,ext):
 	except Exception as exc:
 		raise Exception("failed to start video display")
 
-@client.opener("default")
+@client.opener
 def linked(cli,link):
 	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
 	savout = os.dup(1)	#get another header for stdout
+	saverr = os.dup(2)	#get another header for stderr
 	os.close(1)		#close stdout briefly because open_new_tab doesn't pipe stdout to null
+	os.close(2)
 	os.open(os.devnull, os.O_RDWR)	#open devnull for writing
 	try:
 		open_new_tab(link)	#do thing
 	finally:
 		os.dup2(savout, 1)	#reopen stdout
+		os.dup2(saverr, 2)
 
 #-------------------------------------------------------------------------------------------------------
 #COMMANDS
