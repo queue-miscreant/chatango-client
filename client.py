@@ -79,7 +79,7 @@ class link_opener:
 		#extension
 		ext = link[link.rfind(".")+1:].lower()
 		if forcelink:
-			self.default(client,link)
+			getattr(self, 'default')(client,link)
 			return
 
 		if hasattr(self,ext):
