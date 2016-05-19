@@ -91,7 +91,7 @@ class link_opener:
 					return
 			getattr(self, 'default')(client,link)
 	#raise exception if not overloaded
-	def default(self):
+	def default(*args):
 		raise Exception("No regular link handler defined")
 
 #decorators for containers

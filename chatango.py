@@ -507,7 +507,7 @@ def videos(cli,link,ext):
 	except Exception as exc:
 		raise Exception("failed to start video display")
 
-@client.opener
+@client.opener()
 def linked(cli,link):
 	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
