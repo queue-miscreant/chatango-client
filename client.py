@@ -888,7 +888,16 @@ def start(bot_object,main_function):
 	printtime = Thread(target=inp.timeloop)
 	printtime.daemon = True
 	#start
-	curses.wrapper(inp.start, bot_thread, printtime)
+	scr = curses.initscr()
+	curses.noecho()
+	curses.cbreak()
+	scr.keypad(1)
+	#okay actually start 
+	inp.start(scr, bot_thread, printtime)
+	curses.echo()
+	curses.nocbreak()
+	scr.keypad(0)
+	curses.endwin()
 	#end the threads
 	inp.active = False
 	try:

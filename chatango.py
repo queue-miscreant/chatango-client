@@ -48,6 +48,12 @@ FONT_FACES = ["Arial",
 		  ]
 FONT_SIZES = [9,10,11,12,13,14]
 
+HTML_CODES = [["&#39;","'"],
+	 ["&gt;",">"],
+	 ["&lt;","<"],
+	 ["&quot;",'"'],
+	 ["&amp;",'&']]
+
 IMG_PATH = "feh"
 MPV_PATH = "mpv"
 
@@ -58,13 +64,6 @@ filtered_channels = [0, #white
 			0, #red
 			0, #blue
 			0] #both
-
-def getColor(name,rot = 6,init = 6,split = 109):
-	total = init
-	for i in name:
-		n = ord(i)
-		total ^= (n > split) and n or ~n
-	return (total+rot)%11
 
 def init_colors():
 	ordering = (
@@ -116,26 +115,20 @@ def formatRaw(raw):
 	while len(raw) and raw[-1] == "\n":
 		raw = raw[:-1]
 	#thumbnail fix in chatango
-	for i in re.finditer(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)",raw):
-		cap = i.regs[0]
-		raw = raw[:cap[0]] + i.group(1) + 'l' + i.group(2) + raw[cap[1]:]
+	raw = re.subn(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)",r"\1l\2",raw)[0]
 
 	return raw
 
 #fucking HTML
 def decodeHtml(raw,encode=0):
-	htmlCodes = [["&#39;","'"],
-		 ["&gt;",">"],
-		 ["&lt;","<"],
-		 ["&quot;",'"'],
-		 ["&amp;",'&']]
-	if encode: htmlCodes = reversed(htmlCodes)
-	for i in htmlCodes:
+	for i in (encode and reversed(HTML_CODES) or HTML_CODES):
 		if encode: raw = raw.replace(i[1],i[0])
 		else: raw = raw.replace(i[0],i[1])
 	#decode nbsps
 	if not encode:
 		raw = raw.replace("&nbsp;"," ")
+	else:
+		raw = raw.replace("\n","<br/>")
 	
 	return raw
 
@@ -205,7 +198,7 @@ class chat_bot(chlib.ConnectionManager):
 		try:
 			group = getattr(self,'joinedGroup')
 			text = decodeHtml(text,1)
-			group.sendPost(text.replace("\n","<br/>"),self.channel)
+			group.sendPost(text,self.channel)
 		except AttributeError:
 			return
 	
@@ -422,6 +415,13 @@ def F5(self):
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
 #color by user's name
+def getColor(name,rot = 6,init = 6,split = 109):
+	total = init
+	for i in name:
+		n = ord(i)
+		total ^= (n > split) and n or ~n
+	return (total+rot)%11
+
 @client.colorer
 def defaultcolor(msg,coldic,*args):
 	msg.default = getColor(msg()[:msg().find(':')])
@@ -435,10 +435,12 @@ def greentext(msg,*args):
 	for no,line in enumerate(lines):
 		try:
 			#user:
-			begin = re.match(r"^\w+?: ",line).end(0)
+			begin = re.match(r"^[!#]?\w+?: ",line).end(0)
 			#@user
-			reply = re.match(r"^@\w+? ",line[begin:])
-			if reply: begin += reply.end(0)
+			reply = True
+			while reply:
+				reply = re.match(r"^@\w+? ",line[begin:])
+				if reply: begin += reply.end(0)
 			tracker += msg.insertColor(0)
 		except:
 			begin = 0
