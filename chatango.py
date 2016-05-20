@@ -20,13 +20,7 @@ Options:
 	""")
 	exit()
 	
-#try importing client
-try:
-	import client
-	from client import dbmsg
-except ImportError:
-	print("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
-	exit()
+import client
 import chlib
 from threading import Thread
 import subprocess

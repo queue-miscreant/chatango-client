@@ -1,7 +1,11 @@
 from os import environ
 import re
 import time
-import curses
+try:
+	import curses
+except ImportError:
+	print("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
+	raise SystemExit
 from threading import Thread
 
 environ.setdefault('ESCDELAY', '25')
@@ -695,9 +699,11 @@ class main:
 			self.text.clear()
 			self.text.appendhist(text)
 			#if it's a command
-			if text[0] == '~' and ' ' in text:
+			if text[0] == '~':
 				try:
-					command = commands[text[1:text.find(' ')]]
+					space = text.find(' ')
+					command = space == -1 and text[1:] or text[1:text.find(' ')]
+					command = commands[command]
 					command(self,text[text.find(' ')+1:].split(' '))
 				finally:
 					return
