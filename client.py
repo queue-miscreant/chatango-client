@@ -1,4 +1,6 @@
 from os import environ
+import sys
+import traceback
 import re
 import time
 try:
@@ -9,6 +11,9 @@ except ImportError:
 from threading import Thread
 
 environ.setdefault('ESCDELAY', '25')
+
+active = False
+lastlinks = []
 
 WORD_RE = re.compile("[^ ]* ")
 ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")
@@ -118,7 +123,8 @@ def opener(extension = 'default'):
 	return wrap
 
 #add links to a list
-def parseLinks(raw,lastlinks):
+def parseLinks(raw):
+	global lastlinks
 	newLinks = []
 	#look for whole word links starting with http:// or https://
 	newLinks = [i for i in re.findall("(https?://.+?\\.[^ \n]+)[\n ]",raw+" ")]
@@ -152,6 +158,16 @@ class coloring:
 		self.str = self.str[:p] + c + self.str[p:]
 		#return length of c to adjust tracker variables in colorers
 		return len(c)
+	#add effect to string (if test is true)
+	def addEffect(self, number, test = True):
+		self.str = (test and _EFFECTS[number] or "") + self.str
+	#most recent color before end
+	def findColor(self,end):
+		lastcolor = {end-i.end(0):i.group(0) for i in _LAST_COLOR_RE.finditer(self.str) if (end-i.end(0))>=0}
+		try:
+			return lastcolor[min(lastcolor)]
+		except:
+			return ''
 	#prebuilts
 	def prepend(self,new):
 		self.str = new + self.str
@@ -159,9 +175,6 @@ class coloring:
 		self.str = self.str + new 
 	def ljust(self,spacing):
 		self.str = self.str.ljust(spacing)
-	#add effect to string (if test is true)
-	def addEffect(self, number, test = True):
-		self.str = (test and _EFFECTS[number] or "") + self.str
 
 def definepair(fore, bold = None, back = 'none'):
 	global _COLOR_PAIRS
@@ -169,14 +182,6 @@ def definepair(fore, bold = None, back = 'none'):
 	pair += bold and ";1" or ";22"
 	pair += ';4%d' % _COLORS.index(back) or ""
 	_COLOR_PAIRS.append(pair+'m')
-
-#most recent color before start
-def findcolor(message,end):
-	lastcolor = {end-i.end(0):i.group(0) for i in _LAST_COLOR_RE.finditer(message) if (end-i.end(0))>=0}
-	try:
-		return lastcolor[min(lastcolor)]
-	except:
-		return ''
 
 #clear formatting (reverse, etc) after each message
 @colorer
@@ -399,7 +404,10 @@ class overlayBase:
 			else:
 				setattr(self,"on"+_CURSES_KEYS[i],j)
 	def addResize(self,other):
-		setattr(self,"onresize",other.onresize)
+		setattr(self,"onresize",other.doResize)
+	
+	def post(self):
+		pass
 
 class listOverlay(overlayBase):
 	replace = True
@@ -483,17 +491,15 @@ class colorOverlay(overlayBase):
 			pre = x.rjust((wide+len(x))//2).ljust(wide)
 			if y==self.mode: pre = _SELECTED(pre)
 			return pre
-
 		printLine(_BOX_TOP())
 		for i in range(space):
 			string = ""
-			#draw on this line? (ratio of space alotted to line number = ratio of number to 255)
+			#draw on this line (ratio of space alotted to line number = ratio of number to 255)
 			for j in range(3):
 				string += ((space-i)*255 < (self.color[j]*space)) and _COLOR_PAIRS[j+2] or ""
 				string += " " * wide + _CLEAR_FORMATTING + " "
 			#justify (including escape sequence length)
 			just = _BOX_JUST(string)
-
 			printLine(_BOX_NOFORM(string.rjust(just-1).ljust(just)))
 		
 		printLine(_BOX_PART(""))
@@ -563,7 +569,9 @@ class inputOverlay(overlayBase):
 		return -1
 	def onescape(self):
 		if self.end:
-			raise SystemExit
+			#raising SystemExit is dodgy, since curses.endwin might now get called
+			global active
+			active = False
 		self.inpstr = ''
 		return -1
 	#run in alternate thread to get input
@@ -571,6 +579,96 @@ class inputOverlay(overlayBase):
 		while not self.done:
 			time.sleep(.1)
 		return self.inpstr
+
+class mainOverlay(overlayBase):
+	replace = False
+	#dummy send function
+	send = lambda x: None
+	chatbot = None
+	def __init__(self,parent):
+		self.text = scrollable(DIM_X-1)
+		self.parent = parent
+	#backspace
+	def onbackspace(self):
+		self.text.backspace()
+	#enter
+	def onenter(self):
+		#if it's not just spaces
+		text = self.text()
+		if text.count(" ") != len(text):
+			self.text.clear()
+			self.text.appendhist(text)
+			#if it's a command
+			if text[0] == '~':
+				try:
+					space = text.find(' ')
+					command = space == -1 and text[1:] or text[1:text.find(' ')]
+					command = commands[command]
+					command(self,text[text.find(' ')+1:].split(' '))
+				finally:
+					return
+			self.send(text.replace(r'\n','\n'))
+			
+	#any other key
+	def oninput(self,chars):
+		#allow unicode input
+		self.text.append(bytes(chars).decode())
+	#home
+	def onKEY_SHOME(self):
+		self.text.clear()
+		self.shistory = 0
+	#arrow keys
+	def onKEY_LEFT(self):
+		self.text.movepos(-1)
+	def onKEY_RIGHT(self):
+		self.text.movepos(1)
+	def onKEY_UP(self):
+		self.text.nexthist()
+	def onKEY_DOWN(self):
+		self.text.prevhist()
+	def onKEY_HOME(self):
+		self.text.home()
+	def onKEY_END(self):
+		self.text.end()
+	#shifted delete = backspace word
+	def onaltdel(self):
+		self.text.delword()
+	#f2
+	def onKEY_F2(self):
+		#special wrapper to inject functionality for newlines in the list
+		def select(me):
+			def ret():
+				if not len(lastlinks): return
+				current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
+				current = lastlinks[int(current)-1] #this enforces the wanted link is selected
+				if not me.mode:
+					link_opener(self.parent,current)
+				else:
+					link_opener(self.parent,current,True)
+				#exit
+				return -1
+			return ret
+		
+		#take out the protocol
+		dispList = [i.replace("http://","").replace("https://","") for i in reversed(lastlinks)]
+		#link number: link, but in reverse
+		dispList = ["{}: {}".format(len(lastlinks)-i,j) for i,j in enumerate(dispList)] 
+	
+		box = listOverlay(dispList,None,["open","force"])
+		box.addKeys({
+			'enter':select(box),
+		})
+		self.addOverlay(box)
+	#resize
+	def onresize(self):
+		self.parent.doResize()
+
+	def display(self,*args):
+		pass
+
+	#window frontend
+	def addOverlay(self,new):
+		self.parent.addOverlay(new)
 
 #------------------------------------------------------------------------------
 #INPUT
@@ -653,24 +751,30 @@ class BotException(Exception):
 
 #main class 
 class main:
-	lastlinks = []
-	chatBot = None
 	screen = None
 	last = 0
 	def __init__(self):
-		#text input
-		self.text = scrollable(DIM_X-1)
-		#input stack
-		self.ins = []
-		self.active = True
 		self._chat = display()
+		#input stack
+		self.ins = [mainOverlay(self)]
+
+	#checks for ins and ins[0] being a mainOverlay
+	def _check_main_input(self,onerror = 'No main input window'):
+				#then there's guaranteed at least one element
+		return self.ins and type(self.ins[0]) == mainOverlay
+
 
 	#=------------------------------=
 	#|	INPUT METHODS   	|
 	#=------------------------------=
 	#crux of input
 	def input(self):
-		chars = [self.screen.getch()]
+		try:
+			chars = [self.screen.getch()]
+		except KeyboardInterrupt:
+			global active
+			active = False
+			return
 		#get as many chars as possible
 		self.screen.nodelay(1)
 		next = 0
@@ -678,124 +782,49 @@ class main:
 			next = self.screen.getch()
 			chars.append(next)
 		self.screen.nodelay(0)
+
 		curseAction = _CURSES_KEYS.get(chars[0])
 		#delegate to display stack
-		if self.ins:
-			self = self.ins[-1]
+		self = self.ins[-1]
 		#run onKEY function
 		if curseAction and hasattr(self,"on"+curseAction):
 			return getattr(self,"on"+curseAction)()
 		#otherwise, just grab input characters
 		if chars[0] in range(32,255) and hasattr(self,"oninput"):
 			getattr(self,"oninput")(chars[:-1])
-	#backspace
-	def onbackspace(self):
-		self.text.backspace()
-	#enter
-	def onenter(self):
-		#if it's not just spaces
-		text = self.text()
-		if text.count(" ") != len(text):
-			self.text.clear()
-			self.text.appendhist(text)
-			#if it's a command
-			if text[0] == '~':
-				try:
-					space = text.find(' ')
-					command = space == -1 and text[1:] or text[1:text.find(' ')]
-					command = commands[command]
-					command(self,text[text.find(' ')+1:].split(' '))
-				finally:
-					return
-			try: self.chatBot.tryPost(text.replace(r'\n','\n'))
-			except: raise BotException("Attempted to send post with no bot")
-	#any other key
-	def oninput(self,chars):
-		#allow unicode input
-		self.text.append(bytes(chars).decode())
-	#escape
-	def onescape(self):
-		return -1
-	#home
-	def onKEY_SHOME(self):
-		self.text.clear()
-		self.shistory = 0
-	#arrow keys
-	def onKEY_LEFT(self):
-		self.text.movepos(-1)
-	def onKEY_RIGHT(self):
-		self.text.movepos(1)
-	def onKEY_UP(self):
-		self.text.nexthist()
-	def onKEY_DOWN(self):
-		self.text.prevhist()
-	def onKEY_HOME(self):
-		self.text.home()
-	def onKEY_END(self):
-		self.text.end()
-	#shifted delete = backspace word
-	def onaltdel(self):
-		self.text.delword()
-	#f2
-	def onKEY_F2(self):
-		#special wrapper to inject functionality for newlines in the list
-		def select(me):
-			def ret():
-				if not len(self.lastlinks): return
-				current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
-				current = self.lastlinks[int(current)-1] #this enforces the wanted link is selected
-				if not me.mode:
-					link_opener(self,current)
-				else:
-					link_opener(self,current,True)
-				#exit
-				return -1
-			return ret
-		
-		#take out the protocol
-		dispList = [i.replace("http://","").replace("https://","") for i in reversed(self.lastlinks)]
-		#link number: link, but in reverse
-		dispList = ["{}: {}".format(len(self.lastlinks)-i,j) for i,j in enumerate(dispList)] 
-	
-		box = listOverlay(dispList,None,["open","force"])
-		box.addKeys({
-			'enter':select(box),
-		})
-		self.addOverlay(box)
-	#resize
-	def onresize(self):
+
+	def doResize(self):
 		global DIM_X,DIM_Y
 		DIM_Y, DIM_X = self.screen.getmaxyx()
-		self.text.width = DIM_X-1
 		self._chat.redoLines()
 		self.updateinput()
 		self.updateinfo()
 		self._chat.display()
+		if self._check_main_input():
+			self.ins[0].text.width = DIM_X-1
 
 	#=------------------------------=
 	#|	Loop Frontends		|
 	#=------------------------------=
 	def loop(self):
-		try:
-			while self.active:
-				if self.input() == -1:
-					if not self.ins: break
-					self.ins.pop()
-					self._chat.overlay = (None if not self.ins else self.ins[-1])
-					self.onresize()
-					
-				if self.ins:
-					self._chat.display()
-				else:
-					self.updateinput()
-		except KeyboardInterrupt:
-			pass
+		while active and self.ins:
+			if self.input() == -1:
+				self.ins.pop()
+				if not self.ins: break #insurance
+				self._chat.overlay = self.ins[-1]
+				self.doResize()
+				
+			if len(self.ins)-1:
+				self._chat.display()
+			else:
+				self.updateinput()
+			dbmsg(self.ins)
 		
 	#threaded function that prints the current time every 10 minutes
 	#also handles erasing blurbs
 	def timeloop(self):
 		i = 0
-		while self.active:
+		while active:
 			time.sleep(2)
 			i+=1
 			if time.time() - self.last > 4:
@@ -812,16 +841,6 @@ class main:
 	def msgSystem(self, base):
 		self._chat.append(_COLOR_PAIRS[1]+base+_CLEAR_FORMATTING)
 		self._chat.display()
-	#parse a message and color it
-	def msgPost(self, post, *args):
-		parseLinks(post,self.lastlinks)
-		post = coloring(post)
-		#empty dictionary to start
-		for i in colorers:
-			i(post,*args)
-		#push the message and move the cursor back to the input window
-		self._chat.append(post(),list(args))
-		self._chat.display()
 	#push a system message of the time
 	def msgTime(self, numtime = None, predicate=""):
 		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
@@ -830,40 +849,66 @@ class main:
 	def newBlurb(self,message = ""):
 		self.last = time.time()
 		self._chat.printblurb(message)
+	#parse a message and color it
+	def _msgPost(self,post,*args):
+		parseLinks(post)
+		post = coloring(post)
+		#empty dictionary to start
+		for i in colorers:
+			i(post,*args)
+		#push the message and move the cursor back to the input window
+		self._chat.append(post(),list(args))
+		self._chat.display()
+	#thread a post
+	def msgPost(self, post, *args):
+		addpost = Thread(target=self._msgPost,args=(post,*args))
+		addpost.start()
 	#update input
 	def updateinput(self):
-		self._chat.printinput(self.text.display())
+		text = ""
+		if self._check_main_input():
+			text = self.ins[0].text.display()
+		self._chat.printinput(text)
 	def updateinfo(self,right=None,left=None):
 		self._chat.printinfo(right,left)
 
-	#unget to exit loop
-	def unget(self,char="\x1b"):
-		curses.ungetch(char)
-
-	#window frontend
 	def addOverlay(self,new):
 		new.addResize(self)
 		self.ins.append(new)
 		self._chat.overlay = new
-		time.sleep(.01) #for some reason this is too fast otherwise. a hundredth of a second isn't very noticeable anyway
+		time.sleep(.01) #for some reason this is too fast otherwise; a hundredth of a second isn't very noticeable anyway
 		self._chat.display()
 		self.updateinfo() #this looks ugly otherwise
+
+	def setBot(self, chatbot, sendfunc):
+		if not self._check_main_input(): raise BotException("No place to set send function")
+		self.ins[0].chatbot = chatbot
+		self.ins[0].send = sendfunc
+
+	def onerr(self):
+		global active
+		active = False
+		self.msgSystem("An error occurred. Press any button to exit...")
+	
 	
 	def start(self,screen,*args):
+		global active
+		active = True
 		self.screen = screen
-		self.onresize()
+		self.doResize()
 		curses.curs_set(0)
 		for i in args:
 			i.start()
 		self.loop()
+		active = False
 
 #wrapper for adding keys to the main interface
 def onkey(keyname):
 	def wrapper(func):
 		if type(keyname) == str:
-			setattr(main,"on"+keyname,func)
+			setattr(mainOverlay,"on"+keyname,func)
 		else:
-			setattr(main,"on"+_CURSES_KEYS[keyname],func)
+			setattr(mainOverlay,"on"+_CURSES_KEYS[keyname],func)
 	return wrapper
 
 #------------------------------------------------------------------------------
@@ -881,11 +926,12 @@ def catcherr(client,fun,*args):
 		try:
 			fun(*args)
 		except Exception as e:
-			dbmsg("HALTED DUE TO",exc)
-			client.active = False
+			dbmsg("HALTED DUE TO")
+			dbmsg(''.join(traceback.format_exception(*sys.exc_info())))
+			client.onerr()
 	return wrap
 
-def start(bot_object,main_function):
+def start(bot_object,main_function,after_function):
 	inp = main()
 	bot_object.wrap(inp)
 	#daemonize functions
@@ -900,12 +946,8 @@ def start(bot_object,main_function):
 	scr.keypad(1)
 	#okay actually start 
 	inp.start(scr, bot_thread, printtime)
-	curses.echo()
-	curses.nocbreak()
-	scr.keypad(0)
-	curses.endwin()
-	#end the threads
-	inp.active = False
 	try:
-		bot_object.stop()
+		after_function()
 	except: pass
+	curses.echo(); curses.nocbreak(); scr.keypad(0)
+	curses.endwin()

@@ -132,7 +132,7 @@ class Group(object):
 
 		self.manager = manager
 		self.name = group
-		self.user = user.lower()
+		self.user = user
 		self.password = password
 		self.time = None
 		self.pm = pm

@@ -42,11 +42,14 @@ FONT_FACES = ["Arial",
 		  ]
 FONT_SIZES = [9,10,11,12,13,14]
 
-HTML_CODES = [["&#39;","'"],
-	 ["&gt;",">"],
-	 ["&lt;","<"],
-	 ["&quot;",'"'],
-	 ["&amp;",'&']]
+HTML_CODES = [
+	["&#39;","'"],
+	["&gt;",">"],
+	["<br/>","\n"],
+	["&lt;","<"],
+	["&quot;",'"'],
+	["&amp;",'&'],
+]
 
 IMG_PATH = "feh"
 MPV_PATH = "mpv"
@@ -92,39 +95,24 @@ def sendToFile(filePath,jsonData):
 	encoder = json.JSONEncoder(ensure_ascii=False)
 	out = open(filePath,'w')
 	out.write(encoder.encode(jsonData)) 
-#format raw HTML data
+#the normal chatango library just takes out HTML without formatting it
+#so I'm adding <br> to \n. This further gets converted by the client into multiple lines
 def formatRaw(raw):
 	if len(raw) == 0: return raw
-	html = re.findall("(<[^<>]*?>)", raw)
 	#REEEEEE CONTROL CHARACTERS GET OUT
-	for j in raw:
-		if ord(j) < 32:
-			raw = raw.replace(j,"")
 	#replace <br>s with actual line breaks
 	#otherwise, remove html
-	for i in html:
+	for i in re.findall("(<[^<>]*?>)", raw):
 		raw = raw.replace(i,i == "<br/>" and "\n" or "")
-	raw = decodeHtml(raw)
+	for i in HTML_CODES:
+		raw = raw.replace(i[0],i[1])
 	#remove trailing \n's
 	while len(raw) and raw[-1] == "\n":
 		raw = raw[:-1]
 	#thumbnail fix in chatango
 	raw = re.subn(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)",r"\1l\2",raw)[0]
 
-	return raw
-
-#fucking HTML
-def decodeHtml(raw,encode=0):
-	for i in (encode and reversed(HTML_CODES) or HTML_CODES):
-		if encode: raw = raw.replace(i[1],i[0])
-		else: raw = raw.replace(i[0],i[1])
-	#decode nbsps
-	if not encode:
-		raw = raw.replace("&nbsp;"," ")
-	else:
-		raw = raw.replace("\n","<br/>")
-	
-	return raw
+	return raw.replace("&nbsp;"," ")
 
 #if given is at place 0 in the member name
 #return rest of the member name or an empty string
@@ -147,7 +135,7 @@ class chat_bot(chlib.ConnectionManager):
 		
 	def wrap(self,wrapper):
 		self.parent = wrapper
-		self.parent.chatBot = self
+		wrapper.setBot(self,self.tryPost)
 	
 	def main(self):
 		for num,i in enumerate(['user','passwd','room']):
@@ -157,9 +145,11 @@ class chat_bot(chlib.ConnectionManager):
 			prompt = ['username', 'password', 'group name'][num]
 			inp = client.inputOverlay("Enter your " + prompt, num == 1,True)
 			self.parent.addOverlay(inp)
-			creds[i] = inp.waitForInput();
+			creds[i] = inp.waitForInput()
+			if not client.active: return
+			client.dbmsg(creds[i])
 
-		#wait until now to initialize the object, since now the information exists
+		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
 
 		self.addGroup(creds['room'])
@@ -191,8 +181,10 @@ class chat_bot(chlib.ConnectionManager):
 	def tryPost(self,text):
 		try:
 			group = getattr(self,'joinedGroup')
-			text = decodeHtml(text,1)
-			group.sendPost(text,self.channel)
+			#replace HTML equivalents
+			for i in reversed(HTML_CODES):
+				text = text.replace(i[1],i[0])
+			group.sendPost(text.replace("\n","<br/>"),self.channel)
 		except AttributeError:
 			return
 	
@@ -210,14 +202,10 @@ class chat_bot(chlib.ConnectionManager):
 		self.parent.msgTime(float(past[-1].time),"Last message at ")
 		self.parent.msgTime()
 
-	def recvRemove(self,group):
-		self.stop()
-
 	#on disconnect
-	def stop(self):
-		chlib.ConnectionManager.stop(self)
-		self.parent.active = False
-		self.parent.unget()
+	def recvRemove(self,group):
+		#self.parent.unget()
+		self.stop()
 		
 	#on message
 	def recvPost(self, group, user, post, history = 0):
@@ -272,7 +260,7 @@ def ontab(self):
 		#look for the name starting with the text given
 		if afterReply != "":
 			#up until the @
-			self.text.append(findName(afterReply,self.chatBot.members) + " ")
+			self.text.append(findName(afterReply,self.chatbot.members) + " ")
 
 @client.onkey('KEY_F3')
 def F3(self):
@@ -288,7 +276,7 @@ def F3(self):
 			return -1
 		return ret
 	
-	dispList = {i:self.chatBot.members.count(i) for i in self.chatBot.members}
+	dispList = {i:self.chatbot.members.count(i) for i in self.chatbot.members}
 	dispList = [str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()]
 	box = client.listOverlay(sorted(dispList))
 	box.addKeys({
@@ -302,14 +290,14 @@ def F4(self):
 	#select which further input to display
 	def select(me):
 		def ret():
-			formatting = self.chatBot.creds['formatting']
+			formatting = self.chatbot.creds['formatting']
 			furtherInput = None
 			#ask for font color
 			if me.it == 0:
 				def enter(me):
 					def ret():
 						formatting['fc'] = client.toHexColor(me.color)
-						self.chatBot.setFormatting(formatting)
+						self.chatbot.setFormatting(formatting)
 						return -1
 					return ret
 
@@ -322,7 +310,7 @@ def F4(self):
 				def enter(me):
 					def ret():
 						formatting['nc'] = client.toHexColor(me.color)
-						self.chatBot.setFormatting(formatting)
+						self.chatbot.setFormatting(formatting)
 						return -1
 					return ret
 			
@@ -335,7 +323,7 @@ def F4(self):
 				def enter(me):
 					def ret():
 						formatting['ff'] = str(me.it)
-						self.chatBot.setFormatting(formatting)
+						self.chatbot.setFormatting(formatting)
 						return -1
 					return ret
 				
@@ -349,7 +337,7 @@ def F4(self):
 				def enter(me):
 					def ret():
 						formatting['fz'] = FONT_SIZES[me.it]
-						self.chatBot.setFormatting(formatting)
+						self.chatbot.setFormatting(formatting)
 						return -1
 					return ret
 					
@@ -376,7 +364,7 @@ def F4(self):
 def F5(self):
 	def select(me):
 		def ret():
-			self.chatBot.channel = me.it
+			self.chatbot.channel = me.it
 			return -1
 		return ret
 	
@@ -402,7 +390,7 @@ def F5(self):
 		'enter':select(box),
 		'input':oninput(box),
 	})
-	box.it = self.chatBot.channel
+	box.it = self.chatbot.channel
 	
 	self.addOverlay(box)
 
@@ -431,20 +419,22 @@ def greentext(msg,*args):
 			#user:
 			begin = re.match(r"^[!#]?\w+?: ",line).end(0)
 			#@user
-			reply = True
+			reply = re.match(r"^@\w+? ",line[begin:])
 			while reply:
+				begin += reply.end(0)
 				reply = re.match(r"^@\w+? ",line[begin:])
-				if reply: begin += reply.end(0)
 			tracker += msg.insertColor(0)
 		except:
 			begin = 0
-		
-		if not len(line[begin:]): continue
-		if line[begin] == ">":
-			tracker += msg.insertColor(begin+tracker,11)
-		else:
-			tracker += msg.insertColor(begin+tracker)
-		tracker += len(line)+1 #add in the newline
+		#try catch in case the length of the string past begin is zero
+		try:
+			if line[begin] == ">":
+				tracker += msg.insertColor(begin+tracker,11)
+			else:
+				tracker += msg.insertColor(begin+tracker)
+		except IndexError: pass
+		finally:
+			tracker += len(line)+1 #add in the newline
 
 #links as white
 @client.colorer
@@ -455,7 +445,7 @@ def link(msg,*args):
 	while find:
 		begin,end = tracker+find.start(0),tracker+find.end(0)
 		#find the most recent color
-		last = client.findcolor(msg(),end)
+		last = msg.findColor(begin)
 		end += msg.insertColor(begin,0,False)
 		tracker = msg.insertColor(end,last) + end
 		find = linkre.search(msg()[tracker:])
@@ -588,4 +578,4 @@ if __name__ == '__main__':
 	init_colors()
 	chatbot = chat_bot(creds)
 	#start
-	client.start(chatbot,chatbot.main)
+	client.start(chatbot,chatbot.main,chatbot.stop)
