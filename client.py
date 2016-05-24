@@ -1,14 +1,21 @@
-from os import environ
-import sys
-import traceback
-import re
-import time
+#TODO:
+#	split display manager functionality between mainOverlay and display class
+#		(i.e: move chat messages into mainOverlay)
+#		Actually, rethink how self.ins draws: Start at the end. If replace is true, then stop and run display
+#			Otherwise, keep going until replace is true
+#			Draw all after the first replace == true
+#			This might involve moving display class functionality into main
 try:
 	import curses
 except ImportError:
 	print("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 	raise SystemExit
+from os import environ
 from threading import Thread
+import sys
+import traceback
+import re
+import time
 
 environ.setdefault('ESCDELAY', '25')
 
@@ -861,7 +868,7 @@ class main:
 		self._chat.display()
 	#thread a post
 	def msgPost(self, post, *args):
-		addpost = Thread(target=self._msgPost,args=(post,*args))
+		addpost = Thread(target=catcherr(self,self._msgPost,post,*args))
 		addpost.start()
 	#update input
 	def updateinput(self):
