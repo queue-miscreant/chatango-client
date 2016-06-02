@@ -4,7 +4,7 @@
 #		Chat bot that extends the ConnectionManager class in chlib and
 #		adds extensions to the client for chatango only.
 #		The main source file.
-#
+#TODO:		add buttons for ignore/unignore people (in f3 menu)
 
 import sys
 
@@ -16,9 +16,10 @@ Usage:
 Options:
 	-c:		Input credentials again
 	-g:		Input group name again
+	-nc:		No custom script import
 	--help:		Display this page
 	""")
-	exit()
+	sys.exit()
 	
 import client
 import chlib
@@ -70,7 +71,7 @@ def init_colors():
 		'red',
 		'yellow',
 		)
-	ordlen = 5
+	ordlen = len(ordering)
 	for i in range(ordlen*2):
 		client.definepair(ordering[i%ordlen],i//ordlen) #0-10: user text
 	client.definepair('green',True)
@@ -125,11 +126,11 @@ def findName(given,memList):
 	return ""
 
 #bot for interacting with chat
-class chat_bot(chlib.ConnectionManager):
-	parent = None
+class chat_bot(chlib.ConnectionManager,client.botclass):
 	members = []
 
 	def __init__(self,creds):
+		client.botclass.__init__(self,'tryPost')
 		self.creds = creds
 		self.channel = 0
 		
@@ -147,7 +148,6 @@ class chat_bot(chlib.ConnectionManager):
 			self.parent.addOverlay(inp)
 			creds[i] = inp.waitForInput()
 			if not client.active: return
-			client.dbmsg(creds[i])
 
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
@@ -209,18 +209,15 @@ class chat_bot(chlib.ConnectionManager):
 		
 	#on message
 	def recvPost(self, group, user, post, history = 0):
-		#post.ip contains channel info
-		if user in ignores: return
-
 		if user not in self.members:
 			self.members.append(user)
 		me = self.creds.get('user')
 		#and is short-circuited
 		reply = me is not None and ("@"+me.lower() in post.raw.lower())
 		#sound bell
-		if reply and not history: print('\a')
+		if reply and not history: print('\a',end="")
 		#format as ' user: message'
-		self.parent.msgPost("{}: {}".format(post.user,formatRaw(post.raw)),
+		self.parent.msgPost(user+': '+formatRaw(post.raw),
 		#extra arguments. use in colorers
 			post.user, reply, history, post.channel)
 
@@ -260,7 +257,7 @@ def ontab(self):
 		#look for the name starting with the text given
 		if afterReply != "":
 			#up until the @
-			self.text.append(findName(afterReply,self.chatbot.members) + " ")
+			self.text.append(findName(afterReply,chatbot.members) + " ")
 
 @client.onkey('KEY_F3')
 def F3(self):
@@ -276,7 +273,7 @@ def F3(self):
 			return -1
 		return ret
 	
-	dispList = {i:self.chatbot.members.count(i) for i in self.chatbot.members}
+	dispList = {i:chatbot.members.count(i) for i in chatbot.members}
 	dispList = [str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()]
 	box = client.listOverlay(sorted(dispList))
 	box.addKeys({
@@ -290,14 +287,14 @@ def F4(self):
 	#select which further input to display
 	def select(me):
 		def ret():
-			formatting = self.chatbot.creds['formatting']
+			formatting = chatbot.creds['formatting']
 			furtherInput = None
 			#ask for font color
 			if me.it == 0:
 				def enter(me):
 					def ret():
 						formatting['fc'] = client.toHexColor(me.color)
-						self.chatbot.setFormatting(formatting)
+						chatbot.setFormatting(formatting)
 						return -1
 					return ret
 
@@ -310,7 +307,7 @@ def F4(self):
 				def enter(me):
 					def ret():
 						formatting['nc'] = client.toHexColor(me.color)
-						self.chatbot.setFormatting(formatting)
+						chatbot.setFormatting(formatting)
 						return -1
 					return ret
 			
@@ -323,7 +320,7 @@ def F4(self):
 				def enter(me):
 					def ret():
 						formatting['ff'] = str(me.it)
-						self.chatbot.setFormatting(formatting)
+						chatbot.setFormatting(formatting)
 						return -1
 					return ret
 				
@@ -337,7 +334,7 @@ def F4(self):
 				def enter(me):
 					def ret():
 						formatting['fz'] = FONT_SIZES[me.it]
-						self.chatbot.setFormatting(formatting)
+						chatbot.setFormatting(formatting)
 						return -1
 					return ret
 					
@@ -364,7 +361,7 @@ def F4(self):
 def F5(self):
 	def select(me):
 		def ret():
-			self.chatbot.channel = me.it
+			chatbot.channel = me.it
 			return -1
 		return ret
 	
@@ -390,7 +387,7 @@ def F5(self):
 		'enter':select(box),
 		'input':oninput(box),
 	})
-	box.it = self.chatbot.channel
+	box.it = chatbot.channel
 	
 	self.addOverlay(box)
 
@@ -440,7 +437,7 @@ def greentext(msg,*args):
 @client.colorer
 def link(msg,*args):
 	tracker = 0
-	linkre = re.compile("(https?://.+?\\.[^ \n]+)")
+	linkre = re.compile("(https?://.+?\\.[^ `\n]+)")
 	find = linkre.search(msg())
 	while find:
 		begin,end = tracker+find.start(0),tracker+find.end(0)
@@ -516,14 +513,15 @@ def linked(cli,link):
 def ignore(cli,arglist):
 	global ignores
 	person = arglist[0]
-	if '@' == person[1]: person = person[1:]
+	if '@' == person[0]: person = person[1:]
 	if person in ignores: return
 	ignores.append(person)
 
+@client.command('unignore')
 def unignore(cli,arglist):
 	global ignores
 	person = arglist[0]
-	if '@' == person[1]: person = person[1:]
+	if '@' == person[0]: person = person[1:]
 	if person not in ignores: return
 	ignores.pop(person)
 
@@ -545,10 +543,6 @@ def ignorefilter(*args):
 	except:
 		return True
 #-------------------------------------------------------------------------------------------------------
-try:
-	import custom #custom plugins
-except ImportError as exc:
-	pass
 
 if __name__ == '__main__':
 	creds = readFromFile('creds')
@@ -573,9 +567,15 @@ if __name__ == '__main__':
 			if '-' in creds['room']: raise Exception()
 		except:
 			raise Exception("Improper argument formatting")
+
+	if '-nc' not in sys.argv:
+		try:
+			import custom #custom plugins
+		except ImportError as exc: pass
 			
 	#initialize colors and chat bot
 	init_colors()
 	chatbot = chat_bot(creds)
 	#start
-	client.start(chatbot,chatbot.main,chatbot.stop)
+	client.start(chatbot,chatbot.main)
+	chatbot.stop()
