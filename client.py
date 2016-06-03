@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 #TODO:
 #		Try managing things in fewer threads
 #		mainOverlay command mode with history; move up/down to message select
