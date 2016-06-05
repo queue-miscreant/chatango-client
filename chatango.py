@@ -130,7 +130,6 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 	members = []
 
 	def __init__(self,creds):
-		client.botclass.__init__(self,'tryPost')
 		self.creds = creds
 		self.channel = 0
 		
@@ -577,5 +576,5 @@ if __name__ == '__main__':
 	init_colors()
 	chatbot = chat_bot(creds)
 	#start
-	client.start(chatbot,chatbot.main)
+	client.start(chatbot,chatbot.main,chatbot.tryPost)
 	chatbot.stop()

@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 #TODO:
 #		Try managing things in fewer threads
-#		mainOverlay command mode with history; move up/down to message select
-#		move mainoverlay.send into globals
-#		maybe move updateinput to mainOverlay
+#		move up/down to message select in mainoverlay
 try:
 	import curses
 except ImportError:
@@ -17,10 +15,11 @@ import time
 #check if terminal
 if not sys.stdout.isatty():
 	raise IOError("This script is not intended to be piped")
-
+#escape has delay typically
 environ.setdefault('ESCDELAY', '25')
 
 client = None
+send = lambda x: None
 active = False
 lastlinks = []
 
@@ -145,6 +144,22 @@ def parseLinks(raw):
 		if i not in newLinks:
 			newLinks.append(i)
 	lastlinks += newLinks
+
+@command('help')
+def listcommands(cli,args):
+	dbmsg(cli)
+	def select(self):
+		def ret():
+			new = commandOverlay(cli)
+			new.inpstr = self.list[self.it]
+			cli.replaceOverlay(new)
+		return ret
+	commandsList = listOverlay(list(commands))
+	commandsList.addKeys({
+		'enter':select(commandsList)
+	})
+	cli.addOverlay(commandsList)
+	
 #------------------------------------------------------------------------------
 #COLORING METHODS
 
@@ -472,14 +487,14 @@ class inputOverlay(overlayBase):
 	def __init__(self,prompt,password = False,end=False):
 		self.inpstr = ''
 		self.done = False
-		self.prompt = prompt
+		self.prompt = prompt+': '
 		self.password = password
 		self.end = end
 	def display(self,lines):
 		start = DIM_Y//2 - 2
 		room = DIM_X-2
 		lines[start] = _BOX_TOP()
-		out = self.prompt + ': '
+		out = self.prompt
 		#make sure we're not too long
 		lenout = len(out)
 		if lenout > room-2:
@@ -498,7 +513,7 @@ class inputOverlay(overlayBase):
 		return -1
 	def onescape(self):
 		if self.end:
-			#raising SystemExit is dodgy, since curses.endwin might now get called
+			#raising SystemExit is dodgy, since curses.endwin won't get called
 			global active
 			active = False
 		self.inpstr = ''
@@ -509,10 +524,37 @@ class inputOverlay(overlayBase):
 			time.sleep(.1)
 		return self.inpstr
 
+class commandOverlay(inputOverlay):
+	replace = False
+	def __init__(self,client):
+		inputOverlay.__init__(self,'')
+		self.parent = client
+	def display(self,lines):
+		final = lines[-1]
+		content = ':' + self.inpstr
+		lines[-1] = content + final[len(content):]
+		return lines
+	def onbackspace(self):
+		if not self.inpstr:
+			return -1
+		self.inpstr = self.inpstr[:-1]
+	def onenter(self):
+		#when this function is delegated, it's at the top of the ins stack; I can't return -1 
+		#without the function terminating early, and it's too late at the end if a command opens an overlay
+		#pop from the top now
+		self.parent.ins.pop()
+		text = self.inpstr
+		try:
+			space = text.find(' ')
+			command = space == -1 and text or text[1:space]
+			command = commands[command]
+			command(self.parent,text[space+1:].split(' '))
+		except Exception as exc:
+			dbmsg(exc)
+
 class mainOverlay(overlayBase):
 	replace = True
 	#dummy send function
-	send = lambda x: None
 	def __init__(self,parent):
 		self.text = scrollable(DIM_X-1)
 		self.allMessages = []
@@ -539,10 +581,14 @@ class mainOverlay(overlayBase):
 					command(self.parent,text[text.find(' ')+1:].split(' '))
 				finally:
 					return
-			self.send(text.replace(r'\n','\n'))
+			send(text.replace(r'\n','\n'))
 			
 	#any other key
 	def oninput(self,chars):
+		#58 is colon
+		if chars[0] == 58 and len(chars) == 1:
+			self.addOverlay(commandOverlay(self.parent))
+			return
 		#allow unicode input
 		self.text.append(bytes(chars).decode())
 	#home
@@ -563,7 +609,7 @@ class mainOverlay(overlayBase):
 	def onKEY_END(self):
 		self.text.end()
 	#shifted delete = backspace word
-	def onctrldel(self):
+	def onalt_backspace(self):
 		self.text.delword()
 	#f2
 	def onKEY_F2(self):
@@ -591,6 +637,9 @@ class mainOverlay(overlayBase):
 			'enter':select(box),
 		})
 		self.addOverlay(box)
+	#resize
+	def onresize(self):
+		self.parent.resize()
 	#add new messages
 	def append(self,newline,args = None):
 		self.allMessages.append((newline,args))
@@ -610,15 +659,15 @@ class mainOverlay(overlayBase):
 			except: pass
 			newlines += breaklines(i[0])
 		self.lines = newlines
-	#resize
-	def onresize(self):
-		self.parent.resize()
 	#add lines into lines supplied
 	def display(self,lines):
 		try:
-			for i in range(len(lines)-1):
-				j = i-len(lines)
-				lines[j] = self.lines[j+1]
+			lenlines,lenself = len(lines),len(self.lines)
+			get = min(len(lines),len(self.lines))
+			#decrement if there haven't been enough messages yet
+			get-= lenlines<lenself
+			for i in range(get):
+				lines[i] = self.lines[i-get]
 		except IndexError: pass
 		lines[-1] = CHAR_HSPACE*DIM_X
 		return lines
@@ -691,6 +740,7 @@ class scrollable:
 		if len(self.history) > 0:
 			self.selhis += (self.selhis < (len(self.history)))
 			self._text = self.history[-self.selhis]
+			self.disp = 0
 			self.movepos(len(self._text))
 	#history prev
 	def prevhist(self):
@@ -698,6 +748,7 @@ class scrollable:
 			self.selhis -= (self.selhis > 0)
 			#the next element or an empty string
 			self._text = self.selhis and self.history[-self.selhis] or ""
+			self.disp = 0
 			self.movepos(len(self._text))
 	#add new history entry
 	def appendhist(self,new):
@@ -711,11 +762,6 @@ class BotException(Exception):
 
 class botclass:
 	parent = None
-	def __init__(self,sendfuncname):
-		if not hasattr(self,sendfuncname):
-			raise BotException("Bot does not have member named "+sendfuncname)
-		#set the main send function to the client's send
-		mainOverlay.send = getattr(self,sendfuncname)
 	def setparent(self,overlay):
 		if not isinstance(overlay,main):
 			raise BotException("Attempted to set bot parent to instance other than client.main")
@@ -726,6 +772,8 @@ class main:
 	screen = None
 	last = 0
 	def __init__(self,chatbot):
+		if not isinstance(chatbot,botclass):
+			raise BotException("Bot instance not descendent of client.botclass")
 		#artifacts from client.display
 		self.schedule = schedule()
 		self.bottom_edges = [" "," "]
@@ -749,15 +797,19 @@ class main:
 			next = self.screen.getch()
 			chars.append(next)
 		self.screen.nodelay(0)
-
-		curseAction = _CURSES_KEYS.get(chars[0])
+		keyAction = ""
+		#alt keys are of the form 27, (key sequence)
+		if len(chars) > 2 and chars[0] == 27:
+			chars.pop(0)
+			keyAction += 'alt_'
+		keyAction += _CURSES_KEYS.get(chars[0]) or ""
 		#delegate to display stack
 		self = self.ins[-1]
 		#run onKEY function
-		if curseAction and hasattr(self,"on"+curseAction):
-			return getattr(self,"on"+curseAction)()
+		if keyAction and hasattr(self,"on"+keyAction):
+			return getattr(self,"on"+keyAction)()
 		#otherwise, just grab input characters
-		if chars[0] in range(32,255) and hasattr(self,"oninput"):
+		if not keyAction and chars[0] in range(32,255) and hasattr(self,"oninput"):
 			getattr(self,"oninput")(chars[:-1])
 	#resize the gui
 	def resize(self):
@@ -812,6 +864,7 @@ class main:
 			i.start()
 		self.loop()
 		active = False
+
 	#=------------------------------=
 	#|	Display Backends	|
 	#=------------------------------=
@@ -852,6 +905,7 @@ class main:
 		room = DIM_X - len(self.bottom_edges[0]) - len(self.bottom_edges[1])
 		if room < 1:
 			raise DisplayException("Terminal size too small")
+		#selected, then turn off
 		print("\x1b[7m{}{}{}\x1b[0m".format(self.bottom_edges[0]," "*room,self.bottom_edges[1]),end="")
 		moveCursor(DIM_Y-RESERVE_LINES)
 		print('')
@@ -892,12 +946,17 @@ class main:
 		self.schedule(self._updateinfo,right,left)
 
 	def addOverlay(self,new):
+		dbmsg(self.ins,new)
 		new.addResize(self)
 		self.ins.append(new)
 		#for some reason this is too fast; a hundredth of a second isn't very noticeable anyway
 		time.sleep(.01)
 		self.display()
 		self.updateinfo() #this looks ugly otherwise
+	#replace the top overlay
+	def replaceOverlay(self,new):
+		self.ins.pop()
+		self.addOverlay(new)
 
 	def onerr(self):
 		global active
@@ -933,9 +992,10 @@ def catcherr(client,fun,*args):
 	return wrap
 
 
-def start(bot_object,main_function):
-	global client
+def start(bot_object,main_function,send_function):
+	global client,send
 	client = main(bot_object)
+	send = send_function
 	#daemonize functions
 	bot_thread = Thread(target=catcherr(client,main_function))
 	bot_thread.daemon = True
