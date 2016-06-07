@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #TODO:
-#		Try managing things in fewer threads
 #		move up/down to message select in mainoverlay
+#		make it less of a dance for one overlay to replace another (overlay needs parent to do so)
 try:
 	import curses
 except ImportError:
@@ -55,6 +55,7 @@ CHAR_TRCORNER = "┐"
 CHAR_BLCORNER = "└"
 CHAR_BRCORNER = "┘"
 CHAR_CURSOR = "|"
+CHAR_COMMAND = "`"
 #lambdas
 _BOX_TOP = lambda: CHAR_TLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_TRCORNER
 #just the number of spaces to justify
@@ -74,7 +75,6 @@ _CURSES_KEYS = {
 	13: 'enter',	#carriage return
 	27: 'escape',	#escape
 	127:'backspace',#delete character
-	521:'ctrldel',	#ctrl+delete
 }
 for i in dir(curses):
 	if "KEY" in i:
@@ -531,7 +531,7 @@ class commandOverlay(inputOverlay):
 		self.parent = client
 	def display(self,lines):
 		final = lines[-1]
-		content = ':' + self.inpstr
+		content = CHAR_COMMAND + self.inpstr
 		lines[-1] = content + final[len(content):]
 		return lines
 	def onbackspace(self):
@@ -543,26 +543,29 @@ class commandOverlay(inputOverlay):
 		#without the function terminating early, and it's too late at the end if a command opens an overlay
 		#pop from the top now
 		self.parent.ins.pop()
+		self.parent.display()
 		text = self.inpstr
+		space = text.find(' ')
+		command = space == -1 and text or text[1:space]
 		try:
-			space = text.find(' ')
-			command = space == -1 and text or text[1:space]
 			command = commands[command]
 			command(self.parent,text[space+1:].split(' '))
-		except Exception as exc:
-			dbmsg(exc)
+		except: pass
 
 class mainOverlay(overlayBase):
 	replace = True
-	#dummy send function
+	
+	msgSplit = "\x1b" #sequence between messages to draw reversed
 	def __init__(self,parent):
 		self.text = scrollable(DIM_X-1)
 		self.allMessages = []
 		self.lines = []
+		self.selector = 0
 		self.parent = parent
 	#backspace
 	def onbackspace(self):
 		self.text.backspace()
+		self.demandRedraw()
 	def onKEY_DC(self):
 		self.text.delback()
 	#enter
@@ -572,45 +575,50 @@ class mainOverlay(overlayBase):
 		if text.count(" ") != len(text):
 			self.text.clear()
 			self.text.appendhist(text)
-			#if it's a command
-			if text[0] == '~':
-				try:
-					space = text.find(' ')
-					command = space == -1 and text[1:] or text[1:text.find(' ')]
-					command = commands[command]
-					command(self.parent,text[text.find(' ')+1:].split(' '))
-				finally:
-					return
+			#call the global send, passed into start
 			send(text.replace(r'\n','\n'))
+		self.demandRedraw()
 			
 	#any other key
 	def oninput(self,chars):
-		#58 is colon
-		if chars[0] == 58 and len(chars) == 1:
+		if not self.text() and len(chars) == 1 and chars[0] == ord(CHAR_COMMAND):
 			self.addOverlay(commandOverlay(self.parent))
 			return
 		#allow unicode input
 		self.text.append(bytes(chars).decode())
+		self.demandRedraw()
 	#home
 	def onKEY_SHOME(self):
 		self.text.clear()
-		self.shistory = 0
+		self.demandRedraw()
 	#arrow keys
 	def onKEY_LEFT(self):
 		self.text.movepos(-1)
+		self.demandRedraw()
 	def onKEY_RIGHT(self):
 		self.text.movepos(1)
+		self.demandRedraw()
 	def onKEY_UP(self):
-		self.text.nexthist()
+		self.selector += 1
+		self.selector = min(self.selector,len(self.allMessages))
+		#self.text.nexthist()
 	def onKEY_DOWN(self):
-		self.text.prevhist()
+		self.selector -= 1
+		self.selector = max(self.selector,0)
+		#schedule a redraw since we're not highlighting any more
+		if not self.selector:
+			self.parent.display()
+		#self.text.prevhist()
 	def onKEY_HOME(self):
 		self.text.home()
+		self.demandRedraw()
 	def onKEY_END(self):
 		self.text.end()
+		self.demandRedraw()
 	#shifted delete = backspace word
 	def onalt_backspace(self):
 		self.text.delword()
+		self.demandRedraw()
 	#f2
 	def onKEY_F2(self):
 		#special wrapper to inject functionality for newlines in the list
@@ -640,6 +648,12 @@ class mainOverlay(overlayBase):
 	#resize
 	def onresize(self):
 		self.parent.resize()
+
+	def demandRedraw(self):
+		if self.selector:
+			self.selector = 0
+			self.parent.display()
+	
 	#add new messages
 	def append(self,newline,args = None):
 		self.allMessages.append((newline,args))
@@ -648,6 +662,7 @@ class mainOverlay(overlayBase):
 				return
 		except: pass
 		self.lines += breaklines(newline)
+		self.lines.append(self.msgSplit)
 	#does what it says
 	def redolines(self):
 		newlines = []
@@ -658,19 +673,27 @@ class mainOverlay(overlayBase):
 					continue
 			except: pass
 			newlines += breaklines(i[0])
+			newlines.append(self.msgSplit)
 		self.lines = newlines
 	#add lines into lines supplied
 	def display(self,lines):
-		try:
-			lenlines,lenself = len(lines),len(self.lines)
-			get = min(len(lines),len(self.lines))
-			#decrement if there haven't been enough messages yet
-			get-= lenlines<lenself
-			for i in range(get):
-				lines[i] = self.lines[i-get]
-		except IndexError: pass
+		#seperate traversals
+		selftraverse,linetraverse = 1,2
+		msgno = 0
+		lenself, lenlines = len(self.lines),len(lines)
+		while selftraverse <= lenself and linetraverse <= lenlines:
+			if self.lines[-selftraverse] == self.msgSplit:
+				selftraverse += 1 #disregard this line, it sucks cocks
+				msgno += 1
+				continue
+			reverse = (msgno == self.selector) and _EFFECTS[0] or ""
+			dbmsg(msgno,self.selector,self.lines[-selftraverse])
+			lines[-linetraverse] = reverse + self.lines[-selftraverse]
+			selftraverse += 1
+			linetraverse += 1
 		lines[-1] = CHAR_HSPACE*DIM_X
 		return lines
+
 	#window frontend
 	def addOverlay(self,new):
 		self.parent.addOverlay(new)
@@ -801,8 +824,10 @@ class main:
 		#alt keys are of the form 27, (key sequence)
 		if len(chars) > 2 and chars[0] == 27:
 			chars.pop(0)
-			keyAction += 'alt_'
-		keyAction += _CURSES_KEYS.get(chars[0]) or ""
+			keyAction = 'alt_'
+			keyAction += _CURSES_KEYS.get(chars[0]) or chr(chars[0])
+		else:
+			keyAction += _CURSES_KEYS.get(chars[0]) or ""
 		#delegate to display stack
 		self = self.ins[-1]
 		#run onKEY function
@@ -835,7 +860,7 @@ class main:
 				if not self.ins: break #insurance
 				self.resize()
 				
-			if len(self.ins)-1:
+			if len(self.ins)-1 or self.over.selector:
 				self.display()
 			else:
 				self.updateinput()
