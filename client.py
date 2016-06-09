@@ -25,7 +25,7 @@ lastlinks = []
 
 WORD_RE = re.compile("[^ ]* ")
 ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")
-LINK_RE = re.compile("(https?://.+?\\.[^ \n]+)[\n` ]")
+LINK_RE = re.compile("(https?://.+?\\.[^\n` 　]+)[\n` 　]")
 _LAST_COLOR_RE = re.compile("\x1b"+r"\[[^m]*3[^m]*[^m]*m")
 INDENT_LEN = 4
 INDENT_STR = ""
@@ -147,7 +147,6 @@ def parseLinks(raw):
 
 @command('help')
 def listcommands(cli,args):
-	dbmsg(cli)
 	def select(self):
 		def ret():
 			new = commandOverlay(cli)
@@ -166,6 +165,12 @@ def listcommands(cli,args):
 #exception raised when errors occur in this segment
 class ColoringException(Exception):
 	pass
+
+def decolor(string):
+	#replace all escapes with null string
+	new = ANSI_ESC_RE.subn('',string)
+	#only return the string
+	return new[0]
 
 #coloring objects contain a string and default color
 class coloring:
@@ -252,12 +257,11 @@ def preserveFormatting(line):
 		return ret + _LAST_COLOR_RE.findall(line)[-1]
 	except IndexError: return ret
 
-def breaklines(string, length = 0, tab = None):
+def breaklines(string, length = 0):
 	#if this is in the function args, it can't be changed later
 	if not length:
 		length = DIM_X
-	if tab is None:
-		tab = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
+	tab = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
 	THRESHOLD = length/2
 	TABSPACE = length - len(tab)
 
@@ -331,8 +335,6 @@ class schedule:
 			self.taskno = 0
 		self.debounce = newbounce
 		return prev
-
-
 
 #overlays
 class overlayBase:
@@ -453,7 +455,6 @@ class colorOverlay(overlayBase):
 		lines[-2] = _BOX_PART(toHexColor(self.color).rjust(int(wide*1.5)+3)) #1 line
 		lines[-1] = _BOX_BOTTOM() #last line
 		return lines
-		
 	#color manipulation: mode represents color selected
 	def onKEY_UP(self):
 		self.color[self.mode] += 1
@@ -546,7 +547,7 @@ class commandOverlay(inputOverlay):
 		self.parent.display()
 		text = self.inpstr
 		space = text.find(' ')
-		command = space == -1 and text or text[1:space]
+		command = space == -1 and text or text[:space]
 		try:
 			command = commands[command]
 			command(self.parent,text[space+1:].split(' '))
@@ -554,8 +555,8 @@ class commandOverlay(inputOverlay):
 
 class mainOverlay(overlayBase):
 	replace = True
-	
-	msgSplit = "\x1b" #sequence between messages to draw reversed
+	#sequence between messages to draw reversed
+	msgSplit = "\x1b" 
 	def __init__(self,parent):
 		self.text = scrollable(DIM_X-1)
 		self.allMessages = []
@@ -653,7 +654,6 @@ class mainOverlay(overlayBase):
 		if self.selector:
 			self.selector = 0
 			self.parent.display()
-	
 	#add new messages
 	def append(self,newline,args = None):
 		self.allMessages.append((newline,args))
@@ -663,6 +663,7 @@ class mainOverlay(overlayBase):
 		except: pass
 		self.lines += breaklines(newline)
 		self.lines.append(self.msgSplit)
+		self.selector += self.selector>0
 	#does what it says
 	def redolines(self):
 		newlines = []
@@ -687,13 +688,11 @@ class mainOverlay(overlayBase):
 				msgno += 1
 				continue
 			reverse = (msgno == self.selector) and _EFFECTS[0] or ""
-			dbmsg(msgno,self.selector,self.lines[-selftraverse])
 			lines[-linetraverse] = reverse + self.lines[-selftraverse]
 			selftraverse += 1
 			linetraverse += 1
 		lines[-1] = CHAR_HSPACE*DIM_X
 		return lines
-
 	#window frontend
 	def addOverlay(self,new):
 		self.parent.addOverlay(new)
@@ -971,7 +970,6 @@ class main:
 		self.schedule(self._updateinfo,right,left)
 
 	def addOverlay(self,new):
-		dbmsg(self.ins,new)
 		new.addResize(self)
 		self.ins.append(new)
 		#for some reason this is too fast; a hundredth of a second isn't very noticeable anyway

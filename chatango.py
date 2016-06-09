@@ -246,6 +246,16 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 #KEYS
 @client.onkey("tab")
 def ontab(self):
+	if self.selector:
+		try:
+			#allmessages contain the colored message and arguments
+			message = self.allMessages[-self.selector]
+			msg = client.decolor(message[0])
+			#first colon is separating the name from the message
+			msg = msg[msg.find(':')+2:]
+			self.text.append('@{}: `{}`'.format(message[1][0],msg))
+		except Exception: pass
+		return self.demandRedraw()
 	#only search after the last space
 	lastSpace = self.text().rfind(" ")
 	search = self.text()[lastSpace + 1 and lastSpace:]
@@ -436,15 +446,14 @@ def greentext(msg,*args):
 @client.colorer
 def link(msg,*args):
 	tracker = 0
-	linkre = re.compile("(https?://.+?\\.[^ `\n]+)")
-	find = linkre.search(msg())
+	find = client.LINK_RE.search(msg()+' ')
 	while find:
 		begin,end = tracker+find.start(0),tracker+find.end(0)
 		#find the most recent color
 		last = msg.findColor(begin)
 		end += msg.insertColor(begin,0,False)
 		tracker = msg.insertColor(end,last) + end
-		find = linkre.search(msg()[tracker:])
+		find = client.LINK_RE.search(msg()[tracker:] + ' ')
 
 		
 #draw replies, history, and channel
