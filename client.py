@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 #TODO:
-#		move up/down to message select in mainoverlay
 #		make it less of a dance for one overlay to replace another (overlay needs parent to do so)
+#		bind alt-arrows to message select; arrows to history
+
 try:
 	import curses
 except ImportError:
@@ -75,6 +76,8 @@ _CURSES_KEYS = {
 	13: 'enter',	#carriage return
 	27: 'escape',	#escape
 	127:'backspace',#delete character
+	525:'alt_down', #alt down
+	566:'alt_up',	#alt up
 }
 for i in dir(curses):
 	if "KEY" in i:
@@ -600,16 +603,18 @@ class mainOverlay(overlayBase):
 		self.text.movepos(1)
 		self.demandRedraw()
 	def onKEY_UP(self):
+		self.text.nexthist()
+	def onalt_up(self):
 		self.selector += 1
 		self.selector = min(self.selector,len(self.allMessages))
-		#self.text.nexthist()
 	def onKEY_DOWN(self):
+		self.text.prevhist()
+	def onalt_down(self):
 		self.selector -= 1
 		self.selector = max(self.selector,0)
 		#schedule a redraw since we're not highlighting any more
 		if not self.selector:
 			self.parent.display()
-		#self.text.prevhist()
 	def onKEY_HOME(self):
 		self.text.home()
 		self.demandRedraw()
