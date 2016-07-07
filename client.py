@@ -2,6 +2,8 @@
 #TODO:
 #		make it less of a dance for one overlay to replace another (overlay needs parent to do so)
 #		bind alt-arrows to message select; arrows to history
+#		
+#		for sufficiently small terminals, breaklines loops infinitely
 
 try:
 	import curses
@@ -9,6 +11,7 @@ except ImportError:
 	raise ImportError("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 from os import environ
 from threading import Thread
+from wcwidth import wcwidth
 import sys
 import traceback
 import re
@@ -180,7 +183,7 @@ class coloring:
 	def __init__(self,string,default=None):
 		self.str = string
 		self.default = default
-	def __call__(self):
+	def __repr__(self):
 		return self.str
 	#insert color at position p with color c
 	def insertColor(self,p,c=-1,add = True):
@@ -225,26 +228,42 @@ def removeFormatting(msg,*args):
 #------------------------------------------------------------------------------
 #DISPLAY FITTING
 
-#byte length of string (sans escape sequences)
-strlen = lambda string: len(bytes(string,'utf-8')) - sum([i.end(0) - i.start(0) for i in ANSI_ESC_RE.finditer(string)])
+#column width of string
+def strlen(string):
+	#not in an escape sequence
+	escape = False
+	a = 0
+	for i in string:
+		temp = (i == '\x1b') or escape
+		#not escaped and not transitioning to escape
+		if not temp:
+			b = wcwidth(i)
+			a += (b>0) and b
+		elif i.isalpha(): #is escaped and i is alpha
+			escape = False
+			continue
+		escape = temp
+	return a
 
 #fit word to byte length
 def fitwordtolength(string,length):
-	add = True
-	#byte count
+	escape = False
+	#number of columns passed, number of chars passed
 	trace,lentr = 0,0
 	for lentr,i in enumerate(string):
-		char = len(bytes(i,"utf-8"))
+		temp = (i == '\x1b')
+		#print(lentr,i,temp,escape)
 		#escapes (FSM-style)
-		if add:
-			add = i != '\x1b'
-			trace += char
-			if trace > length:
+		if not (escape or temp):
+			char = wcwidth(i)
+			trace += (char>0) and char
+			elif trace > length:
+				lentr -= 1 #ignore this character, we incremented at the loop
 				break
+		elif i.isalpha(): #is escaped and i is alpha
+			escape = False
 			continue
-		add = i.isalpha()
-		if add and ((trace+char) > length):
-			break
+		escape = escape or temp
 	return lentr
 
 #preserve formatting. this isn't necessary (if you remove the preset colorer), but it looks better
@@ -369,6 +388,18 @@ class listOverlay(overlayBase):
 		self.modes = modes
 		self.nummodes = len(modes)
 	
+	def oninput(self,text):
+		command = chr(text[0])
+		#V I M
+		#I
+		#M
+		if command == 'j': #down
+			self.onKEY_DOWN()
+		elif command == 'k': #up
+			self.onKEY_UP()
+		elif command == '`':
+			self.onescape()
+	
 	def display(self,lines):
 		lines[0] = _BOX_TOP()
 		size = DIM_Y-RESERVE_LINES-2
@@ -411,9 +442,11 @@ class listOverlay(overlayBase):
 		return lines
 	#predefined list iteration methods
 	def onKEY_UP(self):
+		if not len(self.list): return
 		self.it -= 1
 		self.it %= len(self.list)
 	def onKEY_DOWN(self):
+		if not len(self.list): return
 		self.it += 1
 		self.it %= len(self.list)
 	def onKEY_RIGHT(self):
@@ -554,7 +587,8 @@ class commandOverlay(inputOverlay):
 		try:
 			command = commands[command]
 			command(self.parent,text[space+1:].split(' '))
-		except: pass
+		except Exception as esc: 
+			dbmsg(esc)
 
 class mainOverlay(overlayBase):
 	replace = True
@@ -572,20 +606,9 @@ class mainOverlay(overlayBase):
 		self.demandRedraw()
 	def onKEY_DC(self):
 		self.text.delback()
-	#enter
-	def onenter(self):
-		#if it's not just spaces
-		text = self.text()
-		if text.count(" ") != len(text):
-			self.text.clear()
-			self.text.appendhist(text)
-			#call the global send, passed into start
-			send(text.replace(r'\n','\n'))
-		self.demandRedraw()
-			
 	#any other key
 	def oninput(self,chars):
-		if not self.text() and len(chars) == 1 and chars[0] == ord(CHAR_COMMAND):
+		if not str(self.text) and len(chars) == 1 and chars[0] == ord(CHAR_COMMAND):
 			self.addOverlay(commandOverlay(self.parent))
 			return
 		#allow unicode input
@@ -715,7 +738,7 @@ class scrollable:
 		self.selhis = 0
 		self.width = width
 	#return the raw text contained within it
-	def __call__(self):
+	def __repr__(self):
 		return self._text
 	#append new characters and move that length
 	def append(self,new):
@@ -735,10 +758,12 @@ class scrollable:
 		if not pos+1: return
 		if not pos:
 			self._text = self._text[self.pos:]
-			self.movepos(0)
+			self.disp = 0
+			self.pos = 0
 			return
 		self._text = self._text[:pos-1] + self._text[self.pos:]
-		self.movepos(pos-1)
+		#move back the word length
+		self.movepos(pos-self.pos-1)
 	#clear the window
 	def clear(self):
 		self._text = ""
@@ -753,9 +778,10 @@ class scrollable:
 		self.movepos(len(self._text))
 	#move the cursor and display
 	def movepos(self,dist):
-		self.pos = max(0,min(len(self._text),self.pos+dist))
+		#if we're at the end, but not the beginning OR we're past the width, move the cursor
 		if (self.pos == self.disp and self.pos != 0) or self.pos - self.disp >= self.width:
 			self.disp = max(0,min(self.pos-self.width+1,self.disp+dist))
+		self.pos = max(0,min(len(self._text),self.pos+dist))
 	#display some text
 	def display(self):
 		text = self._text[:self.pos] + CHAR_CURSOR + self._text[self.pos:]
@@ -960,7 +986,7 @@ class main:
 		for i in colorers:
 			i(post,*args)
 		#push the message and move the cursor back to the input window
-		self.over.append(post(),list(args))
+		self.over.append(str(post),list(args))
 		self.display()
 	#update input
 	def updateinput(self,text = None):
@@ -1020,10 +1046,8 @@ def catcherr(client,fun,*args):
 	return wrap
 
 
-def start(bot_object,main_function,send_function):
-	global client,send
+def start(bot_object,main_function):
 	client = main(bot_object)
-	send = send_function
 	#daemonize functions
 	bot_thread = Thread(target=catcherr(client,main_function))
 	bot_thread.daemon = True

@@ -49,6 +49,7 @@ HTML_CODES = [
 	["<br/>","\n"],
 	["&lt;","<"],
 	["&quot;",'"'],
+	["&apos;","'"],
 	["&amp;",'&'],
 ]
 
@@ -183,6 +184,9 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			#replace HTML equivalents
 			for i in reversed(HTML_CODES):
 				text = text.replace(i[1],i[0])
+			#this was going to be a cool feature where I inject wingdings in, but nooooooooo
+			#chatango hates that
+			#text = re.subn(r'\|\|\|([^|]+)\|\|\|','<font face=wingdings>\\1</font>',text)[0]
 			group.sendPost(text.replace("\n","<br/>"),self.channel)
 		except AttributeError:
 			return
@@ -244,6 +248,18 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 
 #-------------------------------------------------------------------------------------------------------
 #KEYS
+@client.onkey("enter")
+def onenter(self):
+	#if it's not just spaces
+	text = str(self.text)
+	if text.count(" ") != len(text):
+		#add it to the history
+		self.text.clear()
+		self.text.appendhist(text)
+		#call the send
+		chatbot.tryPost(text.replace(r'\n','\n'))
+	self.demandRedraw()
+
 @client.onkey("tab")
 def ontab(self):
 	if self.selector:
@@ -253,12 +269,12 @@ def ontab(self):
 			msg = client.decolor(message[0])
 			#first colon is separating the name from the message
 			msg = msg[msg.find(':')+2:]
-			self.text.append('@{}: `{}`'.format(message[1][0],msg))
+			self.text.append('@{}: `{}`'.format(message[1][0],msg.replace('`','')))
 		except Exception: pass
 		return self.demandRedraw()
 	#only search after the last space
-	lastSpace = self.text().rfind(" ")
-	search = self.text()[lastSpace + 1 and lastSpace:]
+	lastSpace = str(self.text).rfind(" ")
+	search = str(self.text)[lastSpace + 1 and lastSpace:]
 	#find the last @
 	reply = search.rfind("@")
 	if reply+1:
@@ -412,13 +428,14 @@ def getColor(name,rot = 6,init = 6,split = 109):
 
 @client.colorer
 def defaultcolor(msg,coldic,*args):
-	msg.default = getColor(msg()[:msg().find(':')])
+	strmsg = str(msg)
+	msg.default = getColor(strmsg[:strmsg.find(':')])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
 #also color lines by default
 @client.colorer
 def greentext(msg,*args):
-	lines = msg().split("\n") #don't forget to add back in a char
+	lines = str(msg).split("\n") #don't forget to add back in a char
 	tracker = 0
 	for no,line in enumerate(lines):
 		try:
@@ -446,15 +463,14 @@ def greentext(msg,*args):
 @client.colorer
 def link(msg,*args):
 	tracker = 0
-	find = client.LINK_RE.search(msg()+' ')
+	find = client.LINK_RE.search(str(msg)+' ')
 	while find:
 		begin,end = tracker+find.start(0),tracker+find.end(0)
 		#find the most recent color
 		last = msg.findColor(begin)
 		end += msg.insertColor(begin,0,False)
 		tracker = msg.insertColor(end,last) + end
-		find = client.LINK_RE.search(msg()[tracker:] + ' ')
-
+		find = client.LINK_RE.search(str(msg)[tracker:] + ' ')
 		
 #draw replies, history, and channel
 @client.colorer
@@ -516,7 +532,7 @@ def linked(cli,link):
 #-------------------------------------------------------------------------------------------------------
 #COMMANDS
 
-#methods like this can be used in the form /[commandname]
+#methods like this can be used in the form `[commandname]
 @client.command('ignore')
 def ignore(cli,arglist):
 	global ignores
@@ -585,5 +601,5 @@ if __name__ == '__main__':
 	init_colors()
 	chatbot = chat_bot(creds)
 	#start
-	client.start(chatbot,chatbot.main,chatbot.tryPost)
+	client.start(chatbot,chatbot.main)
 	chatbot.stop()
