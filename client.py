@@ -89,6 +89,16 @@ _CURSES_KEYS[curses.KEY_ENTER] = 'enter'
 _CURSES_KEYS[curses.KEY_BACKSPACE] = 'backspace'
 _CURSES_KEYS[curses.KEY_RESIZE] = 'resize'
 
+class KeyException(Exception): pass
+
+def defineKey(value,string):
+	if string in _CURSES_KEYS.values(): raise KeyException("Key '{}' already defined".format(string))
+	_CURSES_KEYS[value] = string
+
+def cloneKey(fro,to):
+	if fro not in _CURSES_KEYS.values(): raise KeyException("Key '{}' not defined")
+	_CURSES_KEYS[to] = _CURSES_KEYS[fro]
+
 #------------------------------------------------------------------------------
 #conversions to and from hex strings ([255,255,255] <-> FFFFFF)
 toHexColor = lambda rgb: ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
@@ -169,8 +179,7 @@ def listcommands(cli,args):
 #COLORING METHODS
 
 #exception raised when errors occur in this segment
-class ColoringException(Exception):
-	pass
+class ColoringException(Exception): pass
 
 def decolor(string):
 	#replace all escapes with null string
@@ -257,14 +266,13 @@ def fitwordtolength(string,length):
 		if not (escape or temp):
 			char = wcwidth(i)
 			trace += (char>0) and char
-			elif trace > length:
-				lentr -= 1 #ignore this character, we incremented at the loop
-				break
+			if trace > length:
+				return lentr
 		elif i.isalpha(): #is escaped and i is alpha
 			escape = False
 			continue
 		escape = escape or temp
-	return lentr
+	return lentr + 1
 
 #preserve formatting. this isn't necessary (if you remove the preset colorer), but it looks better
 def preserveFormatting(line):
@@ -322,8 +330,7 @@ def breaklines(string, length = 0):
 #------------------------------------------------------------------------------
 #DISPLAY/OVERLAY CLASSES
 
-class DisplayException(Exception):
-	pass
+class DisplayException(Exception): pass
 
 def moveCursor(x=0):
 	print("\x1b[%d;f"%x,end=_CLEAR_FORMATTING)
@@ -575,6 +582,8 @@ class commandOverlay(inputOverlay):
 		if not self.inpstr:
 			return -1
 		self.inpstr = self.inpstr[:-1]
+	def onalt_backspace(self):
+		return -1
 	def onenter(self):
 		#when this function is delegated, it's at the top of the ins stack; I can't return -1 
 		#without the function terminating early, and it's too late at the end if a command opens an overlay
@@ -595,10 +604,11 @@ class mainOverlay(overlayBase):
 	#sequence between messages to draw reversed
 	msgSplit = "\x1b" 
 	def __init__(self,parent):
-		self.text = scrollable(DIM_X-1)
+		self.text = scrollable(DIM_X)
 		self.allMessages = []
 		self.lines = []
 		self.selector = 0
+		self.past = 0
 		self.parent = parent
 	#backspace
 	def onbackspace(self):
@@ -630,6 +640,8 @@ class mainOverlay(overlayBase):
 	def onalt_up(self):
 		self.selector += 1
 		self.selector = min(self.selector,len(self.allMessages))
+	def onalt_k(self):
+		self.onalt_up()
 	def onKEY_DOWN(self):
 		self.text.prevhist()
 	def onalt_down(self):
@@ -638,6 +650,8 @@ class mainOverlay(overlayBase):
 		#schedule a redraw since we're not highlighting any more
 		if not self.selector:
 			self.parent.display()
+	def onalt_j(self):
+		self.onalt_down()
 	def onKEY_HOME(self):
 		self.text.home()
 		self.demandRedraw()
@@ -779,14 +793,15 @@ class scrollable:
 	#move the cursor and display
 	def movepos(self,dist):
 		#if we're at the end, but not the beginning OR we're past the width, move the cursor
-		if (self.pos == self.disp and self.pos != 0) or self.pos - self.disp >= self.width:
-			self.disp = max(0,min(self.pos-self.width+1,self.disp+dist))
+		if (self.pos == self.disp and self.pos != 0) or (self.pos-self.disp+1) >= self.width:
+			self.disp = max(0,min(self.pos-self.width+2,self.disp+dist))
 		self.pos = max(0,min(len(self._text),self.pos+dist))
 	#display some text
 	def display(self):
 		text = self._text[:self.pos] + CHAR_CURSOR + self._text[self.pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
 		text = text[self.disp:self.disp+self.width]
+		#-1 to compensate for the cursor
 		return text[-fitwordtolength(text[::-1],self.width)-1:]
 	#history next
 	def nexthist(self):
@@ -809,9 +824,7 @@ class scrollable:
 		self.history = self.history[-50:]
 		self.selhis = 0
 
-class BotException(Exception):
-	pass
-
+class BotException(Exception): pass
 
 class botclass:
 	parent = None
