@@ -23,7 +23,6 @@ if not sys.stdout.isatty():
 environ.setdefault('ESCDELAY', '25')
 
 client = None
-send = lambda x: None
 active = False
 lastlinks = []
 
@@ -325,7 +324,7 @@ def breaklines(string, length = 0):
 		if newline != "":
 			broken.append(newline+_CLEAR_FORMATTING)
 			form = preserveFormatting(newline)
-	return broken
+	return broken,len(broken)
 
 #------------------------------------------------------------------------------
 #DISPLAY/OVERLAY CLASSES
@@ -431,7 +430,7 @@ class listOverlay(overlayBase):
 			if value and hasattr(self,'drawOther'):
 				col = coloring(val)
 				self.drawOther(col,i)
-				val = col()
+				val = str(col)
 
 			if i+size*partition == self.it:
 				val = _SELECTED(val)
@@ -698,12 +697,17 @@ class mainOverlay(overlayBase):
 			self.parent.display()
 	#add new messages
 	def append(self,newline,args = None):
-		self.allMessages.append((newline,args))
+		#undisplayed messages have length zero
+		msg = [newline,args,0]
 		try:
 			if any(i(*args) for i in filters):
+				self.allMessages.append(msg)
 				return
 		except: pass
-		self.lines += breaklines(newline)
+		a,b = breaklines(newline)
+		self.lines += a
+		msg[2] = b
+		self.allMessages.append(msg)
 		self.lines.append(self.msgSplit)
 		self.selector += self.selector>0
 	#does what it says
@@ -713,17 +717,62 @@ class mainOverlay(overlayBase):
 		for i in self.allMessages[-(DIM_Y-RESERVE_LINES):]:
 			try:
 				if any(j(*i[1]) for j in filters):
+					i[2] = 0
 					continue
 			except: pass
-			newlines += breaklines(i[0])
+			a,b = breaklines(i[0])
+			newlines += a
+			i[2] = b
 			newlines.append(self.msgSplit)
 		self.lines = newlines
 	#add lines into lines supplied
 	def display(self,lines):
 		#seperate traversals
 		selftraverse,linetraverse = 1,2
-		msgno = 0
 		lenself, lenlines = len(self.lines),len(lines)
+		msgno = 0
+		#we need to go up a certain number of lines if we're drawing from selector
+		if self.selector:
+			#number of messages up, number of lines traversed up
+			maxnum,start = 0,0
+			lenmsg = len(self.allMessages)
+			start = 0
+			top = 0
+			while start < lenmsg and (start < self.selector or (top-start+1) < lenlines):
+				j = self.allMessages[-start-1]
+				top += j[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
+				start += 1
+				#if we've already surpassed self.lines, we need to add to self.lines
+				if top > len(self.lines):
+					a,b = breaklines(j[0])
+					a.append(self.msgSplit)
+					newlines = a + newlines
+					j[2] = b
+				#if we've reached the maximum number of messages we need to go up, great
+			dbmsg(lenmsg,lenlines,start,top,self.lines[-top])
+			#we start drawing from this line, downward
+			init = -top
+			selftraverse = init
+			linetraverse = -lenlines
+			getself = lambda: selftraverse
+			#we can start drawing downward now
+			#TODO make this cleaner
+			while (getself() < 0) and linetraverse < -1:
+				dbmsg(selftraverse,linetraverse)
+				#maxnum is calculated backwards, so -selftraverse
+				if self.lines[getself()] == self.msgSplit:
+					selftraverse += 1
+					msgno += 1
+					continue
+				reverse = ((start-msgno) == self.selector) and _EFFECTS[0] or ""
+				lines[linetraverse] = reverse + self.lines[getself()]
+				#print(lines[-linetraverse])
+				#time.sleep(.5)
+				selftraverse += 1
+				linetraverse += 1
+			lines[-1] = CHAR_HSPACE*DIM_X
+			return lines
+					
 		while selftraverse <= lenself and linetraverse <= lenlines:
 			if self.lines[-selftraverse] == self.msgSplit:
 				selftraverse += 1 #disregard this line, it sucks cocks
@@ -735,6 +784,8 @@ class mainOverlay(overlayBase):
 			linetraverse += 1
 		lines[-1] = CHAR_HSPACE*DIM_X
 		return lines
+	def stats(self):
+		return repr(self.allMessages[-self.selector][0])
 	#window frontend
 	def addOverlay(self,new):
 		self.parent.addOverlay(new)
@@ -792,10 +843,10 @@ class scrollable:
 		self.movepos(len(self._text))
 	#move the cursor and display
 	def movepos(self,dist):
+		self.pos = max(0,min(len(self._text),self.pos+dist))
 		#if we're at the end, but not the beginning OR we're past the width, move the cursor
 		if (self.pos == self.disp and self.pos != 0) or (self.pos-self.disp+1) >= self.width:
-			self.disp = max(0,min(self.pos-self.width+2,self.disp+dist))
-		self.pos = max(0,min(len(self._text),self.pos+dist))
+			self.disp = max(0,min(self.pos-self.width+1,self.disp+dist))
 	#display some text
 	def display(self):
 		text = self._text[:self.pos] + CHAR_CURSOR + self._text[self.pos:]

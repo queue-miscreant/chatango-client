@@ -400,7 +400,7 @@ def F5(self):
 	
 	def drawActive(string,i):
 		string.insertColor(0,0,False)
-		a = client._BOX_JUST(string())
+		a = client._BOX_JUST(str(string))
 		if filtered_channels[i]: return string.ljust(a)
 		col = i and i+12 or 16
 		string.ljust(a-1)
