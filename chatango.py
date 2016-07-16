@@ -4,9 +4,6 @@
 #		Chat bot that extends the ConnectionManager class in chlib and
 #		adds extensions to the client for chatango only.
 #		The main source file.
-#TODO:		add buttons for ignore/unignore people (in f3 menu)
-#		ask on 2+ messages to open with enter
-#		if mpv or feh is not present, output blurb instead of raising exception
 
 import sys
 
@@ -256,9 +253,16 @@ def onenter(self):
 		try:
 			message = self.allMessages[-self.selector]
 			msg = client.decolor(message[0])+' '
-			for i in client.LINK_RE.findall(msg):
-				client.link_opener(self.parent,i)
-		except: pass
+			alllinks = client.LINK_RE.findall(msg)
+			def openall():
+				for i in alllinks:
+					client.link_opener(self.parent,i)
+			if len(alllinks) > 1:
+				self.parent.msgSystem('Really open %d links? (y/n)'%len(alllinks))
+				self.addOverlay(client.confirmOverlay(openall))
+			else:
+				openall()
+		except Exception as exc: client.dbmsg(exc)
 		return self.stopselect()
 	text = str(self.text)
 	#if it's not just spaces
@@ -307,12 +311,30 @@ def F3(self):
 			self.text.append("@%s " % current)
 			return -1
 		return ret
-	
+	def tab(me):
+		def ret():
+			global ignores
+			current = me.list[me.it]
+			current = current.split(' ')[0]
+			client.dbmsg(current)
+			if current not in ignores:
+				ignores.append(current)
+			else:
+				ignores.remove(current)
+		return ret
+
 	dispList = {i:chatbot.members.count(i) for i in chatbot.members}
-	dispList = [str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()]
-	box = client.listOverlay(sorted(dispList))
+	dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
+	def drawIgnored(string,i):
+		if dispList[i].split(' ')[0] not in ignores: return string
+		string.insertColor(-1,3)
+		string = string[:-1] + 'i'
+		return string
+	
+	box = client.listOverlay(sorted(dispList),drawIgnored)
 	box.addKeys({
 		'enter':select(box),
+		'tab':tab(box),
 	})
 	
 	self.addOverlay(box)
@@ -400,27 +422,23 @@ def F5(self):
 			return -1
 		return ret
 	
-	def oninput(me):
-		def ret(chars):
+	def ontab(me):
+		def ret():
 			global filtered_channels
 			#space only
-			if chars[0] != 32: return
 			filtered_channels[me.it] = not filtered_channels[me.it]
 		return ret
 	
 	def drawActive(string,i):
-		string.insertColor(0,0,False)
-		a = client._BOX_JUST(str(string))
-		if filtered_channels[i]: return string.ljust(a)
+		if filtered_channels[i]: return
 		col = i and i+12 or 16
-		string.ljust(a-1)
-		string.insertColor(a-1,col)
-		string.append(' ')
+		string.insertColor(-1,col)
+		return string
 					
 	box = client.listOverlay(["None", "Red", "Blue", "Both"],drawActive)
 	box.addKeys({
 		'enter':select(box),
-		'input':oninput(box),
+		'tab':ontab(box),
 	})
 	box.it = chatbot.channel
 	
@@ -506,8 +524,8 @@ def images(cli,link,ext):
 		display_thread = Thread(target = displayProcess.communicate)
 		display_thread.daemon = True
 		display_thread.start()
-	except Exception as exc:
-		raise Exception("failed to start image display")
+	except:
+		cli.newBlurb("No viewer %s found"%FEH_PATH)
 	
 #start and daemonize mpv (or replaced video playing program)
 @client.opener(1,"webm")
@@ -521,8 +539,8 @@ def videos(cli,link,ext):
 		display_thread = Thread(target = displayProcess.communicate)
 		display_thread.daemon = True
 		display_thread.start()
-	except Exception as exc:
-		raise Exception("failed to start video display")
+	except:
+		cli.newBlurb("No player %s found"%MPV_PATH)
 
 @client.opener(0)
 def linked(cli,link):

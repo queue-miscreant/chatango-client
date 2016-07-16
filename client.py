@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 #TODO: 		make it less of a dance for one overlay to replace another (overlay needs parent to do so) (maybe)
-#		check if blurbs overflow
-#		listoverlay: draw entry from left, drawOther from right. Other should overwrite entry
 try:
 	import curses
 except ImportError:
@@ -198,6 +196,10 @@ class coloring:
 		self.default = default
 	def __repr__(self):
 		return self._str
+	def __getitem__(self,sliced):
+		return coloring(self._str[sliced])
+	def __add__(self,other):
+		return coloring(self._str + other)
 	#insert color at position p with color c
 	def insertColor(self,p,c=-1,add = True):
 		c = self.default if c == -1 else c
@@ -221,8 +223,6 @@ class coloring:
 	#prebuilts
 	def prepend(self,new):
 		self._str = new + self._str
-	def append(self,new):
-		self._str = self._str + new 
 	def ljust(self,spacing):
 		self._str = self._str.ljust(spacing)
 
@@ -236,7 +236,7 @@ def definepair(fore, bold = None, back = 'none'):
 #clear formatting (reverse, etc) after each message
 @colorer
 def removeFormatting(msg,*args):
-	msg.append(_CLEAR_FORMATTING)
+	msg += _CLEAR_FORMATTING
 
 #------------------------------------------------------------------------------
 #DISPLAY FITTING
@@ -264,10 +264,10 @@ def fitwordtolength(string,length):
 	#number of columns passed, number of chars passed
 	trace,lentr = 0,0
 	for lentr,i in enumerate(string):
-		temp = (i == '\x1b')
+		temp = (i == '\x1b') or escape
 		#print(lentr,i,temp,escape)
 		#escapes (FSM-style)
-		if not (escape or temp):
+		if not temp:
 			char = wcwidth(i)
 			trace += (char>0) and char
 			if trace > length:
@@ -275,7 +275,7 @@ def fitwordtolength(string,length):
 		elif i.isalpha(): #is escaped and i is alpha
 			escape = False
 			continue
-		escape = escape or temp
+		escape = temp
 	return lentr + 1
 
 #preserve formatting. this isn't necessary (if you remove the preset colorer), but it looks better
@@ -384,9 +384,20 @@ class overlayBase:
 				setattr(self,"on"+_CURSES_KEYS[i],j)
 	def addResize(self,other):
 		setattr(self,"onresize",other.resize)
-	
-	def post(self):
-		pass
+
+#yes, this is this simple
+class confirmOverlay(overlayBase):
+	replace = False
+	def __init__(self,confirmfunc):
+		self.confirm = confirmfunc
+	def display(self,lines):
+		return lines
+	def oninput(self,chars):
+		cmd = chr(chars[0]).lower()
+		if cmd == 'y':
+			self.confirm()
+		elif cmd == 'n':
+			return -1
 
 class listOverlay(overlayBase):
 	replace = True
@@ -427,23 +438,21 @@ class listOverlay(overlayBase):
 		subList = subList + ["" for i in range(size-len(subList))]
 		#display lines
 		i = 0
-		#TODO fix variable names
 		for i,value in enumerate(subList):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
-			val = (len(value) > maxx) and value[:max(half-3,1)] + "..." + value[-half:] or value
-			val += _CLEAR_FORMATTING
+			row = (len(value) > maxx) and value[:max(half-3,1)] + "..." + value[-half:] or value
+			row += _CLEAR_FORMATTING
+			row = row.ljust(_BOX_JUST(row))
 			if value and hasattr(self,'drawOther'):
-				col = coloring(val)
-				self.drawOther(col,i)
-				val = str(col)
+				row = str(self.drawOther(coloring(row),i))
 
 			if i+size*partition == self.it:
-				val = _SELECTED(val)
+				row = _SELECTED(row)
 			else:
-				val += _CLEAR_FORMATTING
+				row += _CLEAR_FORMATTING
 
-			lines[i+1] = _BOX_PART(val)
+			lines[i+1] = _BOX_NOFORM(row)
 		#DIM_Y - RESERVE_LINES is the number of lines
 		
 		if self.nummodes - 1:
@@ -726,11 +735,6 @@ class mainOverlay(overlayBase):
 		newlines = []
 		#get the last terminal line number of messages (worst case)
 		for i in self.allMessages[-(DIM_Y-RESERVE_LINES):]:
-			try:
-				if any(j(*i[1]) for j in filters):
-					i[2] = 0
-					continue
-			except: pass
 			a,b = breaklines(i[0])
 			newlines += a
 			i[2] = b
@@ -750,13 +754,13 @@ class mainOverlay(overlayBase):
 			lenmsg = len(self.allMessages)
 			while start < lenmsg and (start < self.selector or (top-start+1) < lenlines):
 				j = self.allMessages[-start-1]
-				top += j[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
 				start += 1
+				top += j[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
 				#if we've already surpassed self.lines, we need to add to self.lines
 				if top > len(self.lines):
 					a,b = breaklines(j[0])
 					a.append(self.msgSplit)
-					newlines = a + newlines
+					self.lines = a + self.lines
 					j[2] = b
 			#adjust if we went too far up
 			if start > self.selector:
@@ -1004,6 +1008,8 @@ class main:
 	#display a blurb
 	def _printblurb(self,string):
 		moveCursor(DIM_Y-RESERVE_LINES+2)
+		if strlen(string) > DIM_X:
+			string = string[fitwordtolength(string,DIM_X-3):]+'...'
 		printLine(string)
 		moveCursor(DIM_Y-RESERVE_LINES)
 		#for some reason, it won't update input drawing (in IME) until I print something

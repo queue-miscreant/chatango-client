@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 5.0
+Version 5.1
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -10,7 +10,7 @@ If you really want to, create a link to /usr/local/bin/ so you don't have to nav
 This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses wcwidth from <https://github.com/jquast/wcwidth>.
 
 My custom script: http://puu.sh/oTJR8/ca83bf5e85.py
-	Requires livestreamer and youtube-dl
+Requires livestreamer and youtube-dl
 
 FEATURES:
 --------------------------
@@ -107,11 +107,16 @@ CLASSES
 ># 	Class that draws an input box over (but not instead of) chat.
 >		prompt:			Prompt to supply to the overlay
 >		password:		Whether to draw input as stars, obfuscating what is typed
->		end:			Whether to raise SystemExit, ending the program
+>		end:			Whether to end the program
 		
 
 CHANGELOG
 --------------------------
+## v5.1		*2016/7/16*
+* Added asking if opening more than two links at once
+* Lacking programs to run this prints blurbs instead of raising exceptions
+* Blurbs protected against overflowing
+* Fixed listOverlay drawing. Left justify done by client.py, not chatango.py
 ## v5		*2016/7/16*
 * Added scrolling upwards. Either press alt-up or alt-k to go up, and alt-down or alt-j to go down
 * Added k and j for up and down in listOverlay
@@ -121,7 +126,7 @@ CHANGELOG
 	* This allows correct width on CJK characters that take two columns to draw
 * Redefined link_openers with multiple function arguments, because that's what I was doing before
 * Moved onenter to chatango.py so that a "send" function does not have to be passed to client.py
-* Reformatted README :^)
+* Reformatted README.md :^)
 ## v4.1		*2016/5/16*
 * Added "modes" for listinput. Allows different functions to handle data depending on current
 * Changed F2 menu to pull number from string. This confirms the wanted link is selected
