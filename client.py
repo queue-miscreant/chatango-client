@@ -747,26 +747,23 @@ class mainOverlay(overlayBase):
 					a.append(self.msgSplit)
 					newlines = a + newlines
 					j[2] = b
-				#if we've reached the maximum number of messages we need to go up, great
-			dbmsg(lenmsg,lenlines,start,top,self.lines[-top])
+			#adjust if we went too far up
+			if start > self.selector:
+				top = min(top,top+lenlines-(top-start+1))
 			#we start drawing from this line, downward
 			selftraverse = -top
 			linetraverse = -lenlines
 			msgno = start
 			direction = 1
 			#legacy loop statement was this
-			#while (getself() < 0) and linetraverse < -1:
-			#lenself = -2 (int <= -2 <=> int < -1) 
-			lenlines = -2
-			#lenself = -1 (int <= -1 <=> int < 0)
-			lenself = -1
-					
-		#TODO decrease multiplication operation count
-		while selftraverse <= lenself and linetraverse <= lenlines:
+			#while (selftraverse < 0) and linetraverse < -1:
+			lenlines = -2 #int <= -2 <=> int < -1)
+			lenself = -1 #int <= -1 <=> int < 0
+		#this looks horrible, but it's DRY
+		while (direction*selftraverse) <= lenself and (direction*linetraverse) <= lenlines:
 			if self.lines[selftraverse] == self.msgSplit:
-				selftraverse += 1 #disregard this line
-				#count lines down downward, up upward
-				msgno -= direction
+				selftraverse += direction #disregard this line
+				msgno -= direction #count lines down downward, up upward
 				continue
 			reverse = (msgno == self.selector) and _EFFECTS[0] or ""
 			lines[linetraverse] = reverse + self.lines[selftraverse]
