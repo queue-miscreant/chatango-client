@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-#TODO:
-#		make it less of a dance for one overlay to replace another (overlay needs parent to do so) (maybe)
-
+#TODO: 		make it less of a dance for one overlay to replace another (overlay needs parent to do so) (maybe)
+#		check if blurbs overflow
+#		listoverlay: draw entry from left, drawOther from right. Other should overwrite entry
 try:
 	import curses
 except ImportError:
@@ -36,7 +36,7 @@ DIM_Y = 70
 RESERVE_LINES = 3
 #break if smaller than these
 _MIN_X = 0
-_MIN_Y = 5+RESERVE_LINES
+_MIN_Y = RESERVE_LINES
 def setmins(newx,newy):
 	global _MIN_X,_MIN_Y
 	_MIN_X=max(_MIN_X,newx)
@@ -142,7 +142,7 @@ def command(commandname):
 	def wrapper(func):
 		commands[commandname] = func
 	return wrapper
-def opener(typ,pore = None)
+def opener(typ,pore = None):
 	def wrap(func):
 		if typ == 0:
 			setattr(link_opener,'default',staticmethod(func))
@@ -152,6 +152,7 @@ def opener(typ,pore = None)
 			link_opener.sites[pore] = func
 		#allow stacking wrappers
 		return func
+	return wrap
 
 #add links to a list
 def parseLinks(raw):
@@ -413,7 +414,7 @@ class listOverlay(overlayBase):
 		elif command == 'k': #up
 			self.onKEY_UP()
 		elif command == '`':
-			self.onescape()
+			return -1
 	
 	def display(self,lines):
 		lines[0] = _BOX_TOP()
@@ -926,7 +927,7 @@ class main:
 			return getattr(self,"on"+keyAction)()
 		#otherwise, just grab input characters
 		if not keyAction and chars[0] in range(32,255) and hasattr(self,"oninput"):
-			getattr(self,"oninput")(chars[:-1])
+			return getattr(self,"oninput")(chars[:-1])
 	#resize the gui
 	def resize(self):
 		global DIM_X,DIM_Y

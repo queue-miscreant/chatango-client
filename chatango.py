@@ -5,6 +5,8 @@
 #		adds extensions to the client for chatango only.
 #		The main source file.
 #TODO:		add buttons for ignore/unignore people (in f3 menu)
+#		ask on 2+ messages to open with enter
+#		if mpv or feh is not present, output blurb instead of raising exception
 
 import sys
 
@@ -492,10 +494,10 @@ def chatcolors(msg,*args):
 #-------------------------------------------------------------------------------------------------------
 #OPENERS
 #start and daemonize feh (or replaced image viewing program)
-@client.extopener("jpeg")
-@client.extopener("jpg")
-@client.extopener("jpg:large")
-@client.extopener("png")
+@client.opener(1,"jpeg")
+@client.opener(1,"jpg")
+@client.opener(1,"jpg:large")
+@client.opener(1,"png")
 def images(cli,link,ext):
 	cli.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
@@ -508,9 +510,9 @@ def images(cli,link,ext):
 		raise Exception("failed to start image display")
 	
 #start and daemonize mpv (or replaced video playing program)
-@client.extopener("webm")
-@client.extopener("mp4")
-@client.extopener("gif")
+@client.opener(1,"webm")
+@client.opener(1,"mp4")
+@client.opener(1,"gif")
 def videos(cli,link,ext):
 	cli.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
@@ -522,7 +524,7 @@ def videos(cli,link,ext):
 	except Exception as exc:
 		raise Exception("failed to start video display")
 
-@client.opener
+@client.opener(0)
 def linked(cli,link):
 	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
