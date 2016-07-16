@@ -728,16 +728,15 @@ class mainOverlay(overlayBase):
 	#add lines into lines supplied
 	def display(self,lines):
 		#seperate traversals
-		selftraverse,linetraverse = 1,2
+		selftraverse,linetraverse = -1,-2
 		lenself, lenlines = len(self.lines),len(lines)
 		msgno = 0
+		direction = -1 #upward by default
 		#we need to go up a certain number of lines if we're drawing from selector
 		if self.selector:
 			#number of messages up, number of lines traversed up
-			maxnum,start = 0,0
+			top,start = 0,0
 			lenmsg = len(self.allMessages)
-			start = 0
-			top = 0
 			while start < lenmsg and (start < self.selector or (top-start+1) < lenlines):
 				j = self.allMessages[-start-1]
 				top += j[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
@@ -751,37 +750,28 @@ class mainOverlay(overlayBase):
 				#if we've reached the maximum number of messages we need to go up, great
 			dbmsg(lenmsg,lenlines,start,top,self.lines[-top])
 			#we start drawing from this line, downward
-			init = -top
-			selftraverse = init
+			selftraverse = -top
 			linetraverse = -lenlines
-			getself = lambda: selftraverse
-			#we can start drawing downward now
-			#TODO make this cleaner
-			while (getself() < 0) and linetraverse < -1:
-				dbmsg(selftraverse,linetraverse)
-				#maxnum is calculated backwards, so -selftraverse
-				if self.lines[getself()] == self.msgSplit:
-					selftraverse += 1
-					msgno += 1
-					continue
-				reverse = ((start-msgno) == self.selector) and _EFFECTS[0] or ""
-				lines[linetraverse] = reverse + self.lines[getself()]
-				#print(lines[-linetraverse])
-				#time.sleep(.5)
-				selftraverse += 1
-				linetraverse += 1
-			lines[-1] = CHAR_HSPACE*DIM_X
-			return lines
+			msgno = start
+			direction = 1
+			#legacy loop statement was this
+			#while (getself() < 0) and linetraverse < -1:
+			#lenself = -2 (int <= -2 <=> int < -1) 
+			lenlines = -2
+			#lenself = -1 (int <= -1 <=> int < 0)
+			lenself = -1
 					
+		#TODO decrease multiplication operation count
 		while selftraverse <= lenself and linetraverse <= lenlines:
-			if self.lines[-selftraverse] == self.msgSplit:
-				selftraverse += 1 #disregard this line, it sucks cocks
-				msgno += 1
+			if self.lines[selftraverse] == self.msgSplit:
+				selftraverse += 1 #disregard this line
+				#count lines down downward, up upward
+				msgno -= direction
 				continue
 			reverse = (msgno == self.selector) and _EFFECTS[0] or ""
-			lines[-linetraverse] = reverse + self.lines[-selftraverse]
-			selftraverse += 1
-			linetraverse += 1
+			lines[linetraverse] = reverse + self.lines[selftraverse]
+			selftraverse += direction
+			linetraverse += direction
 		lines[-1] = CHAR_HSPACE*DIM_X
 		return lines
 	def stats(self):
