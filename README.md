@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 4.0
+Version 5.0
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -20,9 +20,9 @@ FEATURES:
 * View members of a certain room (F3)
 * Alter formatting sent to the chatango (F4)
 * Change channel (F5)
- * Supports white, red, and blue channels (and the apparently forgotten "both" channel)
+	* Supports white, red, and blue channels (and the apparently forgotten "both" channel)
 * Colorized output
- * Color text matching a regex or so
+	* Color text matching a regex or so
 * Chat filters based on message attributes
 
 DEPENDENCIES
