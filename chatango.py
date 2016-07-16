@@ -250,15 +250,23 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 #KEYS
 @client.onkey("enter")
 def onenter(self):
-	#if it's not just spaces
+	if self.selector:
+		try:
+			message = self.allMessages[-self.selector]
+			msg = client.decolor(message[0])+' '
+			for i in client.LINK_RE.findall(msg):
+				client.link_opener(self.parent,i)
+		except: pass
+		return self.stopselect()
 	text = str(self.text)
+	#if it's not just spaces
 	if text.count(" ") != len(text):
 		#add it to the history
 		self.text.clear()
 		self.text.appendhist(text)
 		#call the send
 		chatbot.tryPost(text.replace(r'\n','\n'))
-	self.demandRedraw()
+	self.stopselect()
 
 @client.onkey("tab")
 def ontab(self):
@@ -270,8 +278,8 @@ def ontab(self):
 			#first colon is separating the name from the message
 			msg = msg[msg.find(':')+2:]
 			self.text.append('@{}: `{}`'.format(message[1][0],msg.replace('`','')))
-		except Exception: pass
-		return self.demandRedraw()
+		except: pass
+		return self.stopselect()
 	#only search after the last space
 	lastSpace = str(self.text).rfind(" ")
 	search = str(self.text)[lastSpace + 1 and lastSpace:]
@@ -484,10 +492,10 @@ def chatcolors(msg,*args):
 #-------------------------------------------------------------------------------------------------------
 #OPENERS
 #start and daemonize feh (or replaced image viewing program)
-@client.opener("ext|jpeg")
-@client.opener("ext|jpg")
-@client.opener("ext|jpg:large")
-@client.opener("ext|png")
+@client.extopener("jpeg")
+@client.extopener("jpg")
+@client.extopener("jpg:large")
+@client.extopener("png")
 def images(cli,link,ext):
 	cli.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
@@ -500,9 +508,9 @@ def images(cli,link,ext):
 		raise Exception("failed to start image display")
 	
 #start and daemonize mpv (or replaced video playing program)
-@client.opener("ext|webm")
-@client.opener("ext|mp4")
-@client.opener("ext|gif")
+@client.extopener("webm")
+@client.extopener("mp4")
+@client.extopener("gif")
 def videos(cli,link,ext):
 	cli.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
@@ -514,7 +522,7 @@ def videos(cli,link,ext):
 	except Exception as exc:
 		raise Exception("failed to start video display")
 
-@client.opener()
+@client.opener
 def linked(cli,link):
 	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null

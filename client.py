@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 #TODO:
-#		make it less of a dance for one overlay to replace another (overlay needs parent to do so)
-#		bind alt-arrows to message select; arrows to history
-#		
-#		for sufficiently small terminals, breaklines loops infinitely
+#		make it less of a dance for one overlay to replace another (overlay needs parent to do so) (maybe)
 
 try:
 	import curses
@@ -36,8 +33,14 @@ LAST_INPUT = ""
 #guessed terminal dimensions
 DIM_X = 40
 DIM_Y = 70
-SIZE_THRESHOLD = 10
 RESERVE_LINES = 3
+#break if smaller than these
+_MIN_X = 0
+_MIN_Y = 5+RESERVE_LINES
+def setmins(newx,newy):
+	global _MIN_X,_MIN_Y
+	_MIN_X=max(_MIN_X,newx)
+	_MIN_Y=max(_MIN_Y,newy)
 #------------------------------------------------------------------------------
 #valid colors to add
 _COLORS = ['black','red','green','yellow','blue','magenta','cyan','white','','none']
@@ -139,15 +142,16 @@ def command(commandname):
 	def wrapper(func):
 		commands[commandname] = func
 	return wrapper
-def opener(extension = 'default'):
+def opener(typ,pore = None)
 	def wrap(func):
-		args = extension.split("|")
-		if args[0] == "ext": setattr(link_opener,args[1],staticmethod(func))
-		elif args[0] == "site": link_opener.sites[args[1]] = func
-		elif extension == "default": setattr(link_opener,extension,staticmethod(func))
+		if typ == 0:
+			setattr(link_opener,'default',staticmethod(func))
+		elif typ == 1 and pore is not None:
+			setattr(link_opener,pore,staticmethod(func))
+		elif typ == 2 and pore is not None:
+			link_opener.sites[pore] = func
 		#allow stacking wrappers
 		return func
-	return wrap
 
 #add links to a list
 def parseLinks(raw):
@@ -189,10 +193,10 @@ def decolor(string):
 #coloring objects contain a string and default color
 class coloring:
 	def __init__(self,string,default=None):
-		self.str = string
+		self._str = string
 		self.default = default
 	def __repr__(self):
-		return self.str
+		return self._str
 	#insert color at position p with color c
 	def insertColor(self,p,c=-1,add = True):
 		c = self.default if c == -1 else c
@@ -200,26 +204,26 @@ class coloring:
 			c = type(c) != str and _COLOR_PAIRS[c + (add and _NUM_PREDEFINED)] or c 
 		except IndexError:
 			raise ColoringException("Foreground/Background pair not defined")
-		self.str = self.str[:p] + c + self.str[p:]
+		self._str = self._str[:p] + c + self._str[p:]
 		#return length of c to adjust tracker variables in colorers
 		return len(c)
 	#add effect to string (if test is true)
 	def addEffect(self, number, test = True):
-		self.str = (test and _EFFECTS[number] or "") + self.str
+		self._str = (test and _EFFECTS[number] or "") + self._str
 	#most recent color before end
 	def findColor(self,end):
-		lastcolor = {end-i.end(0):i.group(0) for i in _LAST_COLOR_RE.finditer(self.str) if (end-i.end(0))>=0}
+		lastcolor = {end-i.end(0):i.group(0) for i in _LAST_COLOR_RE.finditer(self._str) if (end-i.end(0))>=0}
 		try:
 			return lastcolor[min(lastcolor)]
 		except:
 			return ''
 	#prebuilts
 	def prepend(self,new):
-		self.str = new + self.str
+		self._str = new + self._str
 	def append(self,new):
-		self.str = self.str + new 
+		self._str = self._str + new 
 	def ljust(self,spacing):
-		self.str = self.str.ljust(spacing)
+		self._str = self._str.ljust(spacing)
 
 def definepair(fore, bold = None, back = 'none'):
 	global _COLOR_PAIRS
@@ -385,6 +389,11 @@ class overlayBase:
 
 class listOverlay(overlayBase):
 	replace = True
+	#worst case column: |(value[0])...(value[1])|
+	#		    1    2     345  6	    7
+	#worst case rows: |(list member)|(RESERVED)
+	#		  1	2	3
+	setmins(7,3+RESERVE_LINES)
 	def __init__(self,outList,drawOther = None,modes = [""]):
 		self.it = 0
 		self.mode = 0
@@ -410,8 +419,6 @@ class listOverlay(overlayBase):
 		lines[0] = _BOX_TOP()
 		size = DIM_Y-RESERVE_LINES-2
 		maxx = DIM_X-2
-		if maxx < 7 or size < 3:
-			raise DisplayException("Terminal size too small")
 		#which portion of the lmaxyist is currently displaced
 		partition = self.it//size
 		#get the partition of the list we're at, pad the list
@@ -423,8 +430,6 @@ class listOverlay(overlayBase):
 		for i,value in enumerate(subList):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
-			#worst case: (col)(value[0])...(value[1])(col)
-			#		1	2   345	6	  7
 			val = (len(value) > maxx) and value[:max(half-3,1)] + "..." + value[-half:] or value
 			val += _CLEAR_FORMATTING
 			if value and hasattr(self,'drawOther'):
@@ -463,6 +468,11 @@ class listOverlay(overlayBase):
 class colorOverlay(overlayBase):
 	replace = True
 	names = ["Red","Green","Blue"]
+	#worst case column: |Red  GreenBlue |
+	#		    123456789ABCDEFGH = 17
+	#worst case rows: |(color row) (name)(val) (hex)|(RESERVED)
+	#		  1	2     3	 4	5 6  7  8
+	setmins(17,8+RESERVE_LINES)
 	def __init__(self,initcolor = [127,127,127]):
 		self.color = initcolor
 		self.mode = 0
@@ -595,8 +605,7 @@ class commandOverlay(inputOverlay):
 		try:
 			command = commands[command]
 			command(self.parent,text[space+1:].split(' '))
-		except Exception as esc: 
-			dbmsg(esc)
+		except Exception as esc: dbmsg(esc)
 
 class mainOverlay(overlayBase):
 	replace = True
@@ -612,9 +621,10 @@ class mainOverlay(overlayBase):
 	#backspace
 	def onbackspace(self):
 		self.text.backspace()
-		self.demandRedraw()
+		self.stopselect()
 	def onKEY_DC(self):
 		self.text.delback()
+		self.stopselect()
 	#any other key
 	def oninput(self,chars):
 		if not str(self.text) and len(chars) == 1 and chars[0] == ord(CHAR_COMMAND):
@@ -622,18 +632,18 @@ class mainOverlay(overlayBase):
 			return
 		#allow unicode input
 		self.text.append(bytes(chars).decode())
-		self.demandRedraw()
+		self.stopselect()
 	#home
 	def onKEY_SHOME(self):
 		self.text.clear()
-		self.demandRedraw()
+		self.stopselect()
 	#arrow keys
 	def onKEY_LEFT(self):
 		self.text.movepos(-1)
-		self.demandRedraw()
+		self.stopselect()
 	def onKEY_RIGHT(self):
 		self.text.movepos(1)
-		self.demandRedraw()
+		self.stopselect()
 	def onKEY_UP(self):
 		self.text.nexthist()
 	def onalt_up(self):
@@ -653,14 +663,14 @@ class mainOverlay(overlayBase):
 		self.onalt_down()
 	def onKEY_HOME(self):
 		self.text.home()
-		self.demandRedraw()
+		self.stopselect()
 	def onKEY_END(self):
 		self.text.end()
-		self.demandRedraw()
+		self.stopselect()
 	#shifted delete = backspace word
 	def onalt_backspace(self):
 		self.text.delword()
-		self.demandRedraw()
+		self.stopselect()
 	#f2
 	def onKEY_F2(self):
 		#special wrapper to inject functionality for newlines in the list
@@ -691,7 +701,7 @@ class mainOverlay(overlayBase):
 	def onresize(self):
 		self.parent.resize()
 
-	def demandRedraw(self):
+	def stopselect(self):
 		if self.selector:
 			self.selector = 0
 			self.parent.display()
@@ -921,7 +931,7 @@ class main:
 	def resize(self):
 		global DIM_X,DIM_Y
 		DIM_Y, newx = self.screen.getmaxyx()
-		if DIM_Y < SIZE_THRESHOLD+RESERVE_LINES:
+		if DIM_Y < _MIN_Y or newx < _MIN_X:
 			raise DisplayException("Terminal size too small")
 		#only redo lines if the width changed
 		if DIM_X != newx:
@@ -998,7 +1008,8 @@ class main:
 		#for some reason, it won't update input drawing (in IME) until I print something
 		print('')
 	#display string in input
-	def _updateinput(self,string):
+	def _updateinput(self):
+		string = self.over.text.display()
 		moveCursor(DIM_Y-RESERVE_LINES+1)
 		printLine(string)
 		moveCursor(DIM_Y-RESERVE_LINES)
@@ -1040,9 +1051,8 @@ class main:
 		self.over.append(str(post),list(args))
 		self.display()
 	#update input
-	def updateinput(self,text = None):
-		text = text or self.over.text.display()
-		self.schedule(self._updateinput,text)
+	def updateinput(self):
+		self.schedule(self._updateinput)
 	#5 second blurb
 	def newBlurb(self,message = ""):
 		self.last = time.time()
@@ -1108,6 +1118,8 @@ def start(bot_object,main_function):
 	scr = curses.initscr()
 	curses.noecho(); curses.cbreak(); scr.keypad(1)
 	#okay actually start 
-	client.start(scr, bot_thread, printtime)
-	curses.echo(); curses.nocbreak(); scr.keypad(0)
-	curses.endwin()
+	try:
+		client.start(scr, bot_thread, printtime)
+	finally:
+		curses.echo(); curses.nocbreak(); scr.keypad(0)
+		curses.endwin()
