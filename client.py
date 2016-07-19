@@ -627,7 +627,7 @@ class mainOverlay(overlayBase):
 		self.allMessages = []
 		self.lines = []
 		self.selector = 0
-		self.past = 0
+		self.filtered = 0
 		self.parent = parent
 	#backspace
 	def onbackspace(self):
@@ -659,7 +659,7 @@ class mainOverlay(overlayBase):
 		self.text.nexthist()
 	def onalt_up(self):
 		self.selector += 1
-		self.selector = min(self.selector,len(self.allMessages))
+		self.selector = min(self.selector,len(self.allMessages)-self.filtered)
 	def onalt_k(self):
 		self.onalt_up()
 	def onKEY_DOWN(self):
@@ -723,6 +723,7 @@ class mainOverlay(overlayBase):
 		try:
 			if any(i(*args) for i in filters):
 				self.allMessages.append(msg)
+				self.filtered += 1
 				return
 		except: pass
 		a,b = breaklines(newline)
@@ -730,17 +731,41 @@ class mainOverlay(overlayBase):
 		msg[2] = b
 		self.allMessages.append(msg)
 		self.lines.append(self.msgSplit)
-		self.selector += self.selector>0
+		self.selector += self.cangoup()
+
+	def msgup(self,num = None):
+		if num is None: num = self.selector
+		i,count = 1,1
+		while (i <= len(self.allMessages)) and (count <= num):
+			j = self.allMessages[-i]
+			i += 1
+			try:
+				if any(k(*j[1]) for k in filters):
+					continue
+			except: pass
+			count += 1
+		return self.allMessages[-i+1]
+	
+	def cangoup(self):
+		return self.selector>0 and (self.selector+self.filtered > len(self.allMessages))
+
 	#does what it says
 	def redolines(self):
 		newlines = []
+		self.filtered = 0
 		#get the last terminal line number of messages (worst case)
 		for i in self.allMessages[-(DIM_Y-RESERVE_LINES):]:
+			try:
+				if any(j(*i[1]) for j in filters):
+					self.filtered += 1
+					continue
+			except: pass
 			a,b = breaklines(i[0])
 			newlines += a
 			i[2] = b
 			newlines.append(self.msgSplit)
 		self.lines = newlines
+
 	#add lines into lines supplied
 	def display(self,lines):
 		#seperate traversals
@@ -750,26 +775,35 @@ class mainOverlay(overlayBase):
 		direction = -1 #upward by default
 		#we need to go up a certain number of lines if we're drawing from selector
 		if self.selector:
-			#number of messages up, number of lines traversed up
-			top,start = 0,0
+			#number of messages up, number of lines traversed up, number of lines visible up
+			top,start,visup = 0,0,0
 			lenmsg = len(self.allMessages)
-			while start < lenmsg and (start < self.selector or (top-start+1) < lenlines):
-				j = self.allMessages[-start-1]
+			while start < lenmsg and (start < self.selector or (top-visup+1) < lenlines):
+				i = self.allMessages[-start-1]
 				start += 1
-				top += j[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
+				try:
+					if any(j(*i[1]) for j in filters):
+						continue
+				except: pass
+				visup += 1
+				top += i[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
 				#if we've already surpassed self.lines, we need to add to self.lines
 				if top > len(self.lines):
-					a,b = breaklines(j[0])
+					a,b = breaklines(i[0])
 					a.append(self.msgSplit)
 					self.lines = a + self.lines
-					j[2] = b
+					i[2] = b
 			#adjust if we went too far up
-			if start > self.selector:
-				top = min(top,top+lenlines-(top-start+1))
+			if visup > self.selector:
+				top = min(top,top+lenlines-(top-visup+1))
+			temp = top-start-visup+1
+			if temp < 0:
+				lenlines += temp
 			#we start drawing from this line, downward
+			dbmsg()
 			selftraverse = -top
 			linetraverse = -lenlines
-			msgno = start
+			msgno = visup
 			direction = 1
 			#legacy loop statement was this
 			#while (selftraverse < 0) and linetraverse < -1:

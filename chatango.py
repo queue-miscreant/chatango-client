@@ -279,7 +279,7 @@ def ontab(self):
 	if self.selector:
 		try:
 			#allmessages contain the colored message and arguments
-			message = self.allMessages[-self.selector]
+			message = self.msgup()
 			msg = client.decolor(message[0])
 			#first colon is separating the name from the message
 			msg = msg[msg.find(':')+2:]
@@ -316,11 +316,11 @@ def F3(self):
 			global ignores
 			current = me.list[me.it]
 			current = current.split(' ')[0]
-			client.dbmsg(current)
 			if current not in ignores:
 				ignores.append(current)
 			else:
 				ignores.remove(current)
+			self.redolines()
 		return ret
 
 	dispList = {i:chatbot.members.count(i) for i in chatbot.members}
@@ -427,6 +427,7 @@ def F5(self):
 			global filtered_channels
 			#space only
 			filtered_channels[me.it] = not filtered_channels[me.it]
+			self.redolines()
 		return ret
 	
 	def drawActive(string,i):
