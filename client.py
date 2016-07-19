@@ -266,7 +266,6 @@ def fitwordtolength(string,length):
 	trace,lentr = 0,0
 	for lentr,i in enumerate(string):
 		temp = (i == '\x1b') or escape
-		#print(lentr,i,temp,escape)
 		#escapes (FSM-style)
 		if not temp:
 			char = wcwidth(i)
@@ -796,13 +795,10 @@ class mainOverlay(overlayBase):
 			#adjust if we went too far up
 			if visup > self.selector:
 				top = min(top,top+lenlines-(top-visup+1))
-			temp = top-start-visup+1
-			if temp < 0:
-				lenlines += temp
 			#we start drawing from this line, downward
-			dbmsg()
 			selftraverse = -top
-			linetraverse = -lenlines
+			#if we've gone up too many lines, adjust
+			linetraverse = -min(lenlines,lenlines+(top-start-visup+1))
 			msgno = visup
 			direction = 1
 			#legacy loop statement was this
@@ -888,9 +884,9 @@ class scrollable:
 	def display(self):
 		text = self._text[:self.pos] + CHAR_CURSOR + self._text[self.pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
-		text = text[self.disp:self.disp+self.width]
+		text = text[self.disp:self.disp+self.width+1]
 		#-1 to compensate for the cursor
-		return text[-fitwordtolength(text[::-1],self.width)-1:]
+		return text[-fitwordtolength(text[::-1],self.width):]
 	#history next
 	def nexthist(self):
 		if len(self.history) > 0:
@@ -1015,7 +1011,7 @@ class main:
 		active = True
 		self.screen = screen
 		self.resize()
-		curses.curs_set(0)
+		#curses.curs_set(0)
 		for i in args:
 			i.start()
 		self.loop()
@@ -1040,22 +1036,25 @@ class main:
 		#draw each line in lines
 		for i in lines:
 			printLine(i)
+		#print('\x1b[u',end='')
 	#display a blurb
 	def _printblurb(self,string):
 		moveCursor(DIM_Y-RESERVE_LINES+2)
 		if strlen(string) > DIM_X:
 			string = string[fitwordtolength(string,DIM_X-3):]+'...'
-		printLine(string)
-		moveCursor(DIM_Y-RESERVE_LINES)
+		print(string,end="")
 		#for some reason, it won't update input drawing (in IME) until I print something
-		print('')
 	#display string in input
 	def _updateinput(self):
 		string = self.over.text.display()
 		moveCursor(DIM_Y-RESERVE_LINES+1)
+		#one works but not the other. what?
+		#print(string,end='\x1b[K')
 		printLine(string)
-		moveCursor(DIM_Y-RESERVE_LINES)
-		print('')
+		#dbmsg(string+'\x1b[u')
+		#print(string,end='\x1b[u')
+		#moveCursor(DIM_Y-RESERVE_LINES)
+		#print('')
 	#display info window
 	def _updateinfo(self,right,left):
 		moveCursor(DIM_Y)
@@ -1066,8 +1065,6 @@ class main:
 			raise DisplayException("Terminal size too small")
 		#selected, then turn off
 		print("\x1b[7m{}{}{}\x1b[0m".format(self.bottom_edges[0]," "*room,self.bottom_edges[1]),end="")
-		moveCursor(DIM_Y-RESERVE_LINES)
-		print('')
 
 	#=------------------------------=
 	#|	Frontends		|
