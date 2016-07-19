@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 #TODO: 		make it less of a dance for one overlay to replace another (overlay needs parent to do so) (maybe)
+#		make filtered messeges cooperate with selection (add third iterator in "going up loop"
 try:
 	import curses
 except ImportError:

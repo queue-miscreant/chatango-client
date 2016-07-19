@@ -430,7 +430,7 @@ def F5(self):
 		return ret
 	
 	def drawActive(string,i):
-		if filtered_channels[i]: return
+		if filtered_channels[i]: return string
 		col = i and i+12 or 16
 		string.insertColor(-1,col)
 		return string
