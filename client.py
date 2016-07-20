@@ -55,21 +55,21 @@ _CLEAR_FORMATTING = '\x1b[m'
 #overlay formatting
 CHAR_HSPACE = "─"
 CHAR_VSPACE = "│"
-CHAR_TLCORNER = "┌"
-CHAR_TRCORNER = "┐"
-CHAR_BLCORNER = "└"
-CHAR_BRCORNER = "┘"
-CHAR_CURSOR = "|"
-CHAR_COMMAND = "`"
+CHAR_TOPS = "┌┐"
+CHAR_BOTTOMS = "└┘"
+CHAR_CURSOR = '\x1b[s'
+#reload, newline, go up
+CHAR_RETURN_CURSOR = '\x1b[u\n\x1b[A'
+CHAR_COMMAND = "/"
 #lambdas
-_BOX_TOP = lambda: CHAR_TLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_TRCORNER
+_BOX_TOP = lambda: CHAR_TOPS[0] + (CHAR_HSPACE * (DIM_X-2)) + CHAR_TOPS[1]
 #just the number of spaces to justify
 _BOX_JUST = lambda x: DIM_X-2+sum([i.end(0)-i.start(0) for i in ANSI_ESC_RE.finditer(x)])
 #formatted and sandwiched
 _BOX_PART = lambda x: CHAR_VSPACE + x.ljust(_BOX_JUST(x)) + CHAR_VSPACE	
 #sandwiched between verticals
 _BOX_NOFORM = lambda x: CHAR_VSPACE + x + CHAR_VSPACE
-_BOX_BOTTOM = lambda: CHAR_BLCORNER + (CHAR_HSPACE * (DIM_X-2)) + CHAR_BRCORNER
+_BOX_BOTTOM = lambda: CHAR_BOTTOMS[0] + (CHAR_HSPACE * (DIM_X-2)) + CHAR_BOTTOMS[1]
 _SELECTED = lambda x: _EFFECTS[0] + x + _CLEAR_FORMATTING
 #------------------------------------------------------------------------------
 #list of curses keys
@@ -457,7 +457,7 @@ class listOverlay(overlayBase):
 		
 		if self.nummodes - 1:
 			printmode = self.modes[self.mode]
-			lines[-1] = CHAR_BLCORNER+printmode+CHAR_HSPACE*(maxx-len(printmode))+CHAR_BRCORNER
+			lines[-1] = CHAR_BOTTOMS[0]+printmode+CHAR_HSPACE*(maxx-len(printmode))+CHAR_BOTTOMS[1]
 		else:
 			lines[-1] = _BOX_BOTTOM()
 		return lines
@@ -545,30 +545,28 @@ class colorOverlay(overlayBase):
 	def onKEY_LEFT(self):
 		self.mode = (self.mode - 1) % 3
 
+#TODO add assurance tht the prompt isn't too long
 class inputOverlay(overlayBase):
 	replace = False
 	def __init__(self,prompt,password = False,end=False):
-		self.inpstr = ''
 		self.done = False
 		self.prompt = prompt+': '
+		#size = DIM_X-2-len(prompt)
+		self.text = scrollable(DIM_X-2-len(self.prompt))
 		self.password = password
 		self.end = end
 	def display(self,lines):
 		start = DIM_Y//2 - 2
 		room = DIM_X-2
 		lines[start] = _BOX_TOP()
-		out = self.prompt
 		#make sure we're not too long
-		lenout = len(out)
-		if lenout > room-2:
-			raise DisplayException("Terminal size too small")
 		inp = self.password and '*'*len(self.inpstr) or self.inpstr
 		out += inp[(len(inp)+lenout > room) and (len(inp)-room+lenout):]
 		lines[start+1] = _BOX_PART(out)
 		lines[start+2] = _BOX_BOTTOM()
 		return lines
 	def oninput(self,chars):
-		self.inpstr += bytes(chars).decode()
+		self.text.append(bytes(chars).decode())
 	def onbackspace(self):
 		self.inpstr = self.inpstr[:-1]
 	def onenter(self):
@@ -884,7 +882,7 @@ class scrollable:
 	def display(self):
 		text = self._text[:self.pos] + CHAR_CURSOR + self._text[self.pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
-		text = text[self.disp:self.disp+self.width+1]
+		text = text[self.disp:self.disp+self.width+3]
 		#-1 to compensate for the cursor
 		return text[-fitwordtolength(text[::-1],self.width):]
 	#history next
@@ -1036,25 +1034,19 @@ class main:
 		#draw each line in lines
 		for i in lines:
 			printLine(i)
-		#print('\x1b[u',end='')
+		print(CHAR_RETURN_CURSOR,end='')
 	#display a blurb
 	def _printblurb(self,string):
 		moveCursor(DIM_Y-RESERVE_LINES+2)
 		if strlen(string) > DIM_X:
 			string = string[fitwordtolength(string,DIM_X-3):]+'...'
-		print(string,end="")
+		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 		#for some reason, it won't update input drawing (in IME) until I print something
 	#display string in input
 	def _updateinput(self):
 		string = self.over.text.display()
 		moveCursor(DIM_Y-RESERVE_LINES+1)
-		#one works but not the other. what?
-		#print(string,end='\x1b[K')
-		printLine(string)
-		#dbmsg(string+'\x1b[u')
-		#print(string,end='\x1b[u')
-		#moveCursor(DIM_Y-RESERVE_LINES)
-		#print('')
+		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 	#display info window
 	def _updateinfo(self,right,left):
 		moveCursor(DIM_Y)
@@ -1064,7 +1056,7 @@ class main:
 		if room < 1:
 			raise DisplayException("Terminal size too small")
 		#selected, then turn off
-		print("\x1b[7m{}{}{}\x1b[0m".format(self.bottom_edges[0]," "*room,self.bottom_edges[1]),end="")
+		print("\x1b[7m{}{}{}\x1b[0m".format(self.bottom_edges[0]," "*room,self.bottom_edges[1]),end=CHAR_RETURN_CURSOR)
 
 	#=------------------------------=
 	#|	Frontends		|
@@ -1115,6 +1107,7 @@ class main:
 	def onerr(self):
 		global active
 		active = False
+		self.screen.nodelay(1)
 		self.msgSystem("An error occurred. Press any button to exit...")
 
 #wrapper for adding keys to the main interface
