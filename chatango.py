@@ -631,4 +631,5 @@ if __name__ == '__main__':
 	chatbot = chat_bot(creds)
 	#start
 	client.start(chatbot,chatbot.main)
-	chatbot.stop()
+	try: chatbot.stop()
+	except: pass

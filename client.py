@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 #TODO: 		make it less of a dance for one overlay to replace another (overlay needs parent to do so) (maybe)
-#		make filtered messeges cooperate with selection (add third iterator in "going up loop"
 try:
 	import curses
 except ImportError:
@@ -110,6 +109,8 @@ fromHexColor = lambda hexStr: [int(hexStr[2*i:2*i+2],16) for i in range(3)]
 colorers = []
 commands = {}
 filters = []
+#TODO wiki links are stupid and do jpg/other stuff
+#TODO some links are stupid and do jpg?other stuff
 class link_opener:
 	sites = {}
 #	__init__ is like a static __call__
@@ -141,6 +142,7 @@ def command(commandname):
 	def wrapper(func):
 		commands[commandname] = func
 	return wrapper
+#TODO lambda type
 def opener(typ,pore = None):
 	def wrap(func):
 		if typ == 0:
@@ -291,6 +293,7 @@ def preserveFormatting(line):
 		return ret + _LAST_COLOR_RE.findall(line)[-1]
 	except IndexError: return ret
 
+#TODO remove some freedom from this
 def breaklines(string, length = 0):
 	#if this is in the function args, it can't be changed later
 	if not length:
@@ -486,6 +489,10 @@ class colorOverlay(overlayBase):
 	def __init__(self,initcolor = [127,127,127]):
 		self.color = initcolor
 		self.mode = 0
+	def centered(x,y):
+		pre = x.rjust((wide+len(x))//2).ljust(wide)
+		if y==self.mode: pre = _SELECTED(pre)
+		return pre
 	#draw replacement
 	def display(self,lines):
 		wide = (DIM_X-2)//3 - 1
@@ -493,10 +500,6 @@ class colorOverlay(overlayBase):
 		if wide < 4 or space < 5:
 			raise DisplayException("Terminal size too small")
 		
-		def centered(x,y):
-			pre = x.rjust((wide+len(x))//2).ljust(wide)
-			if y==self.mode: pre = _SELECTED(pre)
-			return pre
 		lines[0] = _BOX_TOP()
 		for i in range(space):
 			string = ""
@@ -509,8 +512,8 @@ class colorOverlay(overlayBase):
 			lines[i+1] = _BOX_NOFORM(string.rjust(just-1).ljust(just))
 		
 		lines[-6] = _BOX_PART("")
-		names = "{}{}{}".format(*[centered(j,i) for i,j in enumerate(self.names)])
-		vals = "{}{}{}".format(*[centered(str(j),i) for i,j in enumerate(self.color)])
+		names = "{}{}{}".format(self.centered(j,i) for i,j in enumerate(self.names))
+		vals = "{}{}{}".format(self.centered(str(j),i) for i,j in enumerate(self.color))
 		lines[-5] = _BOX_PART(names) #4 lines
 		lines[-4] = _BOX_PART(vals) #3 line
 		lines[-3] = _BOX_PART("") #2 lines
@@ -560,15 +563,24 @@ class inputOverlay(overlayBase):
 		room = DIM_X-2
 		lines[start] = _BOX_TOP()
 		#make sure we're not too long
-		inp = self.password and '*'*len(self.inpstr) or self.inpstr
-		out += inp[(len(inp)+lenout > room) and (len(inp)-room+lenout):]
+		inp = self.text.display()
+		#preserve the cursor position save
+		if self.password:
+			inp = CHAR_CURSOR.join('*'*strlen(i) for i in inp.split(CHAR_CURSOR))
+		out = self.prompt + inp
 		lines[start+1] = _BOX_PART(out)
 		lines[start+2] = _BOX_BOTTOM()
 		return lines
 	def oninput(self,chars):
 		self.text.append(bytes(chars).decode())
 	def onbackspace(self):
-		self.inpstr = self.inpstr[:-1]
+		self.text.backspace()
+	def onKEY_LEFT(self):
+		self.text.movepos(-1)
+	def onKEY_RIGHT(self):
+		self.text.movepos(1)
+	def onalt_backspace(self):
+		self.text.delword()
 	def onenter(self):
 		self.done = True
 		return -1
@@ -577,13 +589,13 @@ class inputOverlay(overlayBase):
 			#raising SystemExit is dodgy, since curses.endwin won't get called
 			global active
 			active = False
-		self.inpstr = ''
+		self.text.clear()
 		return -1
 	#run in alternate thread to get input
 	def waitForInput(self):
 		while not self.done:
 			time.sleep(.1)
-		return self.inpstr
+		return str(self.text)
 
 class commandOverlay(inputOverlay):
 	replace = False
@@ -592,13 +604,11 @@ class commandOverlay(inputOverlay):
 		self.parent = client
 	def display(self,lines):
 		final = lines[-1]
-		content = CHAR_COMMAND + self.inpstr
+		content = CHAR_COMMAND + self.text.display()
 		lines[-1] = content + final[len(content):]
 		return lines
 	def onbackspace(self):
-		if not self.inpstr:
-			return -1
-		self.inpstr = self.inpstr[:-1]
+		self.text.backspace()
 	def onalt_backspace(self):
 		return -1
 	def onenter(self):
@@ -809,7 +819,7 @@ class mainOverlay(overlayBase):
 				selftraverse += direction #disregard this line
 				msgno -= direction #count lines down downward, up upward
 				continue
-			reverse = (msgno == self.selector) and _EFFECTS[0] or ""
+			reverse = (msgno == self.selector) and _EFFECTS[0]+CHAR_CURSOR or ""
 			lines[linetraverse] = reverse + self.lines[selftraverse]
 			selftraverse += direction
 			linetraverse += direction
@@ -825,6 +835,7 @@ class mainOverlay(overlayBase):
 #INPUT
 
 #scrollable text input
+#TODO fix drawing
 class scrollable:
 	def __init__(self,width):
 		self._text = ""
@@ -933,20 +944,20 @@ class main:
 	#crux of input
 	def input(self):
 		try:
-			chars = [self.screen.getch()]
+			next = -1
+			while next == -1:
+				next = self.screen.getch()
+			chars = [next]
+			while next != -1:
+				next = self.screen.getch()
+				chars.append(next)
 		except KeyboardInterrupt:
 			global active
 			active = False
 			return
-		#get as many chars as possible
-		self.screen.nodelay(1)
-		next = 0
-		while next+1:
-			next = self.screen.getch()
-			chars.append(next)
-		self.screen.nodelay(0)
 		keyAction = ""
 		#alt keys are of the form 27, (key sequence)
+		#TODO refine this so it's handled by overlays. less string manip
 		if len(chars) > 2 and chars[0] == 27:
 			chars.pop(0)
 			keyAction = 'alt_'
@@ -1008,8 +1019,8 @@ class main:
 		global active
 		active = True
 		self.screen = screen
+		self.screen.nodelay(1)
 		self.resize()
-		#curses.curs_set(0)
 		for i in args:
 			i.start()
 		self.loop()
@@ -1031,9 +1042,11 @@ class main:
 			lines = i.display(lines)
 		#main display method: move to top of screen
 		moveCursor()
+		curses.curs_set(0)
 		#draw each line in lines
 		for i in lines:
 			printLine(i)
+		curses.curs_set(1)
 		print(CHAR_RETURN_CURSOR,end='')
 	#display a blurb
 	def _printblurb(self,string):
@@ -1107,7 +1120,6 @@ class main:
 	def onerr(self):
 		global active
 		active = False
-		self.screen.nodelay(1)
 		self.msgSystem("An error occurred. Press any button to exit...")
 
 #wrapper for adding keys to the main interface
