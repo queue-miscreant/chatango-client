@@ -249,21 +249,22 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 #KEYS
 @client.onkey("enter")
 def onenter(self):
-	if self.selector:
+	if self.isselecting():
 		try:
-			message = self.allMessages[-self.selector]
+			message = self.msgup()
 			msg = client.decolor(message[0])+' '
 			alllinks = client.LINK_RE.findall(msg)
 			def openall():
 				for i in alllinks:
 					client.link_opener(self.parent,i)
 			if len(alllinks) > 1:
-				self.parent.msgSystem('Really open %d links? (y/n)'%len(alllinks))
+				self.parent.msgSystem('Really open %d links? (y/n)'%\
+					len(alllinks))
 				self.addOverlay(client.confirmOverlay(openall))
 			else:
 				openall()
 		except Exception as exc: client.dbmsg(exc)
-		return self.stopselect()
+		return
 	text = str(self.text)
 	#if it's not just spaces
 	if text.count(" ") != len(text):
@@ -272,20 +273,20 @@ def onenter(self):
 		self.text.appendhist(text)
 		#call the send
 		chatbot.tryPost(text.replace(r'\n','\n'))
-	self.stopselect()
 
 @client.onkey("tab")
 def ontab(self):
-	if self.selector:
+	if self.isselecting():
 		try:
 			#allmessages contain the colored message and arguments
 			message = self.msgup()
 			msg = client.decolor(message[0])
 			#first colon is separating the name from the message
 			msg = msg[msg.find(':')+2:]
-			self.text.append('@{}: `{}`'.format(message[1][0],msg.replace('`','')))
+			self.text.append('@{}: `{}`'.format(message[1][0],
+				msg.replace('`','')))
 		except: pass
-		return self.stopselect()
+		return 
 	#only search after the last space
 	lastSpace = str(self.text).rfind(" ")
 	search = str(self.text)[lastSpace + 1 and lastSpace:]
@@ -298,30 +299,26 @@ def ontab(self):
 			#up until the @
 			self.text.append(findName(afterReply,chatbot.members) + " ")
 
-@client.onkey('KEY_F3')
+@client.onkey('f3')
 def F3(self):
 	#special wrapper to manipulate inject functionality for newlines in the list
 	def select(me):
-		def ret():
-			current = me.list[me.it]
-			current = current.split(' ')[0]
-			if current[0] in "!#":
-				current = current[1:]
-			#reply
-			self.text.append("@%s " % current)
-			return -1
-		return ret
+		current = me.list[me.it]
+		current = current.split(' ')[0]
+		if current[0] in "!#":
+			current = current[1:]
+		#reply
+		self.text.append("@%s " % current)
+		return -1
 	def tab(me):
-		def ret():
-			global ignores
-			current = me.list[me.it]
-			current = current.split(' ')[0]
-			if current not in ignores:
-				ignores.append(current)
-			else:
-				ignores.remove(current)
-			self.redolines()
-		return ret
+		global ignores
+		current = me.list[me.it]
+		current = current.split(' ')[0]
+		if current not in ignores:
+			ignores.append(current)
+		else:
+			ignores.remove(current)
+		self.redolines()
 
 	dispList = {i:chatbot.members.count(i) for i in chatbot.members}
 	dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
@@ -333,102 +330,88 @@ def F3(self):
 	
 	box = client.listOverlay(sorted(dispList),drawIgnored)
 	box.addKeys({
-		'enter':select(box),
-		'tab':tab(box),
+		'enter':select,
+		'tab':tab,
 	})
 	
 	self.addOverlay(box)
 
-@client.onkey('KEY_F4')
+@client.onkey('f4')
 def F4(self):
 	#select which further input to display
 	def select(me):
-		def ret():
-			formatting = chatbot.creds['formatting']
-			furtherInput = None
-			#ask for font color
-			if me.it == 0:
-				def enter(me):
-					def ret():
-						formatting['fc'] = client.toHexColor(me.color)
-						chatbot.setFormatting(formatting)
-						return -1
-					return ret
+		formatting = chatbot.creds['formatting']
+		furtherInput = None
+		#ask for font color
+		if me.it == 0:
+			def enter(me):
+				formatting['fc'] = client.toHexColor(me.color)
+				chatbot.setFormatting(formatting)
+				return -1
 
-				furtherInput = client.colorOverlay(client.fromHexColor(formatting['fc']))
-				furtherInput.addKeys({
-					'enter':enter(furtherInput),
-				})
-			#ask for name color
-			elif me.it == 1:
-				def enter(me):
-					def ret():
-						formatting['nc'] = client.toHexColor(me.color)
-						chatbot.setFormatting(formatting)
-						return -1
-					return ret
+			furtherInput = client.colorOverlay(client.fromHexColor(formatting['fc']))
+			furtherInput.addKeys({
+				'enter':enter(furtherInput),
+			})
+		#ask for name color
+		elif me.it == 1:
+			def enter(me):
+				formatting['nc'] = client.toHexColor(me.color)
+				chatbot.setFormatting(formatting)
+				return -1
+		
+			furtherInput = client.colorOverlay(client.fromHexColor(formatting['nc']))
+			furtherInput.addKeys({
+				'enter':enter(furtherInput),
+			})
+		#font face
+		elif me.it == 2:
+			def enter(me):
+				formatting['ff'] = str(me.it)
+				chatbot.setFormatting(formatting)
+				return -1
 			
-				furtherInput = client.colorOverlay(client.fromHexColor(formatting['nc']))
-				furtherInput.addKeys({
-					'enter':enter(furtherInput),
-				})
-			#font face
-			elif me.it == 2:
-				def enter(me):
-					def ret():
-						formatting['ff'] = str(me.it)
-						chatbot.setFormatting(formatting)
-						return -1
-					return ret
+			furtherInput = client.listOverlay(FONT_FACES)
+			furtherInput.addKeys({
+				'enter':enter(furtherInput),
+			})
+			furtherInput.it = int(formatting['ff'])
+		#ask for font size
+		elif me.it == 3:
+			def enter(me):
+				formatting['fz'] = FONT_SIZES[me.it]
+				chatbot.setFormatting(formatting)
+				return -1
 				
-				furtherInput = client.listOverlay(FONT_FACES)
-				furtherInput.addKeys({
-					'enter':enter(furtherInput),
-				})
-				furtherInput.it = int(formatting['ff'])
-			#ask for font size
-			elif me.it == 3:
-				def enter(me):
-					def ret():
-						formatting['fz'] = FONT_SIZES[me.it]
-						chatbot.setFormatting(formatting)
-						return -1
-					return ret
-					
-				furtherInput = client.listOverlay([i for i in map(str,FONT_SIZES)])
-				furtherInput.addKeys({
-					'enter':enter(furtherInput),
-				})
-				furtherInput.it = FONT_SIZES.index(formatting['fz'])
-			#insurance
-			if furtherInput is None: raise Exception("How is this error even possible?")
-			#add the overlay
-			self.addOverlay(furtherInput)
-			#set formatting, even if changes didn't occur
-		return ret
+			furtherInput = client.listOverlay([i for i in map(str,FONT_SIZES)])
+			furtherInput.addKeys({
+				'enter':enter(furtherInput),
+			})
+			furtherInput.it = FONT_SIZES.index(formatting['fz'])
+		#insurance
+		if furtherInput is None: raise Exception("How is this error even possible?")
+		#add the overlay
+		self.addOverlay(furtherInput)
+		#set formatting, even if changes didn't occur
 		
 	box = client.listOverlay(["Font Color", "Name Color", "Font Face", "Font Size"])
 	box.addKeys({
-		'enter':select(box),
+		'enter':select,
 	})
 	
 	self.addOverlay(box)
 
-@client.onkey('KEY_F5')
+@client.onkey('f5')
 def F5(self):
 	def select(me):
-		def ret():
-			chatbot.channel = me.it
-			return -1
-		return ret
+		chatbot.channel = me.it
+		return -1
 	
 	def ontab(me):
-		def ret():
-			global filtered_channels
-			#space only
-			filtered_channels[me.it] = not filtered_channels[me.it]
-			self.redolines()
-		return ret
+		global filtered_channels
+		#space only
+		filtered_channels[me.it] = not filtered_channels[me.it]
+		self.redolines()
 	
 	def drawActive(string,i):
 		if filtered_channels[i]: return string
@@ -438,8 +421,8 @@ def F5(self):
 					
 	box = client.listOverlay(["None", "Red", "Blue", "Both"],drawActive)
 	box.addKeys({
-		'enter':select(box),
-		'tab':ontab(box),
+		'enter':select,
+		'tab':ontab,
 	})
 	box.it = chatbot.channel
 	

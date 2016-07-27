@@ -17,7 +17,6 @@ if not sys.stdout.isatty():
 #escape has delay typically
 environ.setdefault('ESCDELAY', '25')
 
-client = None
 active = False
 lastlinks = []
 
@@ -25,6 +24,7 @@ WORD_RE = re.compile("[^ ]* ")
 ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")
 LINK_RE = re.compile("(https?://.+?\\.[^\n` 　]+)[\n` 　]")
 _LAST_COLOR_RE = re.compile("\x1b"+r"\[[^m]*3[^m]*[^m]*m")
+_UP_TO_WORD_RE = re.compile('(.* )[^ ]+ *')
 INDENT_LEN = 4
 INDENT_STR = ""
 LAST_INPUT = ""
@@ -70,34 +70,45 @@ _BOX_PART = lambda x: CHAR_VSPACE + x.ljust(_BOX_JUST(x)) + CHAR_VSPACE
 _BOX_NOFORM = lambda x: CHAR_VSPACE + x + CHAR_VSPACE
 _BOX_BOTTOM = lambda: CHAR_BOTTOMS[0] + (CHAR_HSPACE * (DIM_X-2)) + CHAR_BOTTOMS[1]
 _SELECTED = lambda x: _EFFECTS[0] + x + _CLEAR_FORMATTING
+def centered(string,width,isselected):
+	pre = string.rjust((width+len(x))//2).ljust(wide)
+	if isselected: pre = _SELECTED(pre)
+	return pre
 #------------------------------------------------------------------------------
 #list of curses keys
 #used internally to redirect curses keys
 _CURSES_KEYS = {
-	9:  'tab',	#htab
-	10: 'enter',	#line feed
-	13: 'enter',	#carriage return
-	27: 'escape',	#escape
-	127:'backspace',#delete character
-	525:'alt_down', #alt down
-	566:'alt_up',	#alt up
+	'tab':		9
+	,'enter':	10
+	,'backspace':	127
+}
+_KEY_LUT = {
+	#curses redirects ctrl-h here for some reason
+	curses.KEY_BACKSPACE:	127
+	#numpad enter
+	,curses.KEY_ENTER:	10
+	#ctrl-m to ctrl-j (carriage return to line feed)
+	#this really shouldn't be necessary, since curses does that
+	,13:			10
+					
 }
 for i in dir(curses):
-	if "KEY" in i:
-		_CURSES_KEYS[getattr(curses,i)] = i
-_CURSES_KEYS[curses.KEY_ENTER] = 'enter'
-_CURSES_KEYS[curses.KEY_BACKSPACE] = 'backspace'
-_CURSES_KEYS[curses.KEY_RESIZE] = 'resize'
+	if "KEY_" in i:
+		name = i[4:].lower()
+		if name not in _CURSES_KEYS: #don't map KEY_BACKSPACE or KEY_ENTER
+			_CURSES_KEYS[name] = getattr(curses,i)
 
 class KeyException(Exception): pass
 
-def defineKey(value,string):
-	if string in _CURSES_KEYS.values(): raise KeyException("Key '{}' already defined".format(string))
-	_CURSES_KEYS[value] = string
-
+#we should be cloning one character to another
 def cloneKey(fro,to):
-	if fro not in _CURSES_KEYS.values(): raise KeyException("Key '{}' not defined")
-	_CURSES_KEYS[to] = _CURSES_KEYS[fro]
+	try:
+		if isinstance(fro,str):
+			fro = _CURSES_KEYS[fro]
+		if isinstance(to,str):
+			to = _CURSES_KEYS[to]
+	except: raise KeyException("%s or %s is an invalid key name"%(fro,to))
+	_KEY_LUT[fro] = to
 
 #------------------------------------------------------------------------------
 #conversions to and from hex strings ([255,255,255] <-> FFFFFF)
@@ -169,16 +180,16 @@ def parseLinks(raw):
 @command('help')
 def listcommands(cli,args):
 	def select(self):
-		def ret():
-			new = commandOverlay(cli)
-			new.inpstr = self.list[self.it]
-			cli.replaceOverlay(new)
-		return ret
+		new = commandOverlay(cli)
+		new.text.clear()
+		new.text.append(self.list[self.it])
+		cli.replaceOverlay(new)
+
 	commandsList = listOverlay(list(commands))
 	commandsList.addKeys({
-		'enter':select(commandsList)
+		'enter':select
 	})
-	cli.addOverlay(commandsList)
+	return commandsList
 	
 #------------------------------------------------------------------------------
 #COLORING METHODS
@@ -280,7 +291,8 @@ def fitwordtolength(string,length):
 		escape = temp
 	return lentr + 1
 
-#preserve formatting. this isn't necessary (if you remove the preset colorer), but it looks better
+#preserve formatting. this isn't necessary (if you remove the preset colorer)
+#but it looks better
 def preserveFormatting(line):
 	ret = ''
 	#only fetch after the last clear
@@ -301,6 +313,7 @@ def breaklines(string, length = 0):
 	tab = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
 	THRESHOLD = length/2
 	TABSPACE = length - len(tab)
+	string = string.expandtabs(len(tab))
 
 	broken = []
 	form = ''
@@ -372,35 +385,64 @@ class schedule:
 		self.debounce = newbounce
 		return prev
 
+quitlambda = lambda x: -1
+staticize = lambda x: lambda y: x()
+staticize2 = lambda x,y: lambda z: x(y)
+
 #overlays
 class overlayBase:
-	def onescape(self):
-		return -1
-	def display(self):
-		raise DisplayException("Overlay without corresponding display")
+	_altkeys = {
+		None:	lambda: -1
+	}
+	#interface for adding pre-runtime
+	addoninit = {}
+	#this only needs to be called if you're adding things pre-runtime
+	def __init__(self):
+		self._keys = {27:self._callalt}
+		self.addKeys(self.addoninit)
+	def __call__(self,chars):
+		try:
+			char = _KEY_LUT[chars[0]]
+		except: char = chars[0]
+		if char in self._keys:	#ignore the command character and trailing -1
+			return self._keys[char](chars[1:-1] or [None]) or self.post()
+		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
+			return self._keys[-1](chars[:-1]) or self.post()
+	def _callalt(self,chars):
+		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
+	def display(self,*args):
+		raise DisplayException("%s.display not defined"%type(self).__name__)
+	def post(self):
+		pass
 	#nice method to add keys whenever
 	def addKeys(self,newFunctions = {}):
 		for i,j in newFunctions.items():
-			if type(i) == str:
-				setattr(self,"on"+i,j)
-			else:
-				setattr(self,"on"+_CURSES_KEYS[i],j)
+			if isinstance(i,str):
+				if i.find('a-') == 0:
+					i = i[2:]
+					if i in _CURSES_KEYS[i]:
+						i = _CURSES_KEYS[i]
+					elif len(i) == 1:
+						i = ord(i)
+					else: raise KeyException('key alt-%s invalid'%i)
+				try:
+					i = _CURSES_KEYS[i]
+				except: raise KeyException('key %s not defined'%i)
+			self._keys[i] = staticize2(j,self)
 	def addResize(self,other):
-		setattr(self,"onresize",other.resize)
+		self._keys[curses.KEY_RESIZE] = staticize(other.resize)
 
 #yes, this is this simple
 class confirmOverlay(overlayBase):
 	replace = False
 	def __init__(self,confirmfunc):
-		self.confirm = confirmfunc
+		overlayBase.__init__(self)
+		self._keys.update({
+			ord('y'):	staticize(confirmfunc) #TECHNOLOGY
+			,ord('n'):	quitlambda
+		})
 	def display(self,lines):
 		return lines
-	def oninput(self,chars):
-		cmd = chr(chars[0]).lower()
-		if cmd == 'y':
-			self.confirm()
-		elif cmd == 'n':
-			return -1
 
 class listOverlay(overlayBase):
 	replace = True
@@ -410,6 +452,7 @@ class listOverlay(overlayBase):
 	#		  1	2	3
 	setmins(7,3+RESERVE_LINES)
 	def __init__(self,outList,drawOther = None,modes = [""]):
+		overlayBase.__init__(self)
 		self.it = 0
 		self.mode = 0
 		self.list = outList
@@ -417,18 +460,23 @@ class listOverlay(overlayBase):
 			setattr(self,"drawOther",drawOther)
 		self.modes = modes
 		self.nummodes = len(modes)
+		self._keys.update({
+			ord('j'):	staticize2(self.increment,1) #V I M
+			,ord('k'):	staticize2(self.increment,-1)
+			,ord('`'):	quitlambda
+			,curses.KEY_DOWN:	staticize2(self.increment,1)
+			,curses.KEY_UP:		staticize2(self.increment,-1)
+			,curses.KEY_RIGHT:	staticize2(self.chmode,1)
+			,curses.KEY_LEFT:	staticize2(self.chmode,-1)
+		})
 	
-	def oninput(self,text):
-		command = chr(text[0])
-		#V I M
-		#I
-		#M
-		if command == 'j': #down
-			self.onKEY_DOWN()
-		elif command == 'k': #up
-			self.onKEY_UP()
-		elif command == '`':
-			return -1
+	#predefined list iteration methods
+	def increment(self,amt):
+		if not len(self.list): return
+		self.it += amt
+		self.it %= len(self.list)
+	def chmode(self,amt):
+		self.mode = (self.mode + amt) % self.nummodes
 	
 	def display(self,lines):
 		lines[0] = _BOX_TOP()
@@ -464,19 +512,6 @@ class listOverlay(overlayBase):
 		else:
 			lines[-1] = _BOX_BOTTOM()
 		return lines
-	#predefined list iteration methods
-	def onKEY_UP(self):
-		if not len(self.list): return
-		self.it -= 1
-		self.it %= len(self.list)
-	def onKEY_DOWN(self):
-		if not len(self.list): return
-		self.it += 1
-		self.it %= len(self.list)
-	def onKEY_RIGHT(self):
-		self.mode = (self.mode + 1) % self.nummodes
-	def onKEY_LEFT(self):
-		self.mode = (self.mode - 1) % self.nummodes
 
 class colorOverlay(overlayBase):
 	replace = True
@@ -487,19 +522,32 @@ class colorOverlay(overlayBase):
 	#		  1	2     3	 4	5 6  7  8
 	setmins(17,8+RESERVE_LINES)
 	def __init__(self,initcolor = [127,127,127]):
+		overlayBase.__init__(self)
 		self.color = initcolor
 		self.mode = 0
-	def centered(x,y):
-		pre = x.rjust((wide+len(x))//2).ljust(wide)
-		if y==self.mode: pre = _SELECTED(pre)
-		return pre
-	#draw replacement
+		self._keys.update({
+			ord('`'):		quitlambda
+			,ord('k'):		staticize2(self.increment,1)
+			,ord('j'):		staticize2(self.increment,-1)
+			,curses.KEY_UP:		staticize2(self.increment,1)
+			,curses.KEY_DOWN:	staticize2(self.increment,-1)
+			,curses.KEY_PPAGE:	staticize2(self.increment,10)
+			,curses.KEY_NPAGE:	staticize2(self.increment,-10)
+			,curses.KEY_HOME:	staticize2(self.increment,255)
+			,curses.KEY_END:	staticize2(self.increment,-255)
+			,curses.KEY_LEFT:	staticize2(self.chmode,-1)
+			,curses.KEY_RIGHT:	staticize2(self.chmode,1)
+		})
+	#color manipulation: mode represents color selected
+	def increment(self,amt):
+		self.color[self.mode] += amt
+		if self.color[self.mode] > 255:
+			self.color[self.mode] = 255
+	def chmode(self,amt):
+		self.mode = (self.mode + amt) % 3
 	def display(self,lines):
 		wide = (DIM_X-2)//3 - 1
 		space = DIM_Y-RESERVE_LINES-7
-		if wide < 4 or space < 5:
-			raise DisplayException("Terminal size too small")
-		
 		lines[0] = _BOX_TOP()
 		for i in range(space):
 			string = ""
@@ -512,52 +560,52 @@ class colorOverlay(overlayBase):
 			lines[i+1] = _BOX_NOFORM(string.rjust(just-1).ljust(just))
 		
 		lines[-6] = _BOX_PART("")
-		names = "{}{}{}".format(self.centered(j,i) for i,j in enumerate(self.names))
-		vals = "{}{}{}".format(self.centered(str(j),i) for i,j in enumerate(self.color))
+		names = "{}{}{}".format(*[centered(j,wide,i==self.mode) for i,j in enumerate(self.names)])
+		vals = "{}{}{}".format(*[centered(str(j),wide,i==self.mode) for i,j in enumerate(self.color)])
 		lines[-5] = _BOX_PART(names) #4 lines
 		lines[-4] = _BOX_PART(vals) #3 line
 		lines[-3] = _BOX_PART("") #2 lines
 		lines[-2] = _BOX_PART(toHexColor(self.color).rjust(int(wide*1.5)+3)) #1 line
 		lines[-1] = _BOX_BOTTOM() #last line
 		return lines
-	#color manipulation: mode represents color selected
-	def onKEY_UP(self):
-		self.color[self.mode] += 1
-		if self.color[self.mode] > 255:
-			self.color[self.mode] = 255
-	def onKEY_DOWN(self):
-		self.color[self.mode] -= 1
-		if self.color[self.mode] < 0:
-			self.color[self.mode] = 0
-	#pageup
-	def onKEY_PPAGE(self):
-		self.color[self.mode] += 10
-		if self.color[self.mode] > 255:
-			self.color[self.mode] = 255
-	#pagedown
-	def onKEY_NPAGE(self):
-		self.color[self.mode] -= 10
-		if self.color[self.mode] < 0:
-			self.color[self.mode] = 0
-	def onKEY_HOME(self):
-		self.color[self.mode] = 255
-	def onKEY_END(self):
-		 self.color[self.mode] = 0
-	def onKEY_RIGHT(self):
-		self.mode = (self.mode + 1) % 3
-	def onKEY_LEFT(self):
-		self.mode = (self.mode - 1) % 3
 
-#TODO add assurance tht the prompt isn't too long
 class inputOverlay(overlayBase):
 	replace = False
 	def __init__(self,prompt,password = False,end=False):
+		overlayBase.__init__(self)
 		self.done = False
 		self.prompt = prompt+': '
-		#size = DIM_X-2-len(prompt)
-		self.text = scrollable(DIM_X-2-len(self.prompt))
+		roomleft = DIM_X-2-len(self.prompt)
+		if roomleft <= 2:
+			raise DisplayException("inputOverlay prompt too small")
+		self.text = scrollable(roomleft)
 		self.password = password
 		self.end = end
+		self._keys.update({
+			-1:	self.input
+			,10:	staticize(self.finish)
+			,127:	staticize(self.text.backspace)
+			,curses.KEY_LEFT:	staticize2(self.text.movepos,-1)
+			,curses.KEY_RIGHT:	staticize2(self.text.movepos,1)
+		})
+		self._altkeys.update({
+			None:	self.stop
+			,127:	self.text.backspace
+		})
+	def input(self,chars):
+		self.text.append(bytes(chars).decode())
+	#we stopped
+	def finish(self):
+		self.done = True
+		return -1
+	#premature stops, clear beforehand
+	def stop(self):
+		if self.end:
+			#raising SystemExit is dodgy, since curses.endwin won't get called
+			global active
+			active = False
+		self.text.clear()
+		return -1
 	def display(self,lines):
 		start = DIM_Y//2 - 2
 		room = DIM_X-2
@@ -571,26 +619,6 @@ class inputOverlay(overlayBase):
 		lines[start+1] = _BOX_PART(out)
 		lines[start+2] = _BOX_BOTTOM()
 		return lines
-	def oninput(self,chars):
-		self.text.append(bytes(chars).decode())
-	def onbackspace(self):
-		self.text.backspace()
-	def onKEY_LEFT(self):
-		self.text.movepos(-1)
-	def onKEY_RIGHT(self):
-		self.text.movepos(1)
-	def onalt_backspace(self):
-		self.text.delword()
-	def onenter(self):
-		self.done = True
-		return -1
-	def onescape(self):
-		if self.end:
-			#raising SystemExit is dodgy, since curses.endwin won't get called
-			global active
-			active = False
-		self.text.clear()
-		return -1
 	#run in alternate thread to get input
 	def waitForInput(self):
 		while not self.done:
@@ -602,108 +630,105 @@ class commandOverlay(inputOverlay):
 	def __init__(self,client):
 		inputOverlay.__init__(self,'')
 		self.parent = client
-	def display(self,lines):
-		final = lines[-1]
-		content = CHAR_COMMAND + self.text.display()
-		lines[-1] = content + final[len(content):]
-		return lines
-	def onbackspace(self):
+		self._keys.update({
+			10:	staticize(self.run)
+			,127:	staticize(self.backspacewrap)
+		})
+		self._altkeys.update({
+			127:	lambda: -1
+		})
+	def backspacewrap(self):
+		if str(self.text) == '':
+			return -1
 		self.text.backspace()
-	def onalt_backspace(self):
-		return -1
-	def onenter(self):
-		#when this function is delegated, it's at the top of the ins stack; I can't return -1 
-		#without the function terminating early, and it's too late at the end if a command opens an overlay
-		#pop from the top now
-		self.parent.ins.pop()
-		self.parent.display()
-		text = self.inpstr
+	def run(self):
+		text = str(self.text)
 		space = text.find(' ')
 		command = space == -1 and text or text[:space]
 		try:
 			command = commands[command]
-			command(self.parent,text[space+1:].split(' '))
-		except Exception as esc: dbmsg(esc)
+			add = command(self.parent,text[space+1:].split(' '))
+			if isinstance(add,overlayBase):
+				self.parent.replaceOverlay(add)
+		except Exception as esc: pass
+	def display(self,lines):
+		lines[-1] = CHAR_COMMAND + self.text.display()
+		return lines
 
 class mainOverlay(overlayBase):
 	replace = True
 	#sequence between messages to draw reversed
-	msgSplit = "\x1b" 
+	_msgSplit = "\x1b" 
 	def __init__(self,parent):
+		overlayBase.__init__(self)
 		self.text = scrollable(DIM_X)
-		self.allMessages = []
-		self.lines = []
-		self.selector = 0
-		self.filtered = 0
+		#these two REALLY need to be private
+		self._allMessages = []
+		self._lines = []
+		#these two too because they select the previous two
+		self._selector = 0
+		self._filtered = 0
 		self.parent = parent
-	#backspace
-	def onbackspace(self):
-		self.text.backspace()
-		self.stopselect()
-	def onKEY_DC(self):
-		self.text.delback()
-		self.stopselect()
+		self._keys.update({
+			-1:			self.input
+			,127:			staticize(self.text.backspace)
+			,curses.KEY_DC:		staticize(self.text.delback)
+			,curses.KEY_SHOME:	staticize(self.text.delback)
+			,curses.KEY_RIGHT:	staticize2(self.text.movepos,1)
+			,curses.KEY_LEFT:	staticize2(self.text.movepos,-1)
+			,curses.KEY_UP:		lambda x: self.text.prevhist() or 1 #return 1
+			,curses.KEY_DOWN:	lambda x: self.text.nexthist() or 1 #return 1
+			,curses.KEY_HOME:	staticize(self.text.home)
+			,curses.KEY_END:	staticize(self.text.end)
+			,curses.KEY_F2:		lambda x: self.piclist() or 1
+			,curses.KEY_RESIZE:	staticize(self.parent.resize)
+		})
+		self._altkeys.update({
+			ord('k'):		self.selectup	#muh vim t. me
+			,ord('j'):		self.selectdown
+			,127:			self.text.delword
+		})
+	def isselecting(self):
+		return self._selector
 	#any other key
-	def oninput(self,chars):
-		if not str(self.text) and len(chars) == 1 and chars[0] == ord(CHAR_COMMAND):
+	def input(self,chars):
+		if not str(self.text) and len(chars) == 1 and \
+		chars[0] == ord(CHAR_COMMAND):
 			self.addOverlay(commandOverlay(self.parent))
 			return
 		#allow unicode input
 		self.text.append(bytes(chars).decode())
-		self.stopselect()
-	#home
-	def onKEY_SHOME(self):
-		self.text.clear()
-		self.stopselect()
-	#arrow keys
-	def onKEY_LEFT(self):
-		self.text.movepos(-1)
-		self.stopselect()
-	def onKEY_RIGHT(self):
-		self.text.movepos(1)
-		self.stopselect()
-	def onKEY_UP(self):
-		self.text.nexthist()
-	def onalt_up(self):
-		self.selector += 1
-		self.selector = min(self.selector,len(self.allMessages)-self.filtered)
-	def onalt_k(self):
-		self.onalt_up()
-	def onKEY_DOWN(self):
-		self.text.prevhist()
-	def onalt_down(self):
-		self.selector -= 1
-		self.selector = max(self.selector,0)
-		#schedule a redraw since we're not highlighting any more
-		if not self.selector:
+	#stop selecting
+	def post(self):
+		if self._selector:
+			self._selector = 0
 			self.parent.display()
-	def onalt_j(self):
-		self.onalt_down()
-	def onKEY_HOME(self):
-		self.text.home()
-		self.stopselect()
-	def onKEY_END(self):
-		self.text.end()
-		self.stopselect()
-	#shifted delete = backspace word
-	def onalt_backspace(self):
-		self.text.delword()
-		self.stopselect()
+	#select message down/up
+	def selectup(self):
+		self._selector += 1
+		self._selector = min(self._selector,
+			len(self._allMessages)-self._filtered)
+		return 1 #don't stop selecting
+	def selectdown(self):
+		self._selector -= 1
+		self._selector = max(self._selector,0)
+		#schedule a redraw since we're not highlighting any more
+		if not self._selector:
+			self.parent._display()
+		return 1
 	#f2
-	def onKEY_F2(self):
+	def piclist(self):
 		#special wrapper to inject functionality for newlines in the list
 		def select(me):
-			def ret():
-				if not len(lastlinks): return
-				current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
-				current = lastlinks[int(current)-1] #this enforces the wanted link is selected
-				if not me.mode:
-					link_opener(self.parent,current)
-				else:
-					link_opener(self.parent,current,True)
-				#exit
-				return -1
-			return ret
+			if not len(lastlinks): return
+			current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
+			current = lastlinks[int(current)-1] #this enforces the wanted link is selected
+			if not me.mode:
+				link_opener(self.parent,current)
+			else:
+				link_opener(self.parent,current,True)
+			#exit
+			return -1
 		
 		#take out the protocol
 		dispList = [i.replace("http://","").replace("https://","") for i in reversed(lastlinks)]
@@ -712,81 +737,75 @@ class mainOverlay(overlayBase):
 	
 		box = listOverlay(dispList,None,["open","force"])
 		box.addKeys({
-			'enter':select(box),
+			'enter':select,
 		})
 		self.addOverlay(box)
-	#resize
-	def onresize(self):
-		self.parent.resize()
 
-	def stopselect(self):
-		if self.selector:
-			self.selector = 0
-			self.parent.display()
 	#add new messages
 	def append(self,newline,args = None):
 		#undisplayed messages have length zero
 		msg = [newline,args,0]
 		try:
 			if any(i(*args) for i in filters):
-				self.allMessages.append(msg)
-				self.filtered += 1
+				self._allMessages.append(msg)
+				self._filtered += 1
 				return
 		except: pass
 		a,b = breaklines(newline)
-		self.lines += a
+		self._lines += a
 		msg[2] = b
-		self.allMessages.append(msg)
-		self.lines.append(self.msgSplit)
-		self.selector += self.cangoup()
+		self._allMessages.append(msg)
+		self._lines.append(self._msgSplit)
+		self._selector += self.cangoup()
 
 	def msgup(self,num = None):
-		if num is None: num = self.selector
+		if num is None: num = self._selector
 		i,count = 1,1
-		while (i <= len(self.allMessages)) and (count <= num):
-			j = self.allMessages[-i]
+		while (i <= len(self._allMessages)) and (count <= num):
+			j = self._allMessages[-i]
 			i += 1
 			try:
 				if any(k(*j[1]) for k in filters):
 					continue
 			except: pass
 			count += 1
-		return self.allMessages[-i+1]
+		return self._allMessages[-i+1]
 	
 	def cangoup(self):
-		return self.selector>0 and (self.selector+self.filtered > len(self.allMessages))
+		return self._selector>0 and \
+		(self._selector+self._filtered > len(self._allMessages))
 
 	#does what it says
 	def redolines(self):
 		newlines = []
-		self.filtered = 0
+		self._filtered = 0
 		#get the last terminal line number of messages (worst case)
-		for i in self.allMessages[-(DIM_Y-RESERVE_LINES):]:
+		for i in self._allMessages[-(DIM_Y-RESERVE_LINES):]:
 			try:
 				if any(j(*i[1]) for j in filters):
-					self.filtered += 1
+					self._filtered += 1
 					continue
 			except: pass
 			a,b = breaklines(i[0])
 			newlines += a
 			i[2] = b
-			newlines.append(self.msgSplit)
+			newlines.append(self._msgSplit)
 		self.lines = newlines
 
 	#add lines into lines supplied
 	def display(self,lines):
 		#seperate traversals
 		selftraverse,linetraverse = -1,-2
-		lenself, lenlines = len(self.lines),len(lines)
+		lenself, lenlines = len(self._lines),len(lines)
 		msgno = 0
 		direction = -1 #upward by default
 		#we need to go up a certain number of lines if we're drawing from selector
-		if self.selector:
+		if self._selector:
 			#number of messages up, number of lines traversed up, number of lines visible up
 			top,start,visup = 0,0,0
-			lenmsg = len(self.allMessages)
-			while start < lenmsg and (start < self.selector or (top-visup+1) < lenlines):
-				i = self.allMessages[-start-1]
+			lenmsg = len(self._allMessages)
+			while start < lenmsg and (start < self._selector or (top-visup+1) < lenlines):
+				i = self._allMessages[-start-1]
 				start += 1
 				try:
 					if any(j(*i[1]) for j in filters):
@@ -795,13 +814,13 @@ class mainOverlay(overlayBase):
 				visup += 1
 				top += i[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
 				#if we've already surpassed self.lines, we need to add to self.lines
-				if top > len(self.lines):
+				if top > len(self._lines):
 					a,b = breaklines(i[0])
-					a.append(self.msgSplit)
-					self.lines = a + self.lines
+					a.append(self._msgSplit)
+					self._lines = a + self._lines
 					i[2] = b
 			#adjust if we went too far up
-			if visup > self.selector:
+			if visup > self._selector:
 				top = min(top,top+lenlines-(top-visup+1))
 			#we start drawing from this line, downward
 			selftraverse = -top
@@ -815,18 +834,16 @@ class mainOverlay(overlayBase):
 			lenself = -1 #int <= -1 <=> int < 0
 		#this looks horrible, but it's DRY
 		while (direction*selftraverse) <= lenself and (direction*linetraverse) <= lenlines:
-			if self.lines[selftraverse] == self.msgSplit:
+			if self._lines[selftraverse] == self._msgSplit:
 				selftraverse += direction #disregard this line
 				msgno -= direction #count lines down downward, up upward
 				continue
-			reverse = (msgno == self.selector) and _EFFECTS[0]+CHAR_CURSOR or ""
-			lines[linetraverse] = reverse + self.lines[selftraverse]
+			reverse = (msgno == self._selector) and _EFFECTS[0]+CHAR_CURSOR or ""
+			lines[linetraverse] = reverse + self._lines[selftraverse]
 			selftraverse += direction
 			linetraverse += direction
 		lines[-1] = CHAR_HSPACE*DIM_X
 		return lines
-	def stats(self):
-		return repr(self.allMessages[-self.selector][0])
 	#window frontend
 	def addOverlay(self,new):
 		self.parent.addOverlay(new)
@@ -839,78 +856,77 @@ class mainOverlay(overlayBase):
 class scrollable:
 	def __init__(self,width):
 		self._text = ""
-		self.pos = 0
-		self.disp = 0
+		self._pos = 0
+		self._disp = 0
+		self.width = width
 		self.history = []
 		self.selhis = 0
-		self.width = width
 	#return the raw text contained within it
 	def __repr__(self):
 		return self._text
 	#append new characters and move that length
 	def append(self,new):
-		self._text = self._text[:self.pos] + new + self._text[self.pos:]
+		self._text = self._text[:self._pos] + new + self._text[self._pos:]
 		self.movepos(len(new))
 	#backspace
 	def backspace(self):
-		if not self.pos: return #don't backspace at the beginning of the line
-		self._text = self._text[:self.pos-1] + self._text[self.pos:]
+		if not self._pos: return #don't backspace at the beginning of the line
+		self._text = self._text[:self._pos-1] + self._text[self._pos:]
 		self.movepos(-1)
 	#delete char back
 	def delback(self):
-		self._text = self._text[:self.pos] + self._text[self.pos+1:]
+		self._text = self._text[:self._pos] + self._text[self._pos+1:]
 	#delete word
 	def delword(self):
-		pos = (' '+self._text[:self.pos]).rfind(' ')
-		if not pos+1: return
-		if not pos:
-			self._text = self._text[self.pos:]
-			self.disp = 0
-			self.pos = 0
-			return
-		self._text = self._text[:pos-1] + self._text[self.pos:]
-		#move back the word length
-		self.movepos(pos-self.pos-1)
+		pos = _UP_TO_WORD_RE.match(' '+self._text[:self._pos])
+		if pos:
+			#we started with a space
+			span = pos.span(1)[1] - 1
+			#how far we went
+			self._text = self._text[:span] + self._text[self._pos:]
+			self.movepos(self._pos-span)
+		else:
+			self._text = self._text[self._pos:]
+			self._disp = 0
+			self._pos = 0
 	#clear the window
 	def clear(self):
 		self._text = ""
-		self.pos = 0
-		self.disp = 0
+		self._pos = 0
+		self._disp = 0
 	#home and end functions
 	def home(self):
-		self.pos = 0
-		self.disp = 0
+		self._pos = 0
+		self._disp = 0
 	def end(self):
 		self.home()
 		self.movepos(len(self._text))
 	#move the cursor and display
 	def movepos(self,dist):
-		self.pos = max(0,min(len(self._text),self.pos+dist))
+		self._pos = max(0,min(len(self._text),self._pos+dist))
 		#if we're at the end, but not the beginning OR we're past the width, move the cursor
-		if (self.pos == self.disp and self.pos != 0) or (self.pos-self.disp+1) >= self.width:
-			self.disp = max(0,min(self.pos-self.width+1,self.disp+dist))
+		if (self._pos == self._disp and self._pos != 0) or (self._pos-self._disp+1) >= self.width:
+			self._disp = max(0,min(self._pos-self.width+1,self._disp+dist))
 	#display some text
 	def display(self):
-		text = self._text[:self.pos] + CHAR_CURSOR + self._text[self.pos:]
+		text = self._text[:self._pos] + CHAR_CURSOR + self._text[self._pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
-		text = text[self.disp:self.disp+self.width+3]
+		text = text[self._disp:self._disp+self.width+3]
 		#-1 to compensate for the cursor
 		return text[-fitwordtolength(text[::-1],self.width):]
 	#history next
 	def nexthist(self):
-		if len(self.history) > 0:
+		if self.history:
 			self.selhis += (self.selhis < (len(self.history)))
 			self._text = self.history[-self.selhis]
-			self.disp = 0
-			self.movepos(len(self._text))
+			self.end()
 	#history prev
 	def prevhist(self):
-		if len(self.history) > 0:
+		if self.history:
 			self.selhis -= (self.selhis > 0)
 			#the next element or an empty string
 			self._text = self.selhis and self.history[-self.selhis] or ""
-			self.disp = 0
-			self.movepos(len(self._text))
+			self.end()
 	#add new history entry
 	def appendhist(self,new):
 		self.history.append(new)
@@ -928,54 +944,39 @@ class botclass:
 
 #main class; handles all IO and defers to overlays
 class main:
-	screen = None
-	last = 0
+	_screen = None
+	_last = 0
 	def __init__(self,chatbot):
 		if not isinstance(chatbot,botclass):
-			raise BotException("Bot instance not descendent of client.botclass")
+			raise BotException("%s not descendent of client.botclass"%\
+				type(botclass).__name__)
 		#artifacts from client.display
-		self.schedule = schedule()
-		self.bottom_edges = [" "," "]
+		self._schedule = schedule()
+		self._bottom_edges = [" "," "]
 
 		chatbot.setparent(self)
 		self.over = mainOverlay(self)
 		#input/display stack
-		self.ins = [self.over]
+		self._ins = [self.over]
 	#crux of input
 	def input(self):
 		try:
 			next = -1
 			while next == -1:
-				next = self.screen.getch()
+				next = self._screen.getch()
 			chars = [next]
 			while next != -1:
-				next = self.screen.getch()
+				next = self._screen.getch()
 				chars.append(next)
 		except KeyboardInterrupt:
 			global active
 			active = False
 			return
-		keyAction = ""
-		#alt keys are of the form 27, (key sequence)
-		#TODO refine this so it's handled by overlays. less string manip
-		if len(chars) > 2 and chars[0] == 27:
-			chars.pop(0)
-			keyAction = 'alt_'
-			keyAction += _CURSES_KEYS.get(chars[0]) or chr(chars[0])
-		else:
-			keyAction += _CURSES_KEYS.get(chars[0]) or ""
-		#delegate to display stack
-		self = self.ins[-1]
-		#run onKEY function
-		if keyAction and hasattr(self,"on"+keyAction):
-			return getattr(self,"on"+keyAction)()
-		#otherwise, just grab input characters
-		if not keyAction and chars[0] in range(32,255) and hasattr(self,"oninput"):
-			return getattr(self,"oninput")(chars[:-1])
+		return self._ins[-1](chars)
 	#resize the gui
 	def resize(self):
 		global DIM_X,DIM_Y
-		DIM_Y, newx = self.screen.getmaxyx()
+		DIM_Y, newx = self._screen.getmaxyx()
 		if DIM_Y < _MIN_Y or newx < _MIN_X:
 			raise DisplayException("Terminal size too small")
 		#only redo lines if the width changed
@@ -992,11 +993,11 @@ class main:
 	def loop(self):
 		while active:
 			if self.input() == -1:
-				self.ins.pop()
-				if not self.ins: break #insurance
+				self._ins.pop()
+				if not self._ins: break #insurance
 				self.resize()
 				
-			if len(self.ins)-1 or self.over.selector:
+			if len(self._ins)-1 or self.over.isselecting():
 				self.display()
 			else:
 				self.updateinput()
@@ -1008,7 +1009,7 @@ class main:
 		while active:
 			time.sleep(2)
 			i+=1
-			if time.time() - self.last > 4:
+			if time.time() - self._last > 4:
 				self.newBlurb()
 			#every 600 seconds
 			if not i % 300:
@@ -1018,8 +1019,8 @@ class main:
 	def start(self,screen,*args):
 		global active
 		active = True
-		self.screen = screen
-		self.screen.nodelay(1)
+		self._screen = screen
+		self._screen.nodelay(1)
 		self.resize()
 		for i in args:
 			i.start()
@@ -1036,9 +1037,9 @@ class main:
 		lines = ["" for i in range(size)]
 		#start with the last "replacing" overlay, then draw all overlays afterward
 		start = 1
-		while (start < len(lines)) and not self.ins[-start].replace:
+		while (start < len(lines)) and not self._ins[-start].replace:
 			start += 1
-		for i in self.ins[-start:]:
+		for i in self._ins[-start:]:
 			lines = i.display(lines)
 		#main display method: move to top of screen
 		moveCursor()
@@ -1063,19 +1064,20 @@ class main:
 	#display info window
 	def _updateinfo(self,right,left):
 		moveCursor(DIM_Y)
-		self.bottom_edges[0] = left or self.bottom_edges[0]
-		self.bottom_edges[1] = right or self.bottom_edges[1]
-		room = DIM_X - len(self.bottom_edges[0]) - len(self.bottom_edges[1])
+		self._bottom_edges[0] = left or self._bottom_edges[0]
+		self._bottom_edges[1] = right or self._bottom_edges[1]
+		room = DIM_X - len(self._bottom_edges[0]) - len(self._bottom_edges[1])
 		if room < 1:
 			raise DisplayException("Terminal size too small")
 		#selected, then turn off
-		print("\x1b[7m{}{}{}\x1b[0m".format(self.bottom_edges[0]," "*room,self.bottom_edges[1]),end=CHAR_RETURN_CURSOR)
+		print("\x1b[7m{}{}{}\x1b[0m".format(self._bottom_edges[0],
+			" "*room,self._bottom_edges[1]),end=CHAR_RETURN_CURSOR)
 
 	#=------------------------------=
 	#|	Frontends		|
 	#=------------------------------=
 	def display(self):
-		self.schedule(self._display)
+		self._schedule(self._display)
 	#system message
 	def msgSystem(self, base):
 		self.over.append(_COLOR_PAIRS[1]+base+_CLEAR_FORMATTING)
@@ -1096,39 +1098,38 @@ class main:
 		self.display()
 	#update input
 	def updateinput(self):
-		self.schedule(self._updateinput)
+		self._schedule(self._updateinput)
 	#5 second blurb
 	def newBlurb(self,message = ""):
-		self.last = time.time()
-		self.schedule(self._printblurb,message)
+		self._last = time.time()
+		self._schedule(self._printblurb,message)
 	#update screen bottom
 	def updateinfo(self,right = None,left = None):
-		self.schedule(self._updateinfo,right,left)
+		self._schedule(self._updateinfo,right,left)
 
 	def addOverlay(self,new):
 		new.addResize(self)
-		self.ins.append(new)
+		self._ins.append(new)
 		#for some reason this is too fast; a hundredth of a second isn't very noticeable anyway
 		time.sleep(.01)
 		self.display()
 		self.updateinfo() #this looks ugly otherwise
 	#replace the top overlay
 	def replaceOverlay(self,new):
-		self.ins.pop()
+		self._ins.pop()
 		self.addOverlay(new)
 
 	def onerr(self):
 		global active
 		active = False
-		self.msgSystem("An error occurred. Press any button to exit...")
+		curses.unget('\x1b')
 
 #wrapper for adding keys to the main interface
 def onkey(keyname):
 	def wrapper(func):
-		if type(keyname) == str:
-			setattr(mainOverlay,"on"+keyname,func)
-		else:
-			setattr(mainOverlay,"on"+_CURSES_KEYS[keyname],func)
+		try:
+			mainOverlay.addoninit[_CURSES_KEYS[keyname]] = func
+		except:	raise KeyException("key %s not defined" % keyname)
 	return wrapper
 
 #------------------------------------------------------------------------------
