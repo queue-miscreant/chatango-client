@@ -430,7 +430,8 @@ class overlayBase:
 				except: raise KeyException('key %s not defined'%i)
 			self._keys[i] = staticize2(j,self)
 	def addResize(self,other):
-		self._keys[curses.KEY_RESIZE] = staticize(other.resize)
+		dbmsg("ADDED RESIZE")
+		self._keys[curses.KEY_RESIZE] = lambda x: dbmsg("RESIZED") or other.resize
 
 #yes, this is this simple
 class confirmOverlay(overlayBase):
@@ -438,7 +439,7 @@ class confirmOverlay(overlayBase):
 	def __init__(self,confirmfunc):
 		overlayBase.__init__(self)
 		self._keys.update({
-			ord('y'):	staticize(confirmfunc) #TECHNOLOGY
+			ord('y'):	lambda x: confirmfunc() or -1
 			,ord('n'):	quitlambda
 		})
 	def display(self,lines):
@@ -790,7 +791,7 @@ class mainOverlay(overlayBase):
 			newlines += a
 			i[2] = b
 			newlines.append(self._msgSplit)
-		self.lines = newlines
+		self._lines = newlines
 
 	#add lines into lines supplied
 	def display(self,lines):
@@ -902,7 +903,6 @@ class scrollable:
 		self.movepos(len(self._text))
 	#move the cursor and display
 	def movepos(self,dist):
-		dbmsg("MOVING CURSOR. %d %d"%(self._pos,dist))
 		self._pos = max(0,min(len(self._text),self._pos+dist))
 		#if we're at the end, but not the beginning OR we're past the width, move the cursor
 		if (self._pos == self._disp and self._pos != 0) or \

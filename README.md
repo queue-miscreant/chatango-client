@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 5.1
+Version 5.2
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -112,6 +112,16 @@ CLASSES
 
 CHANGELOG
 --------------------------
+## v5.2		*2016/7/27*
+* commandOverlray replaces last line instead of "drawing over" it
+* Alt-backspace should work in a way that's more sane
+* If a command returns an overlay, then the commandOverlay will be replaced by that overlay
+	* This is better because it means the overlay stack can be privatized (in main class)
+* Revamped entire input delegation system
+	* Front-end is the same
+	* Back-end no longer uses setattr and getattr
+	* This makes string manipulations into integer manipulations
+* Made several member variables into private members
 ## v5.1		*2016/7/16*
 * Added asking if opening more than two links at once
 * Lacking programs to run this prints blurbs instead of raising exceptions
