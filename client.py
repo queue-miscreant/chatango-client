@@ -852,7 +852,6 @@ class mainOverlay(overlayBase):
 #INPUT
 
 #scrollable text input
-#TODO fix drawing
 class scrollable:
 	def __init__(self,width):
 		self._text = ""
@@ -884,7 +883,7 @@ class scrollable:
 			span = pos.span(1)[1] - 1
 			#how far we went
 			self._text = self._text[:span] + self._text[self._pos:]
-			self.movepos(self._pos-span)
+			self.movepos(span-self._pos)
 		else:
 			self._text = self._text[self._pos:]
 			self._disp = 0
@@ -903,9 +902,11 @@ class scrollable:
 		self.movepos(len(self._text))
 	#move the cursor and display
 	def movepos(self,dist):
+		dbmsg("MOVING CURSOR. %d %d"%(self._pos,dist))
 		self._pos = max(0,min(len(self._text),self._pos+dist))
 		#if we're at the end, but not the beginning OR we're past the width, move the cursor
-		if (self._pos == self._disp and self._pos != 0) or (self._pos-self._disp+1) >= self.width:
+		if (self._pos == self._disp and self._pos != 0) or \
+		(self._pos-self._disp+1) >= self.width:
 			self._disp = max(0,min(self._pos-self.width+1,self._disp+dist))
 	#display some text
 	def display(self):
