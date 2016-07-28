@@ -98,7 +98,8 @@ for i in dir(curses):
 			_CURSES_KEYS[name] = getattr(curses,i)
 #simplicity's sake
 for i in range(32):
-	_CURSES_KEYS['^%s'%chr(i+96)] = i
+	#no, not +96 because that gives wrong characters for ^@ and ^_ (\x00 and \x1f)
+	_CURSES_KEYS['^%s'%chr(i+64).lower()] = i
 for i in range(32,256):
 	_CURSES_KEYS[chr(i)] = i
 
@@ -422,8 +423,7 @@ class overlayBase:
 	def addKeys(self,newFunctions = {}):
 		for i,j in newFunctions.items():
 			if isinstance(i,str):
-				i = i.lower()
-				if i.find('a-') == 0:
+				if i.lower().find('a-') == 0:
 					i = i[2:]
 					if i in _CURSES_KEYS[i]:
 						i = _CURSES_KEYS[i]
