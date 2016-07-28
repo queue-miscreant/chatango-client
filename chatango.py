@@ -140,19 +140,22 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 	def main(self):
 		for num,i in enumerate(['user','passwd','room']):
 			#skip if supplied
-			if creds.get(i):
+			if self.creds.get(i):
 				continue
 			prompt = ['username', 'password', 'group name'][num]
 			inp = client.inputOverlay("Enter your " + prompt, num == 1,True)
 			self.parent.addOverlay(inp)
-			creds[i] = inp.waitForInput()
+			self.creds[i] = inp.waitForInput()
 			if not client.active: return
 
 		#wait until now to initialize the object, since now the information is guaranteed to exist
-		chlib.ConnectionManager.__init__(self, creds['user'], creds['passwd'], False)
+		chlib.ConnectionManager.__init__(self, self.creds['user'], self.creds['passwd'], False)
 
-		self.addGroup(creds['room'])
 		chlib.ConnectionManager.main(self)
+	
+	def reconnect(self):
+		self.stop()
+		self.start()
 
 	def setFormatting(self, newFormat = None):
 		group = self.joinedGroup
@@ -176,6 +179,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 	def start(self,*args):
 		self.parent.msgSystem('Connecting')
 		self.parent.updateinfo(None,self.creds.get('user'))
+		self.addGroup(self.creds.get('room'))
 	
 	def tryPost(self,text):
 		try:
@@ -427,6 +431,11 @@ def F5(self):
 	box.it = chatbot.channel
 	
 	self.addOverlay(box)
+
+@client.onkey('^r')
+def reloadclient(self):
+	self.clearlines()
+	chatbot.reconnect()
 
 #-------------------------------------------------------------------------------------------------------
 #COLORERS

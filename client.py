@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#TODO: 		make it less of a dance for one overlay to replace another (overlay needs parent to do so) (maybe)
 try:
 	import curses
 except ImportError:
@@ -75,13 +74,13 @@ def centered(string,width,isselected):
 	if isselected: pre = _SELECTED(pre)
 	return pre
 #------------------------------------------------------------------------------
-#list of curses keys
-#used internally to redirect curses keys
+#names of valid keys
 _CURSES_KEYS = {
 	'tab':		9
 	,'enter':	10
 	,'backspace':	127
 }
+#these keys point to another key
 _KEY_LUT = {
 	#curses redirects ctrl-h here for some reason
 	curses.KEY_BACKSPACE:	127
@@ -97,6 +96,11 @@ for i in dir(curses):
 		name = i[4:].lower()
 		if name not in _CURSES_KEYS: #don't map KEY_BACKSPACE or KEY_ENTER
 			_CURSES_KEYS[name] = getattr(curses,i)
+#simplicity's sake
+for i in range(32):
+	_CURSES_KEYS['^%s'%chr(i+96)] = i
+for i in range(32,256):
+	_CURSES_KEYS[chr(i)] = i
 
 class KeyException(Exception): pass
 
@@ -418,20 +422,18 @@ class overlayBase:
 	def addKeys(self,newFunctions = {}):
 		for i,j in newFunctions.items():
 			if isinstance(i,str):
+				i = i.lower()
 				if i.find('a-') == 0:
 					i = i[2:]
 					if i in _CURSES_KEYS[i]:
 						i = _CURSES_KEYS[i]
-					elif len(i) == 1:
-						i = ord(i)
 					else: raise KeyException('key alt-%s invalid'%i)
 				try:
 					i = _CURSES_KEYS[i]
 				except: raise KeyException('key %s not defined'%i)
 			self._keys[i] = staticize2(j,self)
 	def addResize(self,other):
-		dbmsg("ADDED RESIZE")
-		self._keys[curses.KEY_RESIZE] = lambda x: dbmsg("RESIZED") or other.resize
+		self._keys[curses.KEY_RESIZE] = staticize(other.resize)
 
 #yes, this is this simple
 class confirmOverlay(overlayBase):
@@ -663,13 +665,13 @@ class mainOverlay(overlayBase):
 	def __init__(self,parent):
 		overlayBase.__init__(self)
 		self.text = scrollable(DIM_X)
+		self.parent = parent
 		#these two REALLY need to be private
 		self._allMessages = []
 		self._lines = []
 		#these two too because they select the previous two
 		self._selector = 0
 		self._filtered = 0
-		self.parent = parent
 		self._keys.update({
 			-1:			self.input
 			,127:			staticize(self.text.backspace)
@@ -792,6 +794,12 @@ class mainOverlay(overlayBase):
 			i[2] = b
 			newlines.append(self._msgSplit)
 		self._lines = newlines
+	#second verse, same as the first
+	def clearlines(self):
+		self._lines = []
+		self._allMessages = []
+		self._selector = 0
+		self._filtered = 0
 
 	#add lines into lines supplied
 	def display(self,lines):
@@ -909,6 +917,7 @@ class scrollable:
 		(self._pos-self._disp+1) >= self.width:
 			self._disp = max(0,min(self._pos-self.width+1,self._disp+dist))
 	#display some text
+	#TODO jesus christ fix this
 	def display(self):
 		text = self._text[:self._pos] + CHAR_CURSOR + self._text[self._pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
