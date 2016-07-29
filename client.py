@@ -26,7 +26,6 @@ _LAST_COLOR_RE = re.compile("\x1b"+r"\[[^m]*3[^m]*[^m]*m")
 _UP_TO_WORD_RE = re.compile('(.* )[^ ]+ *')
 INDENT_LEN = 4
 INDENT_STR = ""
-LAST_INPUT = ""
 #guessed terminal dimensions
 DIM_X = 40
 DIM_Y = 70
@@ -277,7 +276,7 @@ def strlen(string):
 		escape = temp
 	return a
 
-#fit word to byte length
+#fit word to column width
 def fitwordtolength(string,length):
 	escape = False
 	#number of columns passed, number of chars passed
@@ -301,8 +300,6 @@ def fitwordtolength(string,length):
 def preserveFormatting(line):
 	ret = ''
 	#only fetch after the last clear
-	lastClear = line.rfind(_CLEAR_FORMATTING)
-	if lastClear+1: line = line[:lastClear]
 	for i in _EFFECTS:
 		if i in line:
 			ret += i
@@ -311,22 +308,18 @@ def preserveFormatting(line):
 	except IndexError: return ret
 
 #TODO remove some freedom from this
-def breaklines(string, length = 0):
-	#if this is in the function args, it can't be changed later
-	if not length:
-		length = DIM_X
-	tab = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
-	THRESHOLD = length/2
-	TABSPACE = length - len(tab)
-	string = string.expandtabs(len(tab))
+def breaklines(string):
+	string = string.expandtabs(INDENT_LEN)
+	THRESHOLD = DIM_X/2
+	TABSPACE = DIM_X - INDENT_LEN
 
 	broken = []
 	form = ''
 	for i,line in enumerate(string.split("\n")):
 		line += " " #ensurance that the last word will capture
 		#tab the next lines
-		space = (i and TABSPACE) or length
-		newline = ((i and tab) or "") + form
+		space = (i and TABSPACE) or DIM_X
+		newline = ((i and INDENT_STR) or "") + form
 		while line != "":
 			match = WORD_RE.match(line)
 			word = match.group(0)
@@ -345,7 +338,7 @@ def breaklines(string, length = 0):
 			
 			if newspace <= 0:
 				broken.append(newline+_CLEAR_FORMATTING)
-				newline = tab+preserveFormatting(newline)
+				newline = INDENT_STR+preserveFormatting(newline)
 				space = TABSPACE
 		if newline != "":
 			broken.append(newline+_CLEAR_FORMATTING)
@@ -563,8 +556,10 @@ class colorOverlay(overlayBase):
 			lines[i+1] = _BOX_NOFORM(string.rjust(just-1).ljust(just))
 		
 		lines[-6] = _BOX_PART("")
-		names = "{}{}{}".format(*[centered(j,wide,i==self.mode) for i,j in enumerate(self.names)])
-		vals = "{}{}{}".format(*[centered(str(j),wide,i==self.mode) for i,j in enumerate(self.color)])
+		names,vals = "",""
+		for i in range(3):
+			names += centered(self.names[i],wide,		i==self.mode)
+			vals += centered(str(self.color[i]),wide,	i==self.mode)
 		lines[-5] = _BOX_PART(names) #4 lines
 		lines[-4] = _BOX_PART(vals) #3 line
 		lines[-3] = _BOX_PART("") #2 lines
@@ -1163,6 +1158,9 @@ def catcherr(client,fun,*args):
 
 
 def start(bot_object,main_function):
+	global INDENT_STR
+	#why would I modify this at runtime anyway
+	INDENT_STR = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
 	client = main(bot_object)
 	#daemonize functions
 	bot_thread = Thread(target=catcherr(client,main_function))
