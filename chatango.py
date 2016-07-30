@@ -136,11 +136,8 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 	def __init__(self,creds):
 		self.creds = creds
 		self.channel = 0
+		self.isinited = 0
 		
-	def wrap(self,wrapper):
-		self.parent = wrapper
-		wrapper.setBot(self,self.tryPost)
-	
 	def main(self):
 		for num,i in enumerate(['user','passwd','room']):
 			#skip if supplied
@@ -154,10 +151,21 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, self.creds['user'], self.creds['passwd'], False)
+		self.isinited = 1
 
 		chlib.ConnectionManager.main(self)
+
+	def start(self,*args):
+		self.parent.msgSystem('Connecting')
+		self.parent.updateinfo(None,self.creds.get('user'))
+		self.addGroup(self.creds.get('room'))
+	
+	def stop(self):
+		if not self.isinited: return
+		chlib.ConnectionManager.stop(self)
 	
 	def reconnect(self):
+		if not self.isinited: return
 		self.stop()
 		self.start()
 
@@ -179,11 +187,6 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		group.setFontSize(self.creds['formatting']['fz'])
 		
 		sendToFile('creds',self.creds)
-	
-	def start(self,*args):
-		self.parent.msgSystem('Connecting')
-		self.parent.updateinfo(None,self.creds.get('user'))
-		self.addGroup(self.creds.get('room'))
 	
 	def tryPost(self,text):
 		try:
@@ -354,9 +357,7 @@ def F4(self):
 				return -1
 
 			furtherInput = client.colorOverlay(client.fromHexColor(formatting['fc']))
-			furtherInput.addKeys({
-				'enter':enter(furtherInput),
-			})
+			furtherInput.addKeys({'enter':enter})
 		#ask for name color
 		elif me.it == 1:
 			def enter(me):
@@ -365,9 +366,7 @@ def F4(self):
 				return -1
 		
 			furtherInput = client.colorOverlay(client.fromHexColor(formatting['nc']))
-			furtherInput.addKeys({
-				'enter':enter(furtherInput),
-			})
+			furtherInput.addKeys({'enter':enter})
 		#font face
 		elif me.it == 2:
 			def enter(me):
@@ -376,9 +375,7 @@ def F4(self):
 				return -1
 			
 			furtherInput = client.listOverlay(FONT_FACES)
-			furtherInput.addKeys({
-				'enter':enter(furtherInput),
-			})
+			furtherInput.addKeys({'enter':enter})
 			furtherInput.it = int(formatting['ff'])
 		#ask for font size
 		elif me.it == 3:
@@ -388,9 +385,7 @@ def F4(self):
 				return -1
 				
 			furtherInput = client.listOverlay([i for i in map(str,FONT_SIZES)])
-			furtherInput.addKeys({
-				'enter':enter(furtherInput),
-			})
+			furtherInput.addKeys({'enter':enter})
 			furtherInput.it = FONT_SIZES.index(formatting['fz'])
 		#insurance
 		if furtherInput is None: raise Exception("How is this error even possible?")
@@ -398,7 +393,7 @@ def F4(self):
 		self.addOverlay(furtherInput)
 		#set formatting, even if changes didn't occur
 		
-	box = client.listOverlay(["Font Color", "Name Color", "Font Face", "Font Size"])
+	box = client.listOverlay(["Font Color","Name Color","Font Face","Font Size"])
 	box.addKeys({
 		'enter':select,
 	})
@@ -422,7 +417,7 @@ def F5(self):
 		col = i and i+12 or 16
 		string.insertColor(-1,col)
 					
-	box = client.listOverlay(["None", "Red", "Blue", "Both"],drawActive)
+	box = client.listOverlay(["None","Red","Blue","Both"],drawActive)
 	box.addKeys({
 		'enter':select,
 		'tab':ontab,
@@ -435,6 +430,10 @@ def F5(self):
 def reloadclient(self):
 	self.clearlines()
 	chatbot.reconnect()
+
+@client.onkey('^g')
+def openlastlink(self):
+	client.link_opener(self.parent,client.lastlinks[-1])
 
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
@@ -621,6 +620,7 @@ if __name__ == '__main__':
 	init_colors()
 	chatbot = chat_bot(creds)
 	#start
-	client.start(chatbot,chatbot.main)
-	try: chatbot.stop()
-	except: pass
+	try:
+		client.start(chatbot,chatbot.main)
+	finally:
+		chatbot.stop()

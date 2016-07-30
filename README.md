@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 5.2
+Version 5.3
 ==========================
 
 A client written in python with curses for chatango, an online chatting service.
@@ -79,32 +79,33 @@ DECORATORS
 >			self:	The client object. Passed so that blurbs can be printed from within functions
 >			link:	The link being opened
 >			ext:	The extension captured. Optional for default opener
+
 ###	*See how these are called in chatango.py, such as in F3()*
 
 CLASSES
 -------
 ###	client.coloring
-># 	A container that holds a string to be colored.
-># 	Members:
+>## 	A container that holds a string to be colored.
+>## 	Members:
 >			str:		String being colored
 >			default:	Default color to be applied
-># 	Methods:
+>## 	Methods:
 >			__repr__:	Return the string contained
 >			prepend(new):	Prepend new to the message
 >			append(new):	Append new to the message
 >			insertColor(position, color = self.default, add = True):	Insert color pair "color" at position "position". "add" signifies whether to use the predefined colors (default don't)
 
 ###	client.listOverlay(screen,string iterable,drawOther = None,modes = [""])
-># 	Class that draws a list that covers the chat.
+>## 	Class that draws a list that covers the chat.
 >		string iterable:	List to draw. These will be properly formatted with appropriate spacing.
 >		drawOther:		Extra coloring to be done on each entry in the list before displaying
 >		modes:			List of modes available. If more than two exist, then the bottom line of the box will display the mode
 		
 ###	client.colorOverlay(screen,initcolor)
-># 	Class that draws a color selector over the chat. Probably not worth extending at all
+>## 	Class that draws a color selector over the chat. Probably not worth extending at all
 
 ###	client.inputOverlay(self,prompt,password = False, end=False):
-># 	Class that draws an input box over (but not instead of) chat.
+>##	Class that draws an input box over (but not instead of) chat.
 >		prompt:			Prompt to supply to the overlay
 >		password:		Whether to draw input as stars, obfuscating what is typed
 >		end:			Whether to end the program
@@ -112,6 +113,18 @@ CLASSES
 
 CHANGELOG
 --------------------------
+## v5.3		*2016/7/30*
+* Fixed scrollable's "reverse fitwordtolength"
+	* This didn't work because it's hard to find a backwards CSI
+* Resize to too small no longer breaks the program.
+	* All display is blocked until a resize event sets the display to within boundaries again
+* Pre-compiled some regexes in chatango.py
+* Added function to add 'default' scrollable controls.
+	* Things like left moves the cursor back, backspace backspaces
+* Pressing \\ now brings up an invisible overlay.
+	* \\->n inserts a newline, \\->\\ a \\
+* Overlays and colorers now alter by reference, and do not expect a return value
+ 
 ## v5.2		*2016/7/27*
 * commandOverlray replaces last line instead of "drawing over" it
 * Alt-backspace should work in a way that's more sane
@@ -122,11 +135,13 @@ CHANGELOG
 	* Back-end no longer uses setattr and getattr
 	* This makes string manipulations into integer manipulations
 * Made several member variables into private members
+
 ## v5.1		*2016/7/16*
 * Added asking if opening more than two links at once
 * Lacking programs to run this prints blurbs instead of raising exceptions
 * Blurbs protected against overflowing
 * Fixed listOverlay drawing. Left justify done by client.py, not chatango.py
+
 ## v5		*2016/7/16*
 * Added scrolling upwards. Either press alt-up or alt-k to go up, and alt-down or alt-j to go down
 * Added k and j for up and down in listOverlay
@@ -136,7 +151,8 @@ CHANGELOG
 	* This allows correct width on CJK characters that take two columns to draw
 * Redefined link_openers with multiple function arguments, because that's what I was doing before
 * Moved onenter to chatango.py so that a "send" function does not have to be passed to client.py
-* Reformatted README.md :^)
+* Reformatted README.md :\^)
+
 ## v4.1		*2016/5/16*
 * Added "modes" for listinput. Allows different functions to handle data depending on current
 * Changed F2 menu to pull number from string. This confirms the wanted link is selected
@@ -146,6 +162,7 @@ CHANGELOG
 	* 	ext|(extension name):	Open extension with 'extension name'
 	* 	site|(pattern):		Open link with pattern 'pattern'
 	* 	default:		Default
+
 * New input window. Due to the new start feature, it is now possible to start the client before the chat bot.
 * Exceptions in the chat bot thread (ie, the functionality supplied to client) should now halt the client
 
@@ -175,13 +192,13 @@ CHANGELOG
 * Made color input window slightly more resize-friendly (read: made things more full out)
 * Daemonized threads should stop together
 * Made better API for listinterface keys. Now uses a dictionary of the same type as client.onkey wrappers. For example, 
-	* 	{'enter':func1,curses.KEY_UP:func2}
+	* `{'enter':func1,curses.KEY_UP:func2}`
 
 ## v3.1	*2016/2/20*
 * Changed colorer arguments. Made client more generalized so that argument list is pulled from the bot.
 * Modified the name colorer to use intene colors on certain names. Should be easier to tell names apart
 * Added chat filtering (space in F5 menu)
->		Drawing filtered channels in the menu pending
+	* Drawing filtered channels in the menu pending
 
 ## v3.0.1	*2016/2/17*
 * Merged bot.py into chatango.py
@@ -197,7 +214,7 @@ CHANGELOG
 * Doing that "import bot and get credentials" was a bad idea
 * Removed aux.py file; reformatted 
 * Added new coloring feature. Messages are now drawn in parts corresponding to color.
-##		See ""API""
+	* See ""API""
 * Due to complication of implementation (and rushing this release), mouse no longer works
 * __KNOWN ERRORS__
 * Random segfaults on startup. Running a second time seems to resolve it
@@ -253,7 +270,7 @@ CHANGELOG
 ## v1.3.2
 * Added better long-message indenting
 * Changed the decode/encode function to stop encoding ' ' as nbsps
-	* 	This solves the tagging and word splits because chatango's HTML client looks for spaces around a name, not non-breaking spaces.
+	* 	This was a stupid idea because chatango's HTML client looks for spaces around a name, not non-breaking spaces.
 * Added better link comprehension
 
 ## v1.3.1
