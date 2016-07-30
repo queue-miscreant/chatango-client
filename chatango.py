@@ -267,7 +267,7 @@ def onenter(self):
 				self.addOverlay(client.confirmOverlay(openall))
 			else:
 				openall()
-		except Exception as exc: client.dbmsg(exc)
+		except Exception: pass
 		return
 	text = str(self.text)
 	#if it's not just spaces
@@ -276,7 +276,7 @@ def onenter(self):
 		self.text.clear()
 		self.text.appendhist(text)
 		#call the send
-		chatbot.tryPost(text.replace(r'\n','\n'))
+		chatbot.tryPost(text)
 
 @client.onkey("tab")
 def ontab(self):
@@ -327,10 +327,10 @@ def F3(self):
 	dispList = {i:chatbot.members.count(i) for i in chatbot.members}
 	dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
 	def drawIgnored(string,i):
-		if dispList[i].split(' ')[0] not in ignores: return string
+		if dispList[i].split(' ')[0] not in ignores: return
 		string.insertColor(-1,3)
-		string = string[:-1] + 'i'
-		return string
+		string[:-1]
+		string + 'i'
 	
 	box = client.listOverlay(sorted(dispList),drawIgnored)
 	box.addKeys({
@@ -418,10 +418,9 @@ def F5(self):
 		self.redolines()
 	
 	def drawActive(string,i):
-		if filtered_channels[i]: return string
+		if filtered_channels[i]: return
 		col = i and i+12 or 16
 		string.insertColor(-1,col)
-		return string
 					
 	box = client.listOverlay(["None", "Red", "Blue", "Both"],drawActive)
 	box.addKeys({
@@ -499,7 +498,7 @@ def chatcolors(msg,*args):
 	msg.addEffect(0,args[1])
 	msg.addEffect(1,args[2])
 	msg.insertColor(0,0)
-	msg.prepend(" ")
+	' ' + msg 
 	msg.insertColor(0,args[3]+12)
 
 #-------------------------------------------------------------------------------------------------------

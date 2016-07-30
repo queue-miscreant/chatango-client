@@ -124,14 +124,13 @@ fromHexColor = lambda hexStr: [int(hexStr[2*i:2*i+2],16) for i in range(3)]
 colorers = []
 commands = {}
 filters = []
-#TODO wiki links are stupid and do jpg/other stuff
-#TODO some links are stupid and do jpg?other stuff
 class link_opener:
 	sites = {}
+	lambdas = []
+	lambdalut = []
 #	__init__ is like a static __call__
 	def __init__(self,client,link,forcelink=False):
-		#extension
-		ext = link[link.rfind(".")+1:].lower()
+		ext = extractext(link)
 		if forcelink:
 			getattr(self, 'default')(client,link)
 			return
@@ -143,10 +142,25 @@ class link_opener:
 				if 1+link.find(i):
 					j(client,link)
 					return
+			for i in range(len(self.lambdas)):
+				if self.lambdas[i](link):
+					self.lambdalut[i](client,link)
 			getattr(self, 'default')(client,link)
-	#raise exception if not overloaded
+	#raise exception if not overridden
 	def default(*args):
 		raise Exception("No regular link handler defined")
+
+#look for the furthest / or ?
+def extractext(link):
+	ext = link[link.rfind('.')+1:]
+	lenext = len(ext)
+	slash = ext.find('/')+1 
+	quest = ext.find('?')+1
+	#yes this looks stupid, yes it works
+	trim = quest and (slash and min(slash,quest) or quest) or slash
+	if trim:
+		ext = ext[:trim-1]
+	return ext
 
 #decorators for containers
 def colorer(func):
@@ -157,7 +171,6 @@ def command(commandname):
 	def wrapper(func):
 		commands[commandname] = func
 	return wrapper
-#TODO lambda type
 def opener(typ,pore = None):
 	def wrap(func):
 		if typ == 0:
@@ -166,6 +179,9 @@ def opener(typ,pore = None):
 			setattr(link_opener,pore,staticmethod(func))
 		elif typ == 2 and pore is not None:
 			link_opener.sites[pore] = func
+		elif typ == 3 and pore is not None:
+			link_opener.lambdas.append(pore)
+			link_opener.lambdalut.append(func)
 		#allow stacking wrappers
 		return func
 	return wrap
@@ -215,9 +231,11 @@ class coloring:
 	def __repr__(self):
 		return self._str
 	def __getitem__(self,sliced):
-		return coloring(self._str[sliced])
+		self._str = self._str[sliced]
 	def __add__(self,other):
-		return coloring(self._str + other)
+		self._str = self._str + other
+	def __radd__(self,other):
+		self._str = other + self._str
 	#insert color at position p with color c
 	def insertColor(self,p,c=-1,add = True):
 		c = self.default if c == -1 else c
@@ -238,9 +256,6 @@ class coloring:
 			return lastcolor[min(lastcolor)]
 		except:
 			return ''
-	#prebuilts
-	def prepend(self,new):
-		self._str = new + self._str
 	def ljust(self,spacing):
 		self._str = self._str.ljust(spacing)
 
@@ -306,19 +321,18 @@ def preserveFormatting(line):
 	try: #return the last (assumed to be color) ANSI escape used
 		return ret + _LAST_COLOR_RE.findall(line)[-1]
 	except IndexError: return ret
-
-#TODO remove some freedom from this
-def breaklines(string):
+#breaklines by max column width
+def breaklines(string,length):
 	string = string.expandtabs(INDENT_LEN)
-	THRESHOLD = DIM_X/2
-	TABSPACE = DIM_X - INDENT_LEN
+	THRESHOLD = length/2
+	TABSPACE = length - INDENT_LEN
 
 	broken = []
 	form = ''
 	for i,line in enumerate(string.split("\n")):
 		line += " " #ensurance that the last word will capture
 		#tab the next lines
-		space = (i and TABSPACE) or DIM_X
+		space = (i and TABSPACE) or length
 		newline = ((i and INDENT_STR) or "") + form
 		while line != "":
 			match = WORD_RE.match(line)
@@ -335,7 +349,6 @@ def breaklines(string):
 				fitsize = fitwordtolength(word, space)
 				line = line[fitsize:]
 				newline += word[:fitsize]
-			
 			if newspace <= 0:
 				broken.append(newline+_CLEAR_FORMATTING)
 				newline = INDENT_STR+preserveFormatting(newline)
@@ -352,9 +365,6 @@ class DisplayException(Exception): pass
 
 def moveCursor(x=0):
 	print("\x1b[%d;f"%x,end=_CLEAR_FORMATTING)
-
-def printLine(x):
-	print(x,end="\x1b[K\n\r")
 
 class schedule:
 	def __init__(self):
@@ -389,15 +399,11 @@ staticize2 = lambda x,y: lambda z: x(y)
 
 #overlays
 class overlayBase:
-	_altkeys = {
-		None:	lambda: -1
-	}
 	#interface for adding pre-runtime
-	addoninit = {}
 	#this only needs to be called if you're adding things pre-runtime
 	def __init__(self):
-		self._keys = {27:self._callalt}
-		self.addKeys(self.addoninit)
+		self._altkeys =	 {None:	lambda: -1}
+		self._keys =	 {27:	self._callalt}
 	def __call__(self,chars):
 		try:
 			char = _KEY_LUT[chars[0]]
@@ -438,7 +444,7 @@ class confirmOverlay(overlayBase):
 			,ord('n'):	quitlambda
 		})
 	def display(self,lines):
-		return lines
+		return
 
 class listOverlay(overlayBase):
 	replace = True
@@ -452,8 +458,7 @@ class listOverlay(overlayBase):
 		self.it = 0
 		self.mode = 0
 		self.list = outList
-		if drawOther:
-			setattr(self,"drawOther",drawOther)
+		self.drawOther = drawOther
 		self.modes = modes
 		self.nummodes = len(modes)
 		self._keys.update({
@@ -491,8 +496,11 @@ class listOverlay(overlayBase):
 			row = (len(value) > maxx) and value[:max(half-3,1)] + "..." + value[-half:] or value
 			row += _CLEAR_FORMATTING
 			row = row.ljust(_BOX_JUST(row))
-			if value and hasattr(self,'drawOther'):
-				row = str(self.drawOther(coloring(row),i))
+			if value and self.drawOther is not None:
+				rowcol = coloring(row)
+				self.drawOther(rowcol,i)
+				row = str(rowcol)
+				
 
 			if i+size*partition == self.it:
 				row = _SELECTED(row)
@@ -653,8 +661,22 @@ class commandOverlay(inputOverlay):
 		lines[-1] = CHAR_COMMAND + self.text.display()
 		return lines
 
+class escapeOverlay(overlayBase):
+	replace = False
+	def __init__(self,appendobj):
+		overlayBase.__init__(self)
+		self._keys.update({
+			-1:		lambda x: -1
+			,ord('n'):	lambda x: appendobj.append('\n') or -1
+			,ord('\\'):	lambda x: appendobj.append('\\') or -1
+			,ord('t'):	lambda x: appendobj.append('\t') or -1
+		})
+	def display(self,lines):
+		return lines
+
 class mainOverlay(overlayBase):
 	replace = True
+	addoninit = {}
 	#sequence between messages to draw reversed
 	_msgSplit = "\x1b" 
 	def __init__(self,parent):
@@ -669,6 +691,7 @@ class mainOverlay(overlayBase):
 		self._filtered = 0
 		self._keys.update({
 			-1:			self.input
+			,ord('\\'):		staticize(self.replaceback)
 			,127:			staticize(self.text.backspace)
 			,curses.KEY_DC:		staticize(self.text.delback)
 			,curses.KEY_SHOME:	staticize(self.text.delback)
@@ -686,8 +709,11 @@ class mainOverlay(overlayBase):
 			,ord('j'):		self.selectdown
 			,127:			self.text.delword
 		})
+		self.addKeys(self.addoninit)
 	def isselecting(self):
 		return self._selector
+	def replaceback(self):
+		self.addOverlay(escapeOverlay(self.text))
 	#any other key
 	def input(self,chars):
 		if not str(self.text) and len(chars) == 1 and \
@@ -749,7 +775,7 @@ class mainOverlay(overlayBase):
 				self._filtered += 1
 				return
 		except: pass
-		a,b = breaklines(newline)
+		a,b = breaklines(newline,DIM_X)
 		self._lines += a
 		msg[2] = b
 		self._allMessages.append(msg)
@@ -770,7 +796,7 @@ class mainOverlay(overlayBase):
 		return self._allMessages[-i+1]
 	
 	def cangoup(self):
-		return self._selector>0 and \
+		return self._selector>0 and not\
 		(self._selector+self._filtered > len(self._allMessages))
 
 	#does what it says
@@ -784,7 +810,7 @@ class mainOverlay(overlayBase):
 					self._filtered += 1
 					continue
 			except: pass
-			a,b = breaklines(i[0])
+			a,b = breaklines(i[0],DIM_X)
 			newlines += a
 			i[2] = b
 			newlines.append(self._msgSplit)
@@ -819,7 +845,7 @@ class mainOverlay(overlayBase):
 				top += i[2]+1 #IMPORTANT FOR THE BREAKING MESSAGE
 				#if we've already surpassed self.lines, we need to add to self.lines
 				if top > len(self._lines):
-					a,b = breaklines(i[0])
+					a,b = breaklines(i[0],DIM_X)
 					a.append(self._msgSplit)
 					self._lines = a + self._lines
 					i[2] = b
@@ -828,12 +854,10 @@ class mainOverlay(overlayBase):
 				top = min(top,top+lenlines-(top-visup+1))
 			#we start drawing from this line, downward
 			selftraverse = -top
-			#if we've gone up too many lines, adjust
-			linetraverse = -min(lenlines,lenlines+(top-start-visup+1))
+			#top-visup+1 just signifies how many drawn lines there are
+			linetraverse = -min(lenlines,top-visup+1)
 			msgno = visup
 			direction = 1
-			#legacy loop statement was this
-			#while (selftraverse < 0) and linetraverse < -1:
 			lenlines = -2 #int <= -2 <=> int < -1)
 			lenself = -1 #int <= -1 <=> int < 0
 		#this looks horrible, but it's DRY
@@ -902,23 +926,23 @@ class scrollable:
 		self._pos = 0
 		self._disp = 0
 	def end(self):
-		self.home()
+		self._pos = 0
+		self._disp = 0
 		self.movepos(len(self._text))
 	#move the cursor and display
 	def movepos(self,dist):
 		self._pos = max(0,min(len(self._text),self._pos+dist))
-		#if we're at the end, but not the beginning OR we're past the width, move the cursor
-		if (self._pos == self._disp and self._pos != 0) or \
-		(self._pos-self._disp+1) >= self.width:
-			self._disp = max(0,min(self._pos-self.width+1,self._disp+dist))
+		curspos = self._pos - self._disp
+		if curspos <= 0: #left hand side
+			self._disp = max(0,self._disp+dist)
+		elif (curspos+1) >= self.width: #right hand side
+			self._disp = min(self._pos-self.width+1,self._disp+dist)
 	#display some text
-	#TODO jesus christ fix this
 	def display(self):
 		text = self._text[:self._pos] + CHAR_CURSOR + self._text[self._pos:]
 		text = text.replace("\n",r"\n").replace("\t",r"\t").replace("\r",r"\r")
-		text = text[self._disp:self._disp+self.width+3]
-		#-1 to compensate for the cursor
-		return text[-fitwordtolength(text[::-1],self.width):]
+		text = text[self._disp:self._disp+self.width+len(CHAR_CURSOR)]
+		return text[-fitwordtolength(text,self.width):]
 	#history next
 	def nexthist(self):
 		if self.history:
@@ -951,6 +975,7 @@ class botclass:
 class main:
 	_screen = None
 	_last = 0
+	_lines = []
 	def __init__(self,chatbot):
 		if not isinstance(chatbot,botclass):
 			raise BotException("%s not descendent of client.botclass"%\
@@ -991,6 +1016,7 @@ class main:
 			self.over.text.width = newx-1
 		self.updateinput()
 		self.updateinfo()
+		self.lines = ["" for i in range(DIM_Y-RESERVE_LINES)]
 		self.display()
 	#=------------------------------=
 	#|	Loop Frontends		|
@@ -1027,6 +1053,8 @@ class main:
 		self._screen = screen
 		self._screen.nodelay(1)
 		self.resize()
+		#for some reason this is too fast; a hundredth of a second isn't very noticeable anyway
+		time.sleep(.01) 
 		for i in args:
 			i.start()
 		self.loop()
@@ -1037,21 +1065,19 @@ class main:
 	#=------------------------------=
 	#display backend
 	def _display(self):
-		size = DIM_Y-RESERVE_LINES
 		#justify number of lines
-		lines = ["" for i in range(size)]
 		#start with the last "replacing" overlay, then draw all overlays afterward
 		start = 1
-		while (start < len(lines)) and not self._ins[-start].replace:
+		while (start < len(self.lines)) and not self._ins[-start].replace:
 			start += 1
 		for i in self._ins[-start:]:
-			lines = i.display(lines)
+			i.display(self.lines)
 		#main display method: move to top of screen
 		moveCursor()
 		curses.curs_set(0)
 		#draw each line in lines
-		for i in lines:
-			printLine(i)
+		for i in self.lines:
+			print(i,end="\x1b[K\n\r")
 		curses.curs_set(1)
 		print(CHAR_RETURN_CURSOR,end='')
 	#display a blurb
@@ -1115,7 +1141,7 @@ class main:
 	def addOverlay(self,new):
 		new.addResize(self)
 		self._ins.append(new)
-		#for some reason this is too fast; a hundredth of a second isn't very noticeable anyway
+		#yes, this is still too fast
 		time.sleep(.01)
 		self.display()
 		self.updateinfo() #this looks ugly otherwise
@@ -1158,7 +1184,7 @@ def catcherr(client,fun,*args):
 
 
 def start(bot_object,main_function):
-	global INDENT_STR
+	global INDENT_STR,DIM_X,DIM_Y
 	#why would I modify this at runtime anyway
 	INDENT_STR = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
 	client = main(bot_object)
