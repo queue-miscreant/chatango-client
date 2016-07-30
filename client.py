@@ -1003,6 +1003,7 @@ class main:
 			next = -1
 			while next == -1:
 				next = self._screen.getch()
+				time.sleep(.01) #less CPU intensive
 			chars = [next]
 			while next != -1:
 				next = self._screen.getch()
