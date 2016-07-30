@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#TODO:		When terminal is too small, block display from firing
 try:
 	import curses
 except ImportError:
@@ -114,6 +115,19 @@ def cloneKey(fro,to):
 	except: raise KeyException("%s or %s is an invalid key name"%(fro,to))
 	_KEY_LUT[fro] = to
 
+#standard scrollable controls
+def scrollablecontrol(scroll):
+	return {
+		127:			staticize(scroll.backspace)
+		,curses.KEY_DC:		staticize(scroll.delback)
+		,curses.KEY_SHOME:	staticize(scroll.clear)
+		,curses.KEY_RIGHT:	staticize2(scroll.movepos,1)
+		,curses.KEY_LEFT:	staticize2(scroll.movepos,-1)
+		,curses.KEY_UP:		lambda x: scroll.nexthist() or 1 #return 1
+		,curses.KEY_DOWN:	lambda x: scroll.prevhist() or 1 #return 1
+		,curses.KEY_HOME:	staticize(scroll.home)
+		,curses.KEY_END:	staticize(scroll.end)
+	}
 #------------------------------------------------------------------------------
 #conversions to and from hex strings ([255,255,255] <-> FFFFFF)
 toHexColor = lambda rgb: ''.join([hex(i)[2:].rjust(2,'0') for i in rgb])
@@ -232,10 +246,13 @@ class coloring:
 		return self._str
 	def __getitem__(self,sliced):
 		self._str = self._str[sliced]
+		return self
 	def __add__(self,other):
 		self._str = self._str + other
+		return self
 	def __radd__(self,other):
 		self._str = other + self._str
+		return self
 	#insert color at position p with color c
 	def insertColor(self,p,c=-1,add = True):
 		c = self.default if c == -1 else c
@@ -587,16 +604,14 @@ class inputOverlay(overlayBase):
 		self.text = scrollable(roomleft)
 		self.password = password
 		self.end = end
+		self._keys.update(scrollablecontrol(self.text))
 		self._keys.update({
 			-1:	self.input
 			,10:	staticize(self.finish)
-			,127:	staticize(self.text.backspace)
-			,curses.KEY_LEFT:	staticize2(self.text.movepos,-1)
-			,curses.KEY_RIGHT:	staticize2(self.text.movepos,1)
 		})
 		self._altkeys.update({
 			None:	self.stop
-			,127:	self.text.backspace
+			,127:	self.text.delword
 		})
 	def input(self,chars):
 		self.text.append(bytes(chars).decode())
@@ -661,6 +676,7 @@ class commandOverlay(inputOverlay):
 		lines[-1] = CHAR_COMMAND + self.text.display()
 		return lines
 
+#overlay for redirecting input after \ is pressed
 class escapeOverlay(overlayBase):
 	replace = False
 	def __init__(self,appendobj):
@@ -689,18 +705,10 @@ class mainOverlay(overlayBase):
 		#these two too because they select the previous two
 		self._selector = 0
 		self._filtered = 0
+		self._keys.update(scrollablecontrol(self.text))
 		self._keys.update({
 			-1:			self.input
 			,ord('\\'):		staticize(self.replaceback)
-			,127:			staticize(self.text.backspace)
-			,curses.KEY_DC:		staticize(self.text.delback)
-			,curses.KEY_SHOME:	staticize(self.text.delback)
-			,curses.KEY_RIGHT:	staticize2(self.text.movepos,1)
-			,curses.KEY_LEFT:	staticize2(self.text.movepos,-1)
-			,curses.KEY_UP:		lambda x: self.text.prevhist() or 1 #return 1
-			,curses.KEY_DOWN:	lambda x: self.text.nexthist() or 1 #return 1
-			,curses.KEY_HOME:	staticize(self.text.home)
-			,curses.KEY_END:	staticize(self.text.end)
 			,curses.KEY_F2:		lambda x: self.piclist() or 1
 			,curses.KEY_RESIZE:	staticize(self.parent.resize)
 		})
@@ -821,6 +829,7 @@ class mainOverlay(overlayBase):
 		self._allMessages = []
 		self._selector = 0
 		self._filtered = 0
+		self.parent.resize() #clear the lines the parent makes
 
 	#add lines into lines supplied
 	def display(self,lines):
@@ -1184,7 +1193,7 @@ def catcherr(client,fun,*args):
 
 
 def start(bot_object,main_function):
-	global INDENT_STR,DIM_X,DIM_Y
+	global INDENT_STR
 	#why would I modify this at runtime anyway
 	INDENT_STR = INDENT_STR[:INDENT_LEN].rjust(INDENT_LEN)
 	client = main(bot_object)

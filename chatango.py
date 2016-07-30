@@ -54,6 +54,10 @@ HTML_CODES = [
 
 IMG_PATH = "feh"
 MPV_PATH = "mpv"
+XML_TAGS_RE = re.compile("(<[^<>]*?>)")
+THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
+REPLY_RE = re.compile(r"^@\w+? ")
+USER_RE = re.compile(r"^[!#]?\w+?: ")
 
 #ignore list
 #needed here so that commands can access it
@@ -103,7 +107,7 @@ def formatRaw(raw):
 	#REEEEEE CONTROL CHARACTERS GET OUT
 	#replace <br>s with actual line breaks
 	#otherwise, remove html
-	for i in re.findall("(<[^<>]*?>)", raw):
+	for i in XML_TAGS_RE.findall(raw):
 		raw = raw.replace(i,i == "<br/>" and "\n" or "")
 	for i in HTML_CODES:
 		raw = raw.replace(i[0],i[1])
@@ -111,7 +115,7 @@ def formatRaw(raw):
 	while len(raw) and raw[-1] == "\n":
 		raw = raw[:-1]
 	#thumbnail fix in chatango
-	raw = re.subn(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)",r"\1l\2",raw)[0]
+	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2",raw)[0]
 
 	return raw.replace("&nbsp;"," ")
 
@@ -187,9 +191,6 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			#replace HTML equivalents
 			for i in reversed(HTML_CODES):
 				text = text.replace(i[1],i[0])
-			#this was going to be a cool feature where I inject wingdings in, but nooooooooo
-			#chatango hates that
-			#text = re.subn(r'\|\|\|([^|]+)\|\|\|','<font face=wingdings>\\1</font>',text)[0]
 			group.sendPost(text.replace("\n","<br/>"),self.channel)
 		except AttributeError:
 			return
@@ -329,8 +330,7 @@ def F3(self):
 	def drawIgnored(string,i):
 		if dispList[i].split(' ')[0] not in ignores: return
 		string.insertColor(-1,3)
-		string[:-1]
-		string + 'i'
+		string[:-1]+'i'
 	
 	box = client.listOverlay(sorted(dispList),drawIgnored)
 	box.addKeys({
@@ -460,12 +460,12 @@ def greentext(msg,*args):
 	for no,line in enumerate(lines):
 		try:
 			#user:
-			begin = re.match(r"^[!#]?\w+?: ",line).end(0)
-			#@user
-			reply = re.match(r"^@\w+? ",line[begin:])
+			begin = USER_RE.match(line).end(0)
+			#ignore each @user
+			reply = REPLY_RE.match(line[begin:])
 			while reply:
 				begin += reply.end(0)
-				reply = re.match(r"^@\w+? ",line[begin:])
+				reply = REPLY_RE.match(line[begin:])
 			tracker += msg.insertColor(0)
 		except:
 			begin = 0
