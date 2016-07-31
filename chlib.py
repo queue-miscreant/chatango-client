@@ -57,6 +57,8 @@ class Generate:
 	def aid(n, uid):
 		'''Generate anon ID'''
 		n, uid = str(n).split(".")[0], str(uid)  # Fault-Tolerance
+		if '<' in tag:
+			n = n[2:-2]
 		try:
 			if int(n) == 0 or len(n) < 4:
 				n = "3452"
