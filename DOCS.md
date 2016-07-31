@@ -8,57 +8,57 @@ DECORATORS
 ###	client.colorer
 Adds a colorer to be applied to the client.  
 Decoratee arguments:  
->>>
+```
 msg:		The message as a coloring object. See coloring under objects.
-\*args:		The rest of the arguments. Currently:
+*args:		The rest of the arguments. Currently:
 0:		reply (boolean)
 1:		history (boolean)
 2:		channel number
->>>
-
----
+```
 
 ###	client.chatfilter
 Function run on attempt to push message. If any filter returns true, the message is not displayed  
 Decoratee arguments:
->			*args:	Same arguments as in client.colorer
-
----
+```
+*args:	Same arguments as in client.colorer
+```
 
 ###	client.onkey(valid_keyname)
 Causes a function to be run on keypress.  
 Arguments:
->	valid_keyname:	Self-explanatory. Must be the name of a valid key in curses._VALID_KEYNAMES
+```
+valid_keyname:	Self-explanatory. Must be the name of a valid key in curses._VALID_KEYNAMES
+```
 Decoratee arguments:
->	self:	the current client object
+```
+self:	the current client object
+```
 
----
-	
 ###	client.command(command_name)
 Declare command. Access commands with /  
 Arguments:
->			command_name:	The name of the command. Type `command_name to run
+```
+command_name:	The name of the command. Type `command_name to run
+```
 Decoratee arguments:
->>>
+```
 self:		The current client object
 arglist:	Space-delimited values following the command name
->>>
-
----
+```
 
 ###	client.opener(type,pattern_or_extension)
 Function run on attempt to open link.  
 Arguments:
->>>
+```
 type:			0,1, or 2. 0 is the default opener, 1 is for extensions, and 2 is for URL patterns
 pattern_or_extension:	The pattern or extension. Optional for default opener
->>>
+```
 Decoratee arguments:
->>>
+```
 self:	The client object. Passed so that blurbs can be printed from within functions
 link:	The link being opened
 ext:	The extension captured. Optional for default opener
->>>
+```
 
 ###	*See how these are called in chatango.py, such as in F3()*
 

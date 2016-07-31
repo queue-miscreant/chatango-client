@@ -12,7 +12,7 @@ This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses 
 My custom script: http://puu.sh/oTJR8/ca83bf5e85.py  
 Requires livestreamer and youtube-dl  
 
-If you want to extend the client somehow, consider looking at the [API](API.md)
+If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
 
 FEATURES:
 --------------------------
