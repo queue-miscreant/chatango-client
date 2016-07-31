@@ -504,7 +504,6 @@ class listOverlay(overlayBase):
 		subList = self.list[listmod:listmod+size]
 		subList = subList + ["" for i in range(size-len(subList))]
 		#display lines
-		i = 0
 		for i,value in enumerate(subList):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
@@ -1059,8 +1058,8 @@ class main:
 		self._screen = screen
 		self._screen.nodelay(1)
 		self.resize()
-		#for some reason this is too fast; a hundredth of a second isn't very noticeable anyway
-		time.sleep(.01) 
+		#for some reason this is too fast; a twentieth of a second isn't very noticeable anyway
+		time.sleep(.05) 
 		for i in args:
 			i.start()
 		self.loop()

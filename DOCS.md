@@ -1,7 +1,7 @@
 API
 =====
 It's nowhere near comprehensive enough to be called an API,
-but this section might help demonstrate the abilities of the client.
+but this section might help demonstrate the abilities of client.py
 
 DECORATORS
 ----------
@@ -117,7 +117,7 @@ Methods:
 A bot class. All bot instances (in start) are expected to descend from it
 Members:
 ```
-	parent: 	The current instance of client.main
+	parent:		The current instance of client.main
 ```
 Methods:
 ```
@@ -131,11 +131,11 @@ Base class of overlays. For something to be added to the overlay stack, it must 
 All subsequent overlays are descendents of it  
 Members:
 ```
-	_altkeys: 	Dictionary of escaped keys, i.e. sequences that start with ESC (ASCII 27)
+	_altkeys:	Dictionary of escaped keys, i.e. sequences that start with ESC (ASCII 27)
 			Keys must be ints, values must be functions that take no arguments
 			Special key None is for the Escape key
 	_keys:		ASCII (and curses values) of keys. Keys must be ints,
-			values must be functions that take a single list argument 	
+			values must be functions that take a single list argument	
 ```
 Methods:
 ```
@@ -281,7 +281,7 @@ Methods:
 	linklist():		Opens a listOverlay of lastlinks, backwards.
 	isselecting():		Returns _selector. Intened to be used to branch if selecting (i.e if self.isselecting():...)
 	addOverlay(new):	Equivalent to self.parent.addOverlay
-	getselect(num): 	Gets the selected message. A frontend for _allMessages[_selector] that returns the right message
+	getselect(num):		Gets the selected message. A frontend for _allMessages[_selector] that returns the right message
 	redolines():		Redo enough lines to not be apparent.
 	clearlines():		Clear _lines, _allMessages, _selector, and _filtered
 	append(newline, args = None):	Append [newline,args,len(breaklines(newline))] to _allMessages. If filtered,
