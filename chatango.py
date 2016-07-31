@@ -259,7 +259,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 def onenter(self):
 	if self.isselecting():
 		try:
-			message = self.msgup()
+			message = self.getselect()
 			msg = client.decolor(message[0])+' '
 			alllinks = client.LINK_RE.findall(msg)
 			def openall():
@@ -287,7 +287,7 @@ def ontab(self):
 	if self.isselecting():
 		try:
 			#allmessages contain the colored message and arguments
-			message = self.msgup()
+			message = self.getselect()
 			msg = client.decolor(message[0])
 			#first colon is separating the name from the message
 			msg = msg[msg.find(':')+2:]
