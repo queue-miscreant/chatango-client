@@ -1,16 +1,18 @@
 Ultra-Meme Chatango CLIent
 ==========================
 Version 5.3
-==========================
+--------------------------
 
-A client written in python with curses for chatango, an online chatting service.
-Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.
+A client written in python with curses for chatango, an online chatting service.  
+Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.  
 If you really want to, create a link to /usr/local/bin/ so you don't have to navigate to the folder.  
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses wcwidth from <https://github.com/jquast/wcwidth>.
 
-My custom script: http://puu.sh/oTJR8/ca83bf5e85.py
-Requires livestreamer and youtube-dl
+My custom script: http://puu.sh/oTJR8/ca83bf5e85.py  
+Requires livestreamer and youtube-dl  
+
+If you want to extend the client somehow, consider looking at the [API](API.md)
 
 FEATURES:
 --------------------------
@@ -23,6 +25,8 @@ FEATURES:
 	* Supports white, red, and blue channels (and the apparently forgotten "both" channel)
 * Colorized output
 	* Color text matching a regex or so
+* Client commands
+	* Type /help while the input box is empty to display a list of commands implemented
 * Chat filters based on message attributes
 
 DEPENDENCIES
@@ -125,8 +129,7 @@ CHANGELOG
 ## v3.0.1	*2016/2/17*
 * Merged bot.py into chatango.py
 * Fixed the colors drawing bug.
-	* 	Was caused by drawing too many lines at once, scrolling too much,
-	* 		and drawing past the display height
+	* Was caused by drawing too many lines at once, scrolling too much, and drawing past the display height
 
 ## v3.0	*2016/2/17*
 * Added channel support
@@ -141,30 +144,30 @@ CHANGELOG
 * __KNOWN ERRORS__
 * Random segfaults on startup. Running a second time seems to resolve it
 * For certain terminal widths, coloring algorithm makes colors fail.
-	* 	Widths greater than 40 seem to be okay.
+	* Widths greater than 40 seem to be okay.
 
 ## v2.Something *2016/1/26*
 * Refined chat window drawing
-	* 	Scrolls when new lines are needed instead of doing total redraws
+	* Scrolls when new lines are needed instead of doing total redraws
 * Moved some variables around
-	* 	This includes running credentials pulling on import of the bot 
+	* This includes running credentials pulling on import of the bot 
 * Added mouse click support on links
 
 ## v2.1 *2015/11/15*
 * Added formatting selector (F4)
-	* 	No way to display the color aside from using a GTK window, which I refuse to do
+	* No way to display the color aside from using a GTK window, which I refuse to do
 * Fixed long-string drawing on text input
-	* 	Previously, too-long strings would cause a curses error
+	* Previously, too-long strings would cause a curses error
 * Changed credentials file to JSON format
-	* 	It's easy to read from
+	* It's easy to read from
 
 ## v2.0 *2015/11/14*
 * Updated chlib.py from git <https://github.com/cellsheet/chlib>
 * Updated various input-pulling methods
-	* 	They now pull from the curses screen, and are descended from a single class
+	* They now pull from the curses screen, and are descended from a single class
 * Fixed various drawing methods
 * Unicode display/input support
-	* 	previously multi-byte characters would cause addstr to fail
+	* Previously multi-byte characters would cause addstr to fail
 
 ## v1.4.2 *2015/11/12*
 * Added numbers to links display
@@ -174,7 +177,7 @@ CHANGELOG
 
 ## v1.4.1 *2015/11/12*
 * Created seperate class for displaying boxes (e.g. the ones for user display/link display)
-	* 	Massive restructuring
+	* Massive restructuring
 
 ## v1.4 *2015/11/12*
 * Added user display list (F3)
@@ -192,7 +195,7 @@ CHANGELOG
 ## v1.3.2
 * Added better long-message indenting
 * Changed the decode/encode function to stop encoding ' ' as nbsps
-	* 	This was a stupid idea because chatango's HTML client looks for spaces around a name, not non-breaking spaces.
+	* This was a stupid idea because chatango's HTML client looks for spaces around a name, not non-breaking spaces.
 * Added better link comprehension
 
 ## v1.3.1
@@ -204,9 +207,9 @@ CHANGELOG
 ## v1.3
 * Added picture/link support (F1)
 * Added better handling of escape sequences
-* 	As consequence, added escape to quit
+	* As consequence, added escape to quit
 * Removed ability to input control characters, as well as rendering of control characters.
-* 	They're non-printing for a reason, lads.
+	* They're non-printing for a reason, lads.
 
 ## v1.2
 * Added a status window (shows username, current number of people in room)

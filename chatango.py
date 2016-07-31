@@ -4,6 +4,7 @@
 #		Chat bot that extends the ConnectionManager class in chlib and
 #		adds extensions to the client for chatango only.
 #		The main source file.
+#		TODO make file in ~ (hidden, starting with .)
 
 import sys
 
