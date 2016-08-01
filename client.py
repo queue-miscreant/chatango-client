@@ -643,7 +643,7 @@ class commandOverlay(inputOverlay):
 		inputOverlay.__init__(self,'')
 		self.parent = client
 		self._keys.update({
-			10:	staticize(self.run)
+			10:	staticize(self._run)
 			,127:	staticize(self._backspacewrap)
 		})
 		self._altkeys.update({
