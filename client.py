@@ -663,6 +663,7 @@ class commandOverlay(inputOverlay):
 			if isinstance(add,overlayBase):
 				self.parent.replaceOverlay(add)
 		except: pass
+		return -1
 	def display(self,lines):
 		lines[-1] = CHAR_COMMAND + self.text.display()
 		return lines
@@ -838,7 +839,7 @@ class mainOverlay(overlayBase):
 			#number of messages up, number of lines traversed up, number of lines visible up
 			top,start,visup = 0,0,0
 			lenmsg = len(self._allMessages)
-			while start < lenmsg and (start < self._selector or (top-visup+1) < lenlines):
+			while start < lenmsg and (visup < self._selector or (top-visup+1) < lenlines):
 				i = self._allMessages[-start-1]
 				start += 1
 				try:
@@ -853,9 +854,10 @@ class mainOverlay(overlayBase):
 					a.append(self._msgSplit)
 					self._lines = a + self._lines
 					i[2] = b
-			#adjust if we went too far up
+			#if we draw way past the selected message
+			#we're close to the bottom of lines
 			if visup > self._selector:
-				top = min(top,top+lenlines-(top-visup+1))
+				top = min(top,lenlines+visup-1) #+visup for the breaking lines
 			#we start drawing from this line, downward
 			selftraverse = -top
 			#top-visup+1 just signifies how many drawn lines there are
@@ -976,7 +978,6 @@ class botclass:
 class main:
 	_screen = None
 	_last = 0
-	_lines = []
 	def __init__(self,chatbot):
 		if not isinstance(chatbot,botclass):
 			raise BotException("%s not descendent of client.botclass"%\
@@ -1021,7 +1022,6 @@ class main:
 			self.over.text.width = newx-1
 		self.updateinput()
 		self.updateinfo()
-		self.lines = ["" for i in range(DIM_Y-RESERVE_LINES)]
 		self.display()
 	#=------------------------------=
 	#|	Loop Frontends		|
@@ -1071,18 +1071,19 @@ class main:
 	#display backend
 	def _display(self):
 		if not self.candisplay: return
+		lines = ["" for i in range(DIM_Y-RESERVE_LINES)]
 		#justify number of lines
 		#start with the last "replacing" overlay, then draw all overlays afterward
 		start = 1
-		while (start < len(self.lines)) and not self._ins[-start].replace:
+		while (start < len(self._ins)) and not self._ins[-start].replace:
 			start += 1
 		for i in self._ins[-start:]:
-			i.display(self.lines)
+			i.display(lines)
 		#main display method: move to top of screen
 		moveCursor()
 		curses.curs_set(0)
 		#draw each line in lines
-		for i in self.lines:
+		for i in lines:
 			print(i,end="\x1b[K\n\r")
 		curses.curs_set(1)
 		print(CHAR_RETURN_CURSOR,end='')
