@@ -5,6 +5,15 @@
 #		the topmost one.
 #		Output is done not with curses display, but
 #		various variations of print()
+#	TODO:	Try decreasing the worst-case time complexity of mainOverlay.display
+#		from 2O(x) to O(x) by handlying "lines" up with msgup/msgdown
+#
+#		Try again to decrease the string manipulation of breaklines
+#		Conceivably, we should be able to find a character, not add into another string
+#		
+#		word(breaking char)word(breaking char)reallylongword
+#			^		^			^
+#		okay to stop here 	or here			but we NEED to stop here
 
 try:
 	import curses
@@ -839,6 +848,8 @@ class mainOverlay(overlayBase):
 			#number of messages up, number of lines traversed up, number of lines visible up
 			top,start,visup = 0,0,0
 			lenmsg = len(self._allMessages)
+			#while (there are lines to draw) and ((we're "below" the selector) or
+			#(there are still lines to fill))
 			while start < lenmsg and (visup < self._selector or (top-visup+1) < lenlines):
 				i = self._allMessages[-start-1]
 				start += 1
@@ -854,18 +865,15 @@ class mainOverlay(overlayBase):
 					a.append(self._msgSplit)
 					self._lines = a + self._lines
 					i[2] = b
-			#if we draw way past the selected message
-			#we're close to the bottom of lines
+			#if the selected message is below the highest message
 			if visup > self._selector:
-				top = min(top,lenlines+visup-1) #+visup for the breaking lines
+				top = min(top,lenlines+visup-1)
 			#we start drawing from this line, downward
-			selftraverse = -top
-			#top-visup+1 just signifies how many drawn lines there are
-			linetraverse = -min(lenlines,top-visup+1)
+			selftraverse,linetraverse = -top,-min(lenlines,top-visup+1)
+			#draw up to line -2 (the breaking bar line), traverse up to the last item in the list
+			lenself,lenlines = -1,-2
 			msgno = visup
 			direction = 1
-			lenlines = -2 #int <= -2 <=> int < -1)
-			lenself = -1 #int <= -1 <=> int < 0
 		#this looks horrible, but it's DRY
 		while (direction*selftraverse) <= lenself and (direction*linetraverse) <= lenlines:
 			if self._lines[selftraverse] == self._msgSplit:
@@ -877,7 +885,6 @@ class mainOverlay(overlayBase):
 			selftraverse += direction
 			linetraverse += direction
 		lines[-1] = CHAR_HSPACE*DIM_X
-		return lines
 
 #------------------------------------------------------------------------------
 #INPUT
