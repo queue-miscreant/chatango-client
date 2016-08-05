@@ -4,7 +4,6 @@
 system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different print() calls.'''
-#TODO		Move history from scrollable into its own class
 
 try:
 	import curses
@@ -92,7 +91,7 @@ def cloneKey(fro,to):
 	except: raise KeyException("%s or %s is an invalid key name"%(fro,to))
 	_KEY_LUT[fro] = to
 
-#USEFUL CONTAINERS--------------------------------------------------------------
+#EXTENDABLE CONTAINERS----------------------------------------------------------
 colorers = []
 commands = {}
 filters = []
@@ -146,6 +145,49 @@ class box:
 		'''Format with box bottoms'''
 		return box.format(box.CHAR_BTML,fmt,box.CHAR_BTMR,box.CHAR_HSPACE)
 
+def scrollablecontrol(scroll):
+	'''Return a dictionary with standard controls for scrollable `scroll`'''
+	return {
+		127:			staticize(scroll.backspace)
+		,curses.KEY_DC:		staticize(scroll.delchar)
+		,curses.KEY_SHOME:	staticize(scroll.clear)
+		,curses.KEY_RIGHT:	staticize2(scroll.movepos,1)
+		,curses.KEY_LEFT:	staticize2(scroll.movepos,-1)
+		,curses.KEY_HOME:	staticize(scroll.home)
+		,curses.KEY_END:	staticize(scroll.end)
+	}
+
+def historycontrol(history,scroll):
+	'''Return a dictionary with standard controls for history `history`'''
+	return {
+		curses.KEY_UP:		lambda x:	scroll.setstr(history.nexthist())
+		,curses.KEY_DOWN:	lambda x:	scroll.setstr(history.prevhist())
+	}
+
+class history:
+	'''Container class for historical entries, a la an actual shell'''
+	def __init__(self):
+		self.history = []
+		self._selhis = 0
+	def nexthist(self):
+		'''Next in history (less recent)'''
+		if self.history:
+			self._selhis += (self._selhis < (len(self.history)))
+			return self.history[-self._selhis]
+		return ''
+	def prevhist(self):
+		'''Back in history (more recent)'''
+		if self.history:
+			self._selhis -= (self._selhis > 0)
+			#the next element or an empty string
+			return self._selhis and self.history[-self._selhis] or ""
+		return ''
+	def appendhist(self,new):
+		'''Add new entry in history'''
+		self.history.append(new)
+		self.history = self.history[-50:]
+		self._selhis = 0
+
 #DISPLAY/OVERLAY CLASSES----------------------------------------------------------
 class DisplayException(Exception):
 	'''Exception for display-related errors in client.display'''
@@ -155,20 +197,6 @@ def _moveCursor(x=0):
 	print("\x1b[%d;f"%x,end=CLEAR_FORMATTING)
 def soundBell():
 	print('\a',end="")
-
-def scrollablecontrol(scroll):
-	'''Return a dictionary with standard controls for scrollable `scroll`'''
-	return {
-		127:			staticize(scroll.backspace)
-		,curses.KEY_DC:		staticize(scroll.delchar)
-		,curses.KEY_SHOME:	staticize(scroll.clear)
-		,curses.KEY_RIGHT:	staticize2(scroll.movepos,1)
-		,curses.KEY_LEFT:	staticize2(scroll.movepos,-1)
-		,curses.KEY_UP:		lambda x: scroll.nexthist() or 1 #return 1
-		,curses.KEY_DOWN:	lambda x: scroll.prevhist() or 1 #return 1
-		,curses.KEY_HOME:	staticize(scroll.home)
-		,curses.KEY_END:	staticize(scroll.end)
-	}
 
 #please don't need these
 quitlambda = lambda x: -1
@@ -420,15 +448,14 @@ class inputOverlay(overlayBase):
 
 class commandOverlay(inputOverlay):
 	replace = False
-	history = []
+	history = history()
 	def __init__(self,client):
 		inputOverlay.__init__(self,'')
 		self.parent = client
+		self._keys.update(historycontrol(self.history,self.text))
 		self._keys.update({
 			10:	staticize(self._run)
 			,127:	staticize(self._backspacewrap)
-			,curses.KEY_UP:		staticize(nexthist)
-			,curses.KEY_DOWN:	staticize(prevhist)
 		})
 		self._altkeys.update({
 			127:	lambda: -1
@@ -439,7 +466,7 @@ class commandOverlay(inputOverlay):
 		self.text.backspace()
 	def _run(self):
 		text = str(self.text)
-		self.history.append(text)
+		if text: self.history.appendhist(text)
 		space = text.find(' ')
 		command = space == -1 and text or text[:space]
 		try:
@@ -448,8 +475,8 @@ class commandOverlay(inputOverlay):
 			if isinstance(add,overlayBase):
 				self.parent.replaceOverlay(add)
 				return
-			return -1
 		except Exception as exc: dbmsg(exc)
+		return -1
 	def display(self,lines):
 		lines[-1] = CHAR_COMMAND + self.text.display()
 		return lines
@@ -485,9 +512,11 @@ class mainOverlay(overlayBase):
 	def __init__(self,parent):
 		overlayBase.__init__(self)
 		self.text = scrollable(DIM_X)
+		self.history = history()
 		self.parent = parent
 		self.clearlines()
 		self._keys.update(scrollablecontrol(self.text))
+		self._keys.update(historycontrol(self.history,self.text))
 		self._keys.update({
 			-1:			self._input
 			,ord('\\'):		staticize(self._replaceback)

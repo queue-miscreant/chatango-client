@@ -5,6 +5,7 @@
 #		adds chatango-specific extensions
 #		The main source file.
 #TODO:		"Join another group" motion
+#		Tabbing from alternate cursor positions
 
 import sys
 
@@ -14,8 +15,8 @@ Usage:
 	chatango [-c username password] [-g group]:	Start the chatango client. 
 
 Options:
-	-c:		Input credentials again
-	-g:		Input group name again
+	-c uname pwd:	Input credentials
+	-g groupname:	Input group name
 	-nc:		No custom script import
 	--help:		Display this page
 	""")
@@ -30,6 +31,11 @@ import re
 import json
 import os
 
+SAVE_PATH = os.path.expanduser('~/.creds')
+XML_TAGS_RE = re.compile("(<[^<>]*?>)")
+THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
+REPLY_RE = re.compile(r"^@\w+? ")
+USER_RE = re.compile(r"^[!#]?\w+?: ")
 #constants for chatango
 FONT_FACES = ["Arial",
 		  "Comic Sans",
@@ -42,7 +48,6 @@ FONT_FACES = ["Arial",
 		  "Typewriter",
 		  ]
 FONT_SIZES = [9,10,11,12,13,14]
-
 HTML_CODES = [
 	["&#39;","'"],
 	["&gt;",">"],
@@ -53,12 +58,6 @@ HTML_CODES = [
 	["&amp;",'&'],
 ]
 
-SAVE_PATH = os.path.expanduser('~/.creds')
-XML_TAGS_RE = re.compile("(<[^<>]*?>)")
-THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
-REPLY_RE = re.compile(r"^@\w+? ")
-USER_RE = re.compile(r"^[!#]?\w+?: ")
-
 #ignore list
 #needed here so that commands can access it
 ignores = []
@@ -66,25 +65,6 @@ filtered_channels = [0, #white
 			0, #red
 			0, #blue
 			0] #both
-
-def init_colors():
-	ordering = (
-		'blue',
-		'cyan',
-		'magenta',
-		'red',
-		'yellow',
-		)
-	ordlen = len(ordering)
-	for i in range(ordlen*2):
-		client.definepair(ordering[i%ordlen],i//ordlen) #0-10: user text
-	client.definepair('green',True)
-	client.definepair('green')		#11: >meme arrow
-	client.definepair('none',False,'none')	#12-15: channels
-	client.definepair('red',False,'red')
-	client.definepair('blue',False,'blue')
-	client.definepair('magenta',False,'magenta')
-	client.definepair('white',False,'white')	#16: extra drawing
 
 #read credentials from file
 def readFromFile(filePath = SAVE_PATH):
@@ -279,7 +259,7 @@ def onenter(self):
 	if text.count(" ") != len(text):
 		#add it to the history
 		self.text.clear()
-		self.text.appendhist(text)
+		self.history.appendhist(text)
 		#call the send
 		chatbot.tryPost(text)
 
@@ -321,13 +301,8 @@ def linklist(self):
 			linkopen.link_opener(self.parent,current,True)
 		#exit
 		return -1
-	
-	#take out the protocol
-	dispList = [i.replace("http://","").replace("https://","") for i in reversed(linkopen.lastlinks)]
-	#link number: link, but in reverse
-	dispList = ["{}: {}".format(len(linkopen.lastlinks)-i,j) for i,j in enumerate(dispList)] 
 
-	box = display.listOverlay(dispList,None,["open","force"])
+	box = display.listOverlay(linkopen.reverselinks(),None,["open","force"])
 	box.addKeys({'enter':select})
 	self.addOverlay(box)
 
@@ -594,8 +569,25 @@ if __name__ == '__main__':
 			import custom #custom plugins
 		except ImportError as exc: pass
 			
-	#initialize colors and chat bot
-	init_colors()
+	#initialize colors
+	ordering = (
+		'blue',
+		'cyan',
+		'magenta',
+		'red',
+		'yellow',
+		)
+	ordlen = len(ordering)
+	for i in range(ordlen*2):
+		client.definepair(ordering[i%ordlen],i//ordlen) #0-10: user text
+	client.definepair('green',True)
+	client.definepair('green')		#11: >meme arrow
+	client.definepair('none',False,'none')	#12-15: channels
+	client.definepair('red',False,'red')
+	client.definepair('blue',False,'blue')
+	client.definepair('magenta',False,'magenta')
+	client.definepair('white',False,'white')	#16: extra drawing
+	#initialize chat bot
 	chatbot = chat_bot(creds)
 	#start
 	try:

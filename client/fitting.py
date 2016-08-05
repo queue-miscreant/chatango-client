@@ -96,6 +96,9 @@ class scrollable:
 	def __repr__(self):
 		'''Return the raw text contained'''
 		return self._str
+	def setstr(self,new):
+		self._str = new
+		self.end()
 	def display(self):
 		'''Display text contained with cursor'''
 		text = self._str[:self._pos] + CHAR_CURSOR + self._str[self._pos:]
@@ -152,21 +155,3 @@ class scrollable:
 		self._pos = 0
 		self._disp = 0
 		self.movepos(len(self._str))
-	def nexthist(self):
-		'''Next in history (less recent)'''
-		if self.history:
-			self._selhis += (self._selhis < (len(self.history)))
-			self._str = self.history[-self._selhis]
-			self.end()
-	def prevhist(self):
-		'''Back in history (more recent)'''
-		if self.history:
-			self._selhis -= (self._selhis > 0)
-			#the next element or an empty string
-			self._str = self._selhis and self.history[-self._selhis] or ""
-			self.end()
-	def appendhist(self,new):
-		'''Add new entry in history'''
-		self.history.append(new)
-		self.history = self.history[-50:]
-		self._selhis = 0
