@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 5.3
+Version 6.0
 --------------------------
 
 A client written in python with curses for chatango, an online chatting service.  
@@ -9,7 +9,7 @@ If you really want to, create a link to /usr/local/bin/ so you don't have to nav
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses wcwidth from <https://github.com/jquast/wcwidth>.
 
-My custom script: http://puu.sh/oTJR8/ca83bf5e85.py  
+My custom script: https://puu.sh/qqETN/8d15cfad44.py
 Requires livestreamer and youtube-dl  
 
 If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
@@ -39,6 +39,14 @@ DEPENDENCIES
 
 CHANGELOG
 =========================
+## v6.0		*2016/8/5*
+* Reorganized client.py into its own package (i.e, client/)
+	* Improves readability, but cross imports seem... strange.
+* Instead of mainOverlay.display calculating from selector position, three variables are used to track selection
+	* Less same time-complexity, half the iterations
+* Moved link opening under client/, and builtins in chatango.py to the new file
+* I honestly don't know if this should constitute its own version number, but okay
+
 ## v5.3		*2016/7/30*
 * Fixed scrollable's "reverse fitwordtolength"
 	* This didn't work because it's hard to find a backwards CSI

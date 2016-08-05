@@ -2,8 +2,9 @@
 #
 #chatango.py:
 #		Chat bot that extends the ConnectionManager class in chlib and
-#		adds extensions to the client for chatango only.
+#		adds chatango-specific extensions
 #		The main source file.
+#TODO:		"Join another group" motion
 
 import sys
 
@@ -21,13 +22,13 @@ Options:
 	sys.exit()
 	
 import client
+#readablity
+from client import display
+from client import linkopen
 import chlib
-from threading import Thread
-import subprocess
 import re
 import json
 import os
-from webbrowser import open_new_tab
 
 #constants for chatango
 FONT_FACES = ["Arial",
@@ -52,8 +53,7 @@ HTML_CODES = [
 	["&amp;",'&'],
 ]
 
-IMG_PATH = "feh"
-MPV_PATH = "mpv"
+SAVE_PATH = os.path.expanduser('~/.creds')
 XML_TAGS_RE = re.compile("(<[^<>]*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 REPLY_RE = re.compile(r"^@\w+? ")
@@ -87,7 +87,7 @@ def init_colors():
 	client.definepair('white',False,'white')	#16: extra drawing
 
 #read credentials from file
-def readFromFile(filePath):
+def readFromFile(filePath = SAVE_PATH):
 	try:
 		jsonInput = open(filePath)
 		jsonData = json.loads(jsonInput.read())
@@ -95,7 +95,7 @@ def readFromFile(filePath):
 		return jsonData
 	except Exception as exc:
 		return {} 
-def sendToFile(filePath,jsonData):
+def sendToFile(jsonData,filePath = SAVE_PATH):
 	if filePath == '': return
 	encoder = json.JSONEncoder(ensure_ascii=False)
 	out = open(filePath,'w')
@@ -144,10 +144,10 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			if self.creds.get(i):
 				continue
 			prompt = ['username', 'password', 'group name'][num]
-			inp = client.inputOverlay("Enter your " + prompt, num == 1,True)
+			inp = display.inputOverlay("Enter your " + prompt, num == 1,True)
 			self.parent.addOverlay(inp)
 			self.creds[i] = inp.waitForInput()
-			if not client.active: return
+			if not display.active: return
 
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, self.creds['user'], self.creds['passwd'], False)
@@ -176,17 +176,17 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			self.creds['formatting'] = newFormat
 		
 		if self.creds.get('formatting') is None:
-			self.creds['formatting'] = {'fc': "DD9211",
-			'nc': "232323",
-			'ff': "0",
-			'fz': 12,
-			}
+			self.creds['formatting'] = {
+			'fc': "DD9211"
+			,'nc': "232323"
+			,'ff': "0"
+			,'fz': 12}
 		group.setFontColor(self.creds['formatting']['fc'])
 		group.setNameColor(self.creds['formatting']['nc'])
 		group.setFontFace(self.creds['formatting']['ff'])
 		group.setFontSize(self.creds['formatting']['fz'])
 		
-		sendToFile('creds',self.creds)
+		sendToFile(self.creds)
 	
 	def tryPost(self,text):
 		try:
@@ -218,18 +218,19 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		self.stop()
 		
 	#on message
-	def recvPost(self, group, user, post, history = 0):
+	def recvPost(self, group, user, post, ishistory = 0):
 		if user not in self.members:
 			self.members.append(user)
 		me = self.creds.get('user')
 		#and is short-circuited
-		reply = me is not None and ("@"+me.lower() in post.raw.lower())
+		isreply = me is not None and ("@"+me.lower() in post.raw.lower())
 		#sound bell
-		if reply and not history: print('\a',end="")
+		if isreply and not ishistory: display.soundBell()
 		#format as ' user: message'
-		self.parent.msgPost(user+': '+formatRaw(post.raw),
+		msg = '%s: %s'%(user,formatRaw(post.raw))
+		linkopen.parseLinks(msg)
+		self.parent.msgPost(msg, post.user, isreply, ishistory, post.channel)
 		#extra arguments. use in colorers
-			post.user, reply, history, post.channel)
 
 	def recvshow_fw(self, group):
 		self.parent.msgSystem("Flood ban warning issued")
@@ -255,20 +256,20 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 
 #-------------------------------------------------------------------------------------------------------
 #KEYS
-@client.onkey("enter")
+@display.onkey("enter")
 def onenter(self):
 	if self.isselecting():
 		try:
 			message = self.getselect()
 			msg = client.decolor(message[0])+' '
-			alllinks = client.LINK_RE.findall(msg)
+			alllinks = linkopen.LINK_RE.findall(msg)
 			def openall():
 				for i in alllinks:
-					client.link_opener(self.parent,i)
+					linkopen.link_opener(self.parent,i)
 			if len(alllinks) > 1:
 				self.parent.msgSystem('Really open %d links? (y/n)'%\
 					len(alllinks))
-				self.addOverlay(client.confirmOverlay(openall))
+				self.addOverlay(display.confirmOverlay(openall))
 			else:
 				openall()
 		except Exception: pass
@@ -282,7 +283,7 @@ def onenter(self):
 		#call the send
 		chatbot.tryPost(text)
 
-@client.onkey("tab")
+@display.onkey("tab")
 def ontab(self):
 	if self.isselecting():
 		try:
@@ -307,7 +308,30 @@ def ontab(self):
 			#up until the @
 			self.text.append(findName(afterReply,chatbot.members) + " ")
 
-@client.onkey('f3')
+@display.onkey('f2')
+def linklist(self):
+	#enter key
+	def select(me):
+		if not len(linkopen.lastlinks): return
+		current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
+		current = linkopen.lastlinks[int(current)-1] #this enforces the wanted link is selected
+		if not me.mode:
+			linkopen.link_opener(self.parent,current)
+		else:
+			linkopen.link_opener(self.parent,current,True)
+		#exit
+		return -1
+	
+	#take out the protocol
+	dispList = [i.replace("http://","").replace("https://","") for i in reversed(linkopen.lastlinks)]
+	#link number: link, but in reverse
+	dispList = ["{}: {}".format(len(linkopen.lastlinks)-i,j) for i,j in enumerate(dispList)] 
+
+	box = display.listOverlay(dispList,None,["open","force"])
+	box.addKeys({'enter':select})
+	self.addOverlay(box)
+
+@display.onkey('f3')
 def F3(self):
 	#special wrapper to manipulate inject functionality for newlines in the list
 	def select(me):
@@ -335,7 +359,7 @@ def F3(self):
 		string.insertColor(-1,3)
 		string[:-1]+'i'
 	
-	box = client.listOverlay(sorted(dispList),drawIgnored)
+	box = display.listOverlay(sorted(dispList),drawIgnored)
 	box.addKeys({
 		'enter':select,
 		'tab':tab,
@@ -343,7 +367,7 @@ def F3(self):
 	
 	self.addOverlay(box)
 
-@client.onkey('f4')
+@display.onkey('f4')
 def F4(self):
 	#select which further input to display
 	def select(me):
@@ -352,20 +376,20 @@ def F4(self):
 		#ask for font color
 		if me.it == 0:
 			def enter(me):
-				formatting['fc'] = client.toHexColor(me.color)
+				formatting['fc'] = me.getHex()
 				chatbot.setFormatting(formatting)
 				return -1
 
-			furtherInput = client.colorOverlay(client.fromHexColor(formatting['fc']))
+			furtherInput = display.colorOverlay(formatting['fc'])
 			furtherInput.addKeys({'enter':enter})
 		#ask for name color
 		elif me.it == 1:
 			def enter(me):
-				formatting['nc'] = client.toHexColor(me.color)
+				formatting['nc'] = me.getHex()
 				chatbot.setFormatting(formatting)
 				return -1
 		
-			furtherInput = client.colorOverlay(client.fromHexColor(formatting['nc']))
+			furtherInput = display.colorOverlay(formatting['nc'])
 			furtherInput.addKeys({'enter':enter})
 		#font face
 		elif me.it == 2:
@@ -374,7 +398,7 @@ def F4(self):
 				chatbot.setFormatting(formatting)
 				return -1
 			
-			furtherInput = client.listOverlay(FONT_FACES)
+			furtherInput = display.listOverlay(FONT_FACES)
 			furtherInput.addKeys({'enter':enter})
 			furtherInput.it = int(formatting['ff'])
 		#ask for font size
@@ -384,7 +408,7 @@ def F4(self):
 				chatbot.setFormatting(formatting)
 				return -1
 				
-			furtherInput = client.listOverlay([i for i in map(str,FONT_SIZES)])
+			furtherInput = display.listOverlay([i for i in map(str,FONT_SIZES)])
 			furtherInput.addKeys({'enter':enter})
 			furtherInput.it = FONT_SIZES.index(formatting['fz'])
 		#insurance
@@ -393,14 +417,14 @@ def F4(self):
 		self.addOverlay(furtherInput)
 		#set formatting, even if changes didn't occur
 		
-	box = client.listOverlay(["Font Color","Name Color","Font Face","Font Size"])
+	box = display.listOverlay(["Font Color","Name Color","Font Face","Font Size"])
 	box.addKeys({
 		'enter':select,
 	})
 	
 	self.addOverlay(box)
 
-@client.onkey('f5')
+@display.onkey('f5')
 def F5(self):
 	def select(me):
 		chatbot.channel = me.it
@@ -417,7 +441,7 @@ def F5(self):
 		col = i and i+12 or 16
 		string.insertColor(-1,col)
 					
-	box = client.listOverlay(["None","Red","Blue","Both"],drawActive)
+	box = display.listOverlay(["None","Red","Blue","Both"],drawActive)
 	box.addKeys({
 		'enter':select,
 		'tab':ontab,
@@ -426,14 +450,14 @@ def F5(self):
 	
 	self.addOverlay(box)
 
-@client.onkey('^r')
+@display.onkey('^r')
 def reloadclient(self):
 	self.clearlines()
 	chatbot.reconnect()
 
-@client.onkey('^g')
+@display.onkey('^g')
 def openlastlink(self):
-	client.link_opener(self.parent,client.lastlinks[-1])
+	linkopen.link_opener(self.parent,linkopen.lastlinks[-1])
 
 #-------------------------------------------------------------------------------------------------------
 #COLORERS
@@ -445,14 +469,14 @@ def getColor(name,rot = 6,init = 6,split = 109):
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-@client.colorer
+@display.colorer
 def defaultcolor(msg,coldic,*args):
 	strmsg = str(msg)
 	msg.default = getColor(strmsg[:strmsg.find(':')])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
 #also color lines by default
-@client.colorer
+@display.colorer
 def greentext(msg,*args):
 	lines = str(msg).split("\n") #don't forget to add back in a char
 	tracker = 0
@@ -479,20 +503,20 @@ def greentext(msg,*args):
 			tracker += len(line)+1 #add in the newline
 
 #links as white
-@client.colorer
+@display.colorer
 def link(msg,*args):
 	tracker = 0
-	find = client.LINK_RE.search(str(msg)+' ')
+	find = linkopen.LINK_RE.search(str(msg)+' ')
 	while find:
 		begin,end = tracker+find.start(0),tracker+find.end(0)
 		#find the most recent color
 		last = msg.findColor(begin)
 		end += msg.insertColor(begin,0,False)
 		tracker = msg.insertColor(end,last) + end
-		find = client.LINK_RE.search(str(msg)[tracker:] + ' ')
+		find = linkopen.LINK_RE.search(str(msg)[tracker:] + ' ')
 		
 #draw replies, history, and channel
-@client.colorer
+@display.colorer
 def chatcolors(msg,*args):
 	msg.addEffect(0,args[1])
 	msg.addEffect(1,args[2])
@@ -501,58 +525,10 @@ def chatcolors(msg,*args):
 	msg.insertColor(0,args[3]+12)
 
 #-------------------------------------------------------------------------------------------------------
-#OPENERS
-#start and daemonize feh (or replaced image viewing program)
-@client.opener(1,"jpeg")
-@client.opener(1,"jpg")
-@client.opener(1,"jpg:large")
-@client.opener(1,"png")
-def images(cli,link,ext):
-	cli.newBlurb("Displaying image... ({})".format(ext))
-	args = [IMG_PATH, link]
-	try:
-		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		display_thread = Thread(target = displayProcess.communicate)
-		display_thread.daemon = True
-		display_thread.start()
-	except:
-		cli.newBlurb("No viewer %s found"%FEH_PATH)
-	
-#start and daemonize mpv (or replaced video playing program)
-@client.opener(1,"webm")
-@client.opener(1,"mp4")
-@client.opener(1,"gif")
-def videos(cli,link,ext):
-	cli.newBlurb("Playing video... ({})".format(ext))
-	args = [MPV_PATH, link, "--pause"]
-	try:
-		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		display_thread = Thread(target = displayProcess.communicate)
-		display_thread.daemon = True
-		display_thread.start()
-	except:
-		cli.newBlurb("No player %s found"%MPV_PATH)
-
-@client.opener(0)
-def linked(cli,link):
-	cli.newBlurb("Opened new tab")
-	#magic code to output stderr to /dev/null
-	savout = os.dup(1)	#get another header for stdout
-	saverr = os.dup(2)	#get another header for stderr
-	os.close(1)		#close stdout briefly because open_new_tab doesn't pipe stdout to null
-	os.close(2)
-	os.open(os.devnull, os.O_RDWR)	#open devnull for writing
-	try:
-		open_new_tab(link)	#do thing
-	finally:
-		os.dup2(savout, 1)	#reopen stdout
-		os.dup2(saverr, 2)
-
-#-------------------------------------------------------------------------------------------------------
 #COMMANDS
 
 #methods like this can be used in the form `[commandname]
-@client.command('ignore')
+@display.command('ignore')
 def ignore(cli,arglist):
 	global ignores
 	person = arglist[0]
@@ -560,7 +536,7 @@ def ignore(cli,arglist):
 	if person in ignores: return
 	ignores.append(person)
 
-@client.command('unignore')
+@display.command('unignore')
 def unignore(cli,arglist):
 	global ignores
 	person = arglist[0]
@@ -572,14 +548,14 @@ def unignore(cli,arglist):
 #FILTERS
 
 #filter filtered channels
-@client.chatfilter
+@display.filter
 def channelfilter(*args):
 	try:
 		return filtered_channels[args[3]]
 	except:
 		return True
 
-@client.chatfilter
+@display.filter
 def ignorefilter(*args):
 	try:
 		return args[0] in ignores
@@ -588,7 +564,9 @@ def ignorefilter(*args):
 #-------------------------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-	creds = readFromFile(os.path.expanduser('~/.creds'))
+	creds = {}
+	if '-r' not in sys.argv:
+		creds = readFromFile()
 
 	formatting = creds.get('formatting')
 	formatting = formatting == {} and None or formatting
@@ -621,6 +599,6 @@ if __name__ == '__main__':
 	chatbot = chat_bot(creds)
 	#start
 	try:
-		client.start(chatbot,chatbot.main)
+		display.start(chatbot,chatbot.main)
 	finally:
 		chatbot.stop()
