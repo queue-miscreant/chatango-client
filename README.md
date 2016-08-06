@@ -1,11 +1,12 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.0
+Version 6.1
 --------------------------
 
 A client written in python with curses for chatango, an online chatting service.  
 Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.  
-If you really want to, create a link to /usr/local/bin/ so you don't have to navigate to the folder.  
+I recommend making a symlink in /usr/local/bin/ so you don't have to navigate to the folder,
+or especially have a million files in ~/
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses wcwidth from <https://github.com/jquast/wcwidth>.
 
@@ -39,6 +40,16 @@ DEPENDENCIES
 
 CHANGELOG
 =========================
+## v6.1		*2016/8/6*
+* Added keys command
+* Removed staticize2; staticize is now a function that copies documentation
+* Made history its own class
+* Fixed tabbing from 'not end of string'
+* Added command tabbing
+	* As consequence, moved findName into client.display
+* Added switching groups (control-t)
+* Moved scrollablecontrol to method of overlayBase
+* Version numbers will now approach tau for no reason whatsoever
 ## v6.0		*2016/8/5*
 * Reorganized client.py into its own package (i.e, client/)
 	* Improves readability, but cross imports seem... strange.
@@ -100,7 +111,7 @@ CHANGELOG
 * New input window. Due to the new start feature, it is now possible to start the client before the chat bot.
 * Exceptions in the chat bot thread (ie, the functionality supplied to client) should now halt the client
 
-## v4.0		*2016/5/10*
+## v4.0 (the important update)	*2016/5/10*
 * Completely new display and input methods
 * No longer relies on curses drawing; everything is done with variations of print()
 * F4 format selector works now

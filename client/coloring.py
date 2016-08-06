@@ -21,7 +21,9 @@ _COLORS =	['black'
 		,'white'
 		,''
 		,'none']
-#0 = reverse; 1 = underline
+#names of effects
+_EFFECTNAMES =	['reverse'
+		,'underline']
 _EFFECTS = ['\x1b[7m','\x1b[4m']
 #storage for defined pairs
 _COLOR_PAIRS = 	['\x1b[39;49m'	#Normal/Normal
@@ -62,14 +64,18 @@ class coloring:
 	def insertColor(self,p,c=None,add=True):
 		'''Add a color at position p with color c'''
 		c = self.default if c is None else c
-		if isinstance(c,int):
+		if type(c) is int:
 			c = getColor(c,add)
 		self._str =  self._str[:p] + c + self._str[p:]
 		#return amount added to string
 		return len(c)
-	def addEffect(self, number, test = True):
+	def addEffect(self, effect, test = True):
 		'''Add effect to string (if test is true)'''
-		self._str = (test and _EFFECTS[number] or "") + self._str
+		try:
+			if type(effect) is str: effect = _EFFECTNAMES[effect]
+		except:
+			raise ColoringException('Effect name %s not defined'%effect)
+		self._str = (test and _EFFECTS[effect] or "") + self._str
 	def findColor(self,end):
 		'''Most recent color before end'''
 		lastcolor = {end-i.end(0):i.group(0) for i in \

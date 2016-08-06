@@ -4,8 +4,6 @@
 #		Chat bot that extends the ConnectionManager class in chlib and
 #		adds chatango-specific extensions
 #		The main source file.
-#TODO:		"Join another group" motion
-#		Tabbing from alternate cursor positions
 
 import sys
 
@@ -99,16 +97,6 @@ def formatRaw(raw):
 
 	return raw.replace("&nbsp;"," ")
 
-#if given is at place 0 in the member name
-#return rest of the member name or an empty string
-def findName(given,memList):
-	for i in memList:
-		if i[0] in "!#":
-			i = i[1:]
-		if not i.find(given):
-			return i[len(given):]
-	return ""
-
 #bot for interacting with chat
 class chat_bot(chlib.ConnectionManager,client.botclass):
 	members = []
@@ -148,6 +136,10 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		if not self.isinited: return
 		self.stop()
 		self.start()
+	
+	def changeGroup(self,newgroup):
+		self.stop()
+		self.addGroup(newgroup)
 
 	def setFormatting(self, newFormat = None):
 		group = self.joinedGroup
@@ -238,6 +230,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 #KEYS
 @display.onkey("enter")
 def onenter(self):
+	'''Open selected message's links or send message'''
 	if self.isselecting():
 		try:
 			message = self.getselect()
@@ -265,6 +258,7 @@ def onenter(self):
 
 @display.onkey("tab")
 def ontab(self):
+	'''Reply to selected message or complete member name'''
 	if self.isselecting():
 		try:
 			#allmessages contain the colored message and arguments
@@ -277,8 +271,8 @@ def ontab(self):
 		except: pass
 		return 
 	#only search after the last space
-	lastSpace = str(self.text).rfind(" ")
-	search = str(self.text)[lastSpace + 1 and lastSpace:]
+	lastSpace = self.text.rfind(" ")
+	search = self.text[lastSpace + 1 and lastSpace:]
 	#find the last @
 	reply = search.rfind("@")
 	if reply+1:
@@ -286,10 +280,11 @@ def ontab(self):
 		#look for the name starting with the text given
 		if afterReply != "":
 			#up until the @
-			self.text.append(findName(afterReply,chatbot.members) + " ")
+			self.text.append(display.findName(afterReply,chatbot.members) + " ")
 
 @display.onkey('f2')
 def linklist(self):
+	'''List accumulated links'''
 	#enter key
 	def select(me):
 		if not len(linkopen.lastlinks): return
@@ -308,7 +303,7 @@ def linklist(self):
 
 @display.onkey('f3')
 def F3(self):
-	#special wrapper to manipulate inject functionality for newlines in the list
+	'''List members of current group'''
 	def select(me):
 		current = me.list[me.it]
 		current = current.split(' ')[0]
@@ -344,6 +339,7 @@ def F3(self):
 
 @display.onkey('f4')
 def F4(self):
+	'''Chatango formatting settings'''
 	#select which further input to display
 	def select(me):
 		formatting = chatbot.creds['formatting']
@@ -401,6 +397,7 @@ def F4(self):
 
 @display.onkey('f5')
 def F5(self):
+	'''List channels'''
 	def select(me):
 		chatbot.channel = me.it
 		return -1
@@ -418,8 +415,8 @@ def F5(self):
 					
 	box = display.listOverlay(["None","Red","Blue","Both"],drawActive)
 	box.addKeys({
-		'enter':select,
-		'tab':ontab,
+		'enter':select
+		,'tab':	ontab
 	})
 	box.it = chatbot.channel
 	
@@ -427,12 +424,21 @@ def F5(self):
 
 @display.onkey('^r')
 def reloadclient(self):
+	'''Reload current group'''
 	self.clearlines()
 	chatbot.reconnect()
 
 @display.onkey('^g')
 def openlastlink(self):
+	'''Open last link'''
 	linkopen.link_opener(self.parent,linkopen.lastlinks[-1])
+
+@display.onkey('^t')
+def joingroup(self):
+	'''Join a new group'''
+	inp = display.inputOverlay("Enter group name")
+	self.addOverlay(inp)
+	inp.runOnDone(lambda x: self.clearlines() or chatbot.changeGroup(x))
 
 #-------------------------------------------------------------------------------------------------------
 #COLORERS

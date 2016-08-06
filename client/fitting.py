@@ -96,6 +96,22 @@ class scrollable:
 	def __repr__(self):
 		'''Return the raw text contained'''
 		return self._str
+	def __getitem__(self,sliced):
+		'''Get a slice up to the cursor'''
+		newstop = sliced.stop
+		if not sliced.stop: newstop = self._pos
+		else: newstop = min(newstop,self._pos)
+		return self._str[slice(sliced.start,newstop,sliced.step)]
+	def find(self,string,start=0,end=None):
+		'''Find up to cursor position'''
+		if end is None:
+			end = self._pos
+		return self._str.find(string,start,end)
+	def rfind(self,string,start=0,end=None):
+		'''Right find up to cursor position'''
+		if end is None:
+			end = self._pos
+		return self._str.rfind(string,start,end)
 	def setstr(self,new):
 		self._str = new
 		self.end()
