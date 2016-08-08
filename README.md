@@ -1,17 +1,19 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.1
+Version 6.2
 --------------------------
 
-A client written in python with curses for chatango, an online chatting service.  
+A CLI application written in python with curses input and ANSI escape-colored output.   
+Used to implement a client for chatango, an online chatting service.   
 Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.  
 I recommend making a symlink in /usr/local/bin/ so you don't have to navigate to the folder,
 or especially have a million files in ~/
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses wcwidth from <https://github.com/jquast/wcwidth>.
 
-My custom script: https://puu.sh/qqETN/8d15cfad44.py
-Requires livestreamer and youtube-dl  
+My custom script: https://puu.sh/qu6w1/84c4e26f77.py
+Requires livestreamer, youtube-dl, and xclip, but if you don't already have
+these, seriously consider installing them  
 
 If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
 
@@ -33,13 +35,30 @@ FEATURES:
 DEPENDENCIES
 --------------------------
 * Python 3
-* Curses (You probably already have this)
-### Technically these are optional since you can change how they open
+* Curses (You probably already have this)  
+### Technically these are optional since you can change how they open  
 * Feh image viewer
 * MPV
 
+TODO
+-------------------------
+### Chatango client-side  
+Checking login success better
+### Package-side  
+Easier-to-access coloring
+Maybe redolines better? (get the right number of lines up)
+Scrolling loads stored messages like before I revamped the scrolling
+
 CHANGELOG
 =========================
+## v6.2		*2016/8/8*
+* Fixed tab-reply to anons and no-accounters
+* Added support for logging in without credentials (i.e anons and no-accounters)
+* Better link opener interface
+* Added -r flag for relogging
+* Fixed newlines
+	* Apparently at some point, embedding html tags in messages caused chatango's web client to eat them
+
 ## v6.1		*2016/8/6*
 * Added keys command
 * Removed staticize2; staticize is now a function that copies documentation
@@ -50,6 +69,7 @@ CHANGELOG
 * Added switching groups (control-t)
 * Moved scrollablecontrol to method of overlayBase
 * Version numbers will now approach tau for no reason whatsoever
+
 ## v6.0		*2016/8/5*
 * Reorganized client.py into its own package (i.e, client/)
 	* Improves readability, but cross imports seem... strange.

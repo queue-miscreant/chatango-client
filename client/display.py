@@ -16,7 +16,6 @@ if not (sys.stdin.isatty() and sys.stdout.isatty()): #check if terminal
 	raise IOError("This script is not intended to be piped")
 #escape has delay typically
 environ.setdefault('ESCDELAY', '25')
-
 #stupid? yes.
 from .coloring import *
 from .fitting import *
@@ -79,7 +78,6 @@ for i in range(32,256):
 
 class KeyException(Exception):
 	'''Exception for keys-related errors in client.display'''
-	pass
 
 def cloneKey(fro,to):
 	'''Redirect one key to another. DO NOT USE FOR VALUES IN range(32,128)'''
@@ -127,7 +125,6 @@ class box:
 	CHAR_TOPR = "┐"
 	CHAR_BTML = "└"
 	CHAR_BTMR = "┘"
-	#lambdas
 	noform = lambda x: box.CHAR_VSPACE + x + box.CHAR_VSPACE
 	def format(left,string,right,justchar = ' '):
 		'''Format and justify part of box'''
@@ -150,19 +147,18 @@ class history:
 	def __init__(self):
 		self.history = []
 		self._selhis = 0
+		self.temp = ''
 	def nexthist(self):
 		'''Next in history (less recent)'''
 		if self.history:
 			self._selhis += (self._selhis < (len(self.history)))
 			return self.history[-self._selhis]
-		return ''
 	def prevhist(self):
 		'''Back in history (more recent)'''
 		if self.history:
 			self._selhis -= (self._selhis > 0)
 			#the next element or an empty string
 			return self._selhis and self.history[-self._selhis] or ""
-		return ''
 	def appendhist(self,new):
 		'''Add new entry in history'''
 		self.history.append(new)
@@ -172,7 +168,6 @@ class history:
 #DISPLAY/OVERLAY CLASSES----------------------------------------------------------
 class DisplayException(Exception):
 	'''Exception for display-related errors in client.display'''
-	pass
 
 def _moveCursor(x=0):
 	print("\x1b[%d;f"%x,end=CLEAR_FORMATTING)
@@ -477,7 +472,11 @@ class inputOverlay(overlayBase):
 			time.sleep(.1)
 		return str(self.text)
 	def runOnDone(self,func):
-		newThread = Thread(target=(lambda: func(self.waitForInput())))
+		'''Start another thread and run func after valid poll'''
+		def onDone():
+			result = self.waitForInput()
+			if result: func(result)
+		newThread = Thread(target=onDone)
 		newThread.daemon = True
 		newThread.start()
 
@@ -709,7 +708,6 @@ class mainOverlay(overlayBase):
 #MAIN CLIENT--------------------------------------------------------------------
 class BotException(Exception):
 	'''Exception for incorrect bots passed into client.display'''
-	pass
 
 class botclass:
 	parent = None

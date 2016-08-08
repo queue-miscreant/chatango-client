@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
-#
 #chatango.py:
-#		Chat bot that extends the ConnectionManager class in chlib and
-#		adds chatango-specific extensions
-#		The main source file.
+'''Chat bot that extends the ConnectionManager class in chlib and
+adds chatango-specific extensions
+The main source file.'''
+#TODO		Something with checking premature group removes
 
 import sys
-
-if "--help" in sys.argv:
-	print("""cube's chatango client
-Usage:
-	chatango [-c username password] [-g group]:	Start the chatango client. 
-
-Options:
-	-c uname pwd:	Input credentials
-	-g groupname:	Input group name
-	-nc:		No custom script import
-	--help:		Display this page
-	""")
-	sys.exit()
-	
 import client
 #readablity
 from client import display
@@ -49,7 +35,6 @@ FONT_SIZES = [9,10,11,12,13,14]
 HTML_CODES = [
 	["&#39;","'"],
 	["&gt;",">"],
-	["<br/>","\n"],
 	["&lt;","<"],
 	["&quot;",'"'],
 	["&apos;","'"],
@@ -82,7 +67,6 @@ def sendToFile(jsonData,filePath = SAVE_PATH):
 #so I'm adding <br> to \n. This further gets converted by the client into multiple lines
 def formatRaw(raw):
 	if len(raw) == 0: return raw
-	#REEEEEE CONTROL CHARACTERS GET OUT
 	#replace <br>s with actual line breaks
 	#otherwise, remove html
 	for i in XML_TAGS_RE.findall(raw):
@@ -167,8 +151,11 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			for i in reversed(HTML_CODES):
 				text = text.replace(i[1],i[0])
 			group.sendPost(text.replace("\n","<br/>"),self.channel)
-		except AttributeError:
-			return
+		except Exception as exc:
+			display.dbmsg(exc)
+			
+#		except AttributeError:
+#			return
 	
 	def recvinited(self, group):
 		self.parent.msgSystem("Connected to "+group.name)
@@ -193,7 +180,8 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 	def recvPost(self, group, user, post, ishistory = 0):
 		if user not in self.members:
 			self.members.append(user)
-		me = self.creds.get('user')
+		me = group.user
+		if me[0] in '!#': me = me[1:]
 		#and is short-circuited
 		isreply = me is not None and ("@"+me.lower() in post.raw.lower())
 		#sound bell
@@ -238,7 +226,7 @@ def onenter(self):
 			alllinks = linkopen.LINK_RE.findall(msg)
 			def openall():
 				for i in alllinks:
-					linkopen.link_opener(self.parent,i)
+					linkopen.open_link(self.parent,i)
 			if len(alllinks) > 1:
 				self.parent.msgSystem('Really open %d links? (y/n)'%\
 					len(alllinks))
@@ -265,9 +253,12 @@ def ontab(self):
 			message = self.getselect()
 			msg = client.decolor(message[0])
 			#first colon is separating the name from the message
-			msg = msg[msg.find(':')+2:]
-			self.text.append('@{}: `{}`'.format(message[1][0],
-				msg.replace('`','')))
+			colon = msg.find(':')
+			name = msg[1:colon]
+			msg = msg[colon+2:]
+			if name[0] in "!#":
+				name = name[1:]
+			self.text.append('@%s: `%s`'%(name,msg.replace('`','')))
 		except: pass
 		return 
 	#only search after the last space
@@ -287,17 +278,14 @@ def linklist(self):
 	'''List accumulated links'''
 	#enter key
 	def select(me):
-		if not len(linkopen.lastlinks): return
+		if not linkopen.getlinks(): return
 		current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
-		current = linkopen.lastlinks[int(current)-1] #this enforces the wanted link is selected
-		if not me.mode:
-			linkopen.link_opener(self.parent,current)
-		else:
-			linkopen.link_opener(self.parent,current,True)
+		current = linkopen.getlinks()[int(current)-1] #this enforces the wanted link is selected
+		linkopen.open_link(self.parent,current,me.mode)
 		#exit
 		return -1
 
-	box = display.listOverlay(linkopen.reverselinks(),None,["open","force"])
+	box = display.listOverlay(linkopen.reverselinks(),None,linkopen.getdefaults())
 	box.addKeys({'enter':select})
 	self.addOverlay(box)
 
@@ -431,7 +419,8 @@ def reloadclient(self):
 @display.onkey('^g')
 def openlastlink(self):
 	'''Open last link'''
-	linkopen.link_opener(self.parent,linkopen.lastlinks[-1])
+	if not linkopen.getlinks(): return
+	linkopen.open_link(self.parent,linkopen.getlinks()[-1])
 
 @display.onkey('^t')
 def joingroup(self):
@@ -545,6 +534,21 @@ def ignorefilter(*args):
 #-------------------------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
+	if "--help" in sys.argv:
+		print("""
+cube's chatango client
+Usage:
+	chatango [-c username password] [-g group]:	Start the chatango client. 
+
+Options:
+	-c uname pwd:	Input credentials
+	-g groupname:	Input group name
+	-r:		Relog
+	-nc:		No custom script import
+	--help:		Display this page
+		""")
+		sys.exit()
+	
 	creds = {}
 	if '-r' not in sys.argv:
 		creds = readFromFile()

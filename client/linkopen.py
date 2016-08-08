@@ -1,42 +1,54 @@
 #!/usr/bin/env python3
-#
-#linkopen.py: 	Library for opening links. Allows extension through wrappers
-#		Open links by file extension, site pattern, or lambda truth
-#		evaluation.
-#		Althought this does not import client, it is expected to be used
-#		in conjunction (move to separate directory?)
-#		TODO:		Current implementation of "forcing" things to use the normal one
-#				doesn't allow for opening things in a non-default way
-#				consider a new framework
+#linkopen.py
+'''Library for opening links. Allows extension through wrappers
+Open links by file extension, site pattern, or lambda truth
+evaluation.
+Althought this does not import .display (or any other module in the package),
+open_link expects an instance of display.main as its first argument.'''
+
 from threading import Thread
 import subprocess
 import re
 import os #for stupid stdout/err hack
 from webbrowser import open_new_tab
 
-LINK_RE = re.compile("(https?://.+?\\.[^\n` 　]+)[\n` 　]")
+#canonical link regex
+LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)[`\\s]")
 IMG_PATH = 'feh'
 MPV_PATH = 'mpv'
-lastlinks = []
+_lastlinks = []
+
+_defaults = []
+_exts = {}
+_sites = {}
+_lambdas = []
+_lambdalut = []
+
+def getlinks():
+	return _lastlinks
 
 def reverselinks():
-	#link number: link sans protocol, but in reverse
-	return ["%s: %s"%(len(lastlinks)-i,j.replace("http://","").replace("https://",""))\
-		 for i,j in enumerate(reversed(lastlinks))]
+	'''Get links, but sans protocol and in reverse'''
+	return ["%s: %s"%(len(_lastlinks)-i,j.replace("http://","").replace("https://",""))\
+		 for i,j in enumerate(reversed(_lastlinks))]
 
-#add links to a list
+def getdefaults():
+	'''Get the names of the default functions. These are hopefully descriptive enough'''
+	return ['default'] + [i.__name__ for i in _defaults]
+
 def parseLinks(raw):
-	global lastlinks
+	'''Add links to lastlinks'''
+	global _lastlinks
 	newLinks = []
 	#look for whole word links starting with http:// or https://
 	#don't add the same link twice
 	for i in LINK_RE.findall(raw+" "):
 		if i not in newLinks:
 			newLinks.append(i)
-	lastlinks += newLinks
+	_lastlinks += newLinks
 
-#look for the furthest / or ?
 def extractext(link):
+	'''Ignore common post-extension formatting, e.g. .png?revision'''
 	ext = link[link.rfind('.')+1:]
 	lenext = len(ext)
 	slash = ext.find('/')+1 
@@ -47,53 +59,55 @@ def extractext(link):
 		ext = ext[:trim-1]
 	return ext
 
+#---------------------------------------------------------------
 def opener(func):
-	setattr(link_opener,'default',staticmethod(func))
+	'''Set a default opener'''
+	global _defaults
+	_defaults.append(func)
 
 def extopener(ext):
+	'''Set an extension opener for extension `ext`'''
 	def wrap(func):
-		setattr(link_opener,ext,staticmethod(func))
+		global _exts
+		_exts[ext] = func
+		#allow stacking wrappers
 		return func
 	return wrap
 
 def pattopener(pattern):
+	'''Set an extension opener for website pattern `pattern`'''
 	def wrap(func):
-		link_opener.sites[pattern] = func
+		global _sites
+		_sites[pattern] = func
 		return func
 	return wrap
 
 def lambdaopener(lamb):
+	'''Set a lambda opener to run when `lamb` returns true'''
 	def wrap(func):
+		global _lambdas,_lambdalut
 		link_opener.lambdas.append(lamb)
 		link_opener.lambdalut.append(func)
 		return func
 	return wrap
 
-class link_opener:
-	sites = {}
-	lambdas = []
-	lambdalut = []
-#	__init__ is like a static __call__
-	def __init__(self,client,link,forcelink=False):
-		ext = extractext(link)
-		if forcelink:
-			getattr(self, 'default')(client,link)
-			return
-
-		if hasattr(self,ext):
-			getattr(self, ext)(client,link,ext)
+#---------------------------------------------------------------
+def open_link(client,link,default = 0):
+	ext = extractext(link)
+	if not default:
+		run = _exts.get(ext)
+		if run:
+			return run(client,link,ext)
 		else:
-			for i,j in self.sites.items():
+			for i,j in _sites.items():
 				if 1+link.find(i):
-					j(client,link)
-					return
-			for i in range(len(self.lambdas)):
-				if self.lambdas[i](link):
-					self.lambdalut[i](client,link)
-			getattr(self, 'default')(client,link)
-	#raise exception if not overridden
-	def default(*args):
-		raise Exception("No regular link handler defined")
+					return j(client,link)
+			for i in range(len(_lambdas)):
+				if _lambdas[i](link):
+					return _lambdalut[i](client,link)
+			return _defaults[default](client,link)
+	else:
+		return _defaults[default-1](client,link)
 
 #-------------------------------------------------------------------------------------------------------
 #OPENERS
@@ -114,11 +128,11 @@ def images(cli,link,ext):
 	except:
 		cli.newBlurb("No viewer %s found"%FEH_PATH)
 	
-#start and daemonize mpv (or replaced video playing program)
 @extopener("webm")
 @extopener("mp4")
 @extopener("gif")
 def videos(cli,link,ext):
+	'''Start and daemonize mpv (or replaced video playing program)'''
 	cli.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
 	try:
@@ -130,7 +144,8 @@ def videos(cli,link,ext):
 		cli.newBlurb("No player %s found"%MPV_PATH)
 
 @opener
-def linked(cli,link):
+def browser(cli,link):
+	'''Open new tab'''
 	cli.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
 	savout = os.dup(1)	#get another header for stdout
@@ -143,4 +158,3 @@ def linked(cli,link):
 	finally:
 		os.dup2(savout, 1)	#reopen stdout
 		os.dup2(saverr, 2)
-

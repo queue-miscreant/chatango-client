@@ -8,9 +8,10 @@ from .coloring import CLEAR_FORMATTING,preserve
 CHAR_CURSOR = '\x1b[s'
 _INDENT_LEN = 4
 _INDENT_STR = "    "
-#useful regexes
-_WORD_RE = re.compile("[^ ]* ")
-_UP_TO_WORD_RE = re.compile('(.* )[^ ]+ *')
+#split words by this regex
+_WORD_RE = re.compile("[^\\s-]*[\\s-]")
+#sane textbox word-backspace
+_UP_TO_WORD_RE = re.compile('(.*[\\s/`~-])[^\\s/`~-]+[\\s/`~-]*')
 
 def strlen(string):
 	'''Column width of a string'''
@@ -113,6 +114,7 @@ class scrollable:
 			end = self._pos
 		return self._str.rfind(string,start,end)
 	def setstr(self,new):
+		if new is None: return
 		self._str = new
 		self.end()
 	def display(self):

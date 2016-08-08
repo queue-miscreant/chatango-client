@@ -12,6 +12,7 @@
 #				1:	red
 #				2:	blue
 #				3:	both
+#MODIFIED 2016/8/8:	New protocol appears to be bauth as anon, then blogin. Changed Group.login during Digest.ok accordingly
 ################################
 
 ################################
@@ -265,7 +266,7 @@ class Group(object):
 			self.user = "#" + user
 			self.sendCmd("blogin", user) #temporary user
 		else:
-			self.sendCmd("blogin")
+			self.user = "!anon" + Generate.aid(self.nColor, self.uid)
 
 	def logout(self):
 		'''Log's out of an account'''
@@ -404,15 +405,17 @@ class Digest(object):
 	def denied(self, group, bites):
 		self.manager.removeGroup(group)
 
-	def ok(self, group, bites):
-		if bites[3] != 'M':
-			self.manager.removeGroup(group.name)
-		else:
+	def ok(self, group, bites): 
+		#if we got a 'M' (bauth succeeded) or we didn't supply a password (anon or tempname)
+		if bites[3] == 'M' or not group.password:
 			group.owner = bites[1]
 			group.time = bites[5]
 			group.ip = bites[6]
 			group.mods = [x.split(',')[0] for x in bites[7].split(';')]
 			group.mods.sort()
+			group.login(group.user,group.password)
+		elif group.user and group.password:
+			self.manager.removeGroup(group.name)
 
 	def inited(self, group, bites):
 		group.sendCmd("blocklist", "block", "", "next", "500")
@@ -493,6 +496,7 @@ class Digest(object):
 			fFace = "0"
 		chval = (int(bites[8]) >> 8) % 16
 		group.pArray[bites[6]] = type("Post", (object,), {"group": group, "time": bites[1], "user": bites[2].lower() if bites[2] != '' else "#" + bites[3] if bites[3] != '' else "!anon" + Generate.aid(nColor, bites[4]) if nColor else "!anon" , "uid": bites[4], "unid": bites[5], "pnum": bites[6], "ip": bites[7], "channel":((chval>=8)<<1|chval%2), "post": re.sub("<(.*?)>", "", ":".join(bites[10:])).replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&#39;", "'").replace("&amp;", "&"), "raw": ":".join(bites[10:]),"nColor": nColor, "fSize": fSize, "fFace": fFace, "fColor": fColor})
+		
 
 	def u(self, group, bites):
 		post = group.pArray[bites[1]] if group.pArray.get(bites[1]) else None
@@ -568,7 +572,7 @@ class Digest(object):
 				self.call(bites[0], group, "Non-member", bites[4])
 
 	def logoutok(self, group, bites):
-		self.manager.user = "!anon" + Generate.aid(self, group.nColor, group.uid)
+		self.manager.user = "!anon" + Generate.aid(group.nColor, group.uid)
 
 	def clearall(self, group, bites):
 		if bites[1] == "ok":
@@ -624,6 +628,8 @@ class ConnectionManager(object):
 		self.user = user.lower()
 		self.name = self.user
 		self.password = password
+		if self.password and not self.user: #password supplied but not username
+			self.password = None
 		self.pm = pm
 		self.cArray = list()
 		self.eArray = dict()
