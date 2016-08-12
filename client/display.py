@@ -415,10 +415,10 @@ class inputOverlay(overlayBase):
 		overlayBase.__init__(self)
 		self._done = False
 		self._prompt = prompt+': '
-		self._resize(DIM_X,DIM_Y)
 		self._password = password
 		self._end = end
 		self.text = scrollable(DIM_X-2)
+		self._resize(DIM_X,DIM_Y)
 		self.controlscrollable(self.text)
 		self._keys.update({
 			-1:	self._input
@@ -429,7 +429,7 @@ class inputOverlay(overlayBase):
 			,127:	self.text.delword
 		})
 	def _resize(self,newx,newy):
-		self.text.width = newx-2
+		self.text.setwidth(newx-2)
 		self._prompts,self._numprompts = breaklines(self._prompt,newx-2)
 	def _input(self,chars):
 		self.text.append(self.decode(chars))
@@ -491,7 +491,7 @@ class commandOverlay(overlayBase):
 			127:	lambda: -1
 		})
 	def _resize(self,newx,newy):
-		self.text.width = newx-1
+		self.text.setwidth(newx-1)
 	def _input(self,chars):
 		self.text.append(self.decode(chars))
 	def _complete(self):
@@ -575,7 +575,7 @@ class mainOverlay(overlayBase):
 		})
 		self.addKeys(self.addoninit)
 	def _resize(self,newx,newy):
-		self.text.width = newx
+		self.text.setwidth(newx)
 		if newx != DIM_X:
 			self.redolines(newx,newy)
 	def _post(self):
@@ -931,7 +931,7 @@ class _main:
 		try:
 			for i in self._ins:
 				i._resize(newx,newy)
-		except:
+		except FormattingException:
 			DIM_X,DIM_Y = newx,newy
 			self.candisplay = 0
 			return

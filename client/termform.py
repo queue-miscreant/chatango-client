@@ -266,7 +266,7 @@ class scrollable:
 		if new is None: return
 		self._str = new
 		self.end()
-	def setwid(self,new = None):
+	def setwidth(self,new = None):
 		if new is None: return
 		if new <= 0:
 			raise FormattingException()
