@@ -6,10 +6,10 @@ evaluation.
 Althought this does not import .display (or any other module in the package),
 open_link expects an instance of display.main as its first argument.'''
 
-from threading import Thread
-import subprocess
 import re
 import os #for stupid stdout/err hack
+from threading import Thread
+import subprocess
 from webbrowser import open_new_tab
 
 #canonical link regex
@@ -57,7 +57,7 @@ def extractext(link):
 	trim = quest and (slash and min(slash,quest) or quest) or slash
 	if trim:
 		ext = ext[:trim-1]
-	return ext
+	return ext.lower()
 
 #---------------------------------------------------------------
 def opener(func):
@@ -102,8 +102,8 @@ def open_link(client,link,default = 0):
 			for i,j in _sites.items():
 				if 1+link.find(i):
 					return j(client,link)
-			for i in range(len(_lambdas)):
-				if _lambdas[i](link):
+			for i,j in enumerate(_lambdas):
+				if j(link):
 					return _lambdalut[i](client,link)
 			return _defaults[default](client,link)
 	else:

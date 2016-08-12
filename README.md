@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.2
+Version 6.28
 --------------------------
 
 A CLI application written in python with curses input and ANSI escape-colored output.   
@@ -44,13 +44,26 @@ TODO
 -------------------------
 ### Chatango client-side  
 Checking login success better
-### Package-side  
-Easier-to-access coloring
-Maybe redolines better? (get the right number of lines up)
-Scrolling loads stored messages like before I revamped the scrolling
+Better (global) tabbing interface
+In-client relogging
 
 CHANGELOG
 =========================
+## v6.28	*2016/8/11*
+* Lods of ebug fixes (Prob'ly)
+* Merged client.coloring and client.formatting into client.termform
+	* One imported the other anyway
+* Hopefully finally got fast scrolling working
+* Made colorers *much* more accessible
+	* colorByRegex and effectByRegex insert relevant escape sequences at matches
+* Added underlining of things in backticks (a la chatango quoting)
+* Added coloring of names referenced by @
+* Remembered that time overlays were blocking and gave overlays potential for \_resize method
+	* All overlays in the stack have this run (defaults to a null lambda with two arguments)
+* Relogging and inputting credentials on command line do not save to file
+* Changing group with ^t now saves to file
+* Moved ~/.creds to ~/.chatango_creds
+
 ## v6.2		*2016/8/8*
 * Fixed tab-reply to anons and no-accounters
 * Added support for logging in without credentials (i.e anons and no-accounters)

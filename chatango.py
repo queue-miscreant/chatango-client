@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 #chatango.py:
-'''Chat bot that extends the ConnectionManager class in chlib and
-adds chatango-specific extensions
-The main source file.'''
+'''
+cube's chatango client
+Usage:
+	chatango [options]:	Start the chatango client. 
+
+Options:
+	-c uname pwd:	Input credentials
+	-g groupname:	Input group name
+	-r:				Relog
+	-nc:			No custom script import
+	--help:			Display this page
+'''
 #TODO		Something with checking premature group removes
 
 import sys
@@ -15,11 +24,10 @@ import re
 import json
 import os
 
-SAVE_PATH = os.path.expanduser('~/.creds')
+write_to_save = 1
+SAVE_PATH = os.path.expanduser('~/.chatango_creds')
 XML_TAGS_RE = re.compile("(<[^<>]*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
-REPLY_RE = re.compile(r"^@\w+? ")
-USER_RE = re.compile(r"^[!#]?\w+?: ")
 #constants for chatango
 FONT_FACES = ["Arial",
 		  "Comic Sans",
@@ -60,6 +68,7 @@ def readFromFile(filePath = SAVE_PATH):
 		return {} 
 def sendToFile(jsonData,filePath = SAVE_PATH):
 	if filePath == '': return
+	if not write_to_save: return
 	encoder = json.JSONEncoder(ensure_ascii=False)
 	out = open(filePath,'w')
 	out.write(encoder.encode(jsonData)) 
@@ -123,6 +132,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 	
 	def changeGroup(self,newgroup):
 		self.stop()
+		self.creds['room'] = newgroup
 		self.addGroup(newgroup)
 
 	def setFormatting(self, newFormat = None):
@@ -153,9 +163,6 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			group.sendPost(text.replace("\n","<br/>"),self.channel)
 		except Exception as exc:
 			display.dbmsg(exc)
-			
-#		except AttributeError:
-#			return
 	
 	def recvinited(self, group):
 		self.parent.msgSystem("Connected to "+group.name)
@@ -190,7 +197,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		msg = '%s: %s'%(user,formatRaw(post.raw))
 		linkopen.parseLinks(msg)
 		self.parent.msgPost(msg, post.user, isreply, ishistory, post.channel)
-		#extra arguments. use in colorers
+		#extra arguments. use in colorizers
 
 	def recvshow_fw(self, group):
 		self.parent.msgSystem("Flood ban warning issued")
@@ -208,7 +215,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		if user == "none": user = "anon"
 		bit = (bit == "1" and 1) or -1
 		#notifications
-		self.parent.newBlurb("%s has %s" % (user,bit+1 and "joined" or "left"))
+		self.parent.newBlurb("%s has %s" % (user,bit+1 and "left" or "joined"))
 	
 	def recvg_participants(self,group):
 		self.members = group.users
@@ -234,7 +241,7 @@ def onenter(self):
 			else:
 				openall()
 		except Exception: pass
-		return
+		return 1
 	text = str(self.text)
 	#if it's not just spaces
 	if text.count(" ") != len(text):
@@ -410,6 +417,25 @@ def F5(self):
 	
 	self.addOverlay(box)
 
+@display.onkey('btab')
+def addignore(self):
+	if self.isselecting():
+		global ignores
+		try:
+			#allmessages contain the colored message and arguments
+			message = self.getselect()
+			msg = client.decolor(message[0])
+			#first colon is separating the name from the message
+			colon = msg.find(':')
+			name = msg[1:colon]
+			if name[0] in "!#":
+				name = name[1:]
+			if name in ignores: return
+			ignores.append(name)
+			self.redolines()
+		except: pass
+	return
+
 @display.onkey('^r')
 def reloadclient(self):
 	'''Reload current group'''
@@ -429,90 +455,92 @@ def joingroup(self):
 	self.addOverlay(inp)
 	inp.runOnDone(lambda x: self.clearlines() or chatbot.changeGroup(x))
 
-#-------------------------------------------------------------------------------------------------------
-#COLORERS
+#COLORIZERS---------------------------------------------------------------------
+#initialize colors
+ordering =	('blue'
+			,'cyan'
+			,'magenta'
+			,'red'
+			,'yellow'
+			)
+for i in range(10):
+	client.defColor(ordering[i%5],i//5) #0-10: user text
+client.defColor('green',True)
+client.defColor('green')		#11: >meme arrow
+client.defColor('none',False,'none')	#12-15: channels
+client.defColor('red',False,'red')
+client.defColor('blue',False,'blue')
+client.defColor('magenta',False,'magenta')
+client.defColor('white',False,'white')	#16: extra drawing
+
 #color by user's name
-def getColor(name,rot = 6,init = 6,split = 109):
+def getColor(name,init = 6,split = 109,rot = 6):
+	if name[0] in '#!': name = name[1:]
 	total = init
 	for i in name:
 		n = ord(i)
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-@display.colorer
-def defaultcolor(msg,coldic,*args):
-	strmsg = str(msg)
-	msg.default = getColor(strmsg[:strmsg.find(':')])
+@display.colorize
+def defaultcolor(msg,*args):
+	msg.default = getColor(args[0])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
-#also color lines by default
-@display.colorer
+LINE_RE = re.compile(r'^([!#]?\w+?: )?(@\w* )*(.+)$',re.MULTILINE)
+@display.colorize
 def greentext(msg,*args):
-	lines = str(msg).split("\n") #don't forget to add back in a char
-	tracker = 0
-	for no,line in enumerate(lines):
-		try:
-			#user:
-			begin = USER_RE.match(line).end(0)
-			#ignore each @user
-			reply = REPLY_RE.match(line[begin:])
-			while reply:
-				begin += reply.end(0)
-				reply = REPLY_RE.match(line[begin:])
-			tracker += msg.insertColor(0)
-		except:
-			begin = 0
-		#try catch in case the length of the string past begin is zero
-		try:
-			if line[begin] == ">":
-				tracker += msg.insertColor(begin+tracker,11)
-			else:
-				tracker += msg.insertColor(begin+tracker)
-		except IndexError: pass
-		finally:
-			tracker += len(line)+1 #add in the newline
+	#match group 3 (the message sans leading replies)
+	msg.colorByRegex(LINE_RE,lambda x: x[0] == '>' and 11 or None,3,'')
 
-#links as white
-@display.colorer
+#color links white
+@display.colorize
 def link(msg,*args):
-	tracker = 0
-	find = linkopen.LINK_RE.search(str(msg)+' ')
-	while find:
-		begin,end = tracker+find.start(0),tracker+find.end(0)
-		#find the most recent color
-		last = msg.findColor(begin)
-		end += msg.insertColor(begin,0,False)
-		tracker = msg.insertColor(end,last) + end
-		find = linkopen.LINK_RE.search(str(msg)[tracker:] + ' ')
+	msg.colorByRegex(linkopen.LINK_RE,display.rawNum(0),1)
+
+#color replies by the color of the replier
+REPLY_RE = re.compile(r"@\w+?\b")
+@display.colorize
+def names(msg,*args):
+	def check(group):
+		name = group[1:].lower()	#sans the @
+		if name in chatbot.members:
+			return getColor(name)
+		return ''
+	msg.colorByRegex(REPLY_RE,check)
+
+#underline quotes
+QUOTE_RE = re.compile(r"`[^`]+`")
+@display.colorize
+def quotes(msg,*args):
+	msg.effectByRegex(QUOTE_RE,'underline')
 		
 #draw replies, history, and channel
-@display.colorer
+@display.colorize
 def chatcolors(msg,*args):
-	msg.addEffect(0,args[1])
-	msg.addEffect(1,args[2])
-	msg.insertColor(0,0)
-	' ' + msg 
-	msg.insertColor(0,args[3]+12)
+	args[1] and msg.addGlobalEffect('reverse')	#reply
+	args[2] and msg.addGlobalEffect('underline')	#history
+	msg.insertColor(0)		#make sure we color the name right
+	(' ' + msg).insertColor(0,args[3]+12)	#channel
 
-#-------------------------------------------------------------------------------------------------------
-#COMMANDS
-
-#methods like this can be used in the form `[commandname]
+#COMMANDS-----------------------------------------------------------------------------------------------
 @display.command('ignore')
-def ignore(cli,arglist):
+def ignore(parent,arglist):
 	global ignores
 	person = arglist[0]
 	if '@' == person[0]: person = person[1:]
 	if person in ignores: return
 	ignores.append(person)
+	parent.over.redolines()
 
 @display.command('unignore')
-def unignore(cli,arglist):
+def unignore(parent,arglist):
 	global ignores
 	person = arglist[0]
 	if '@' == person[0]: person = person[1:]
 	if person not in ignores: return
-	ignores.pop(person)
+	ignores.pop(ignores.index(person))
+	parent.over.redolines()
 
 #-------------------------------------------------------------------------------------------------------
 #FILTERS
@@ -535,29 +563,21 @@ def ignorefilter(*args):
 
 if __name__ == '__main__':
 	if "--help" in sys.argv:
-		print("""
-cube's chatango client
-Usage:
-	chatango [-c username password] [-g group]:	Start the chatango client. 
-
-Options:
-	-c uname pwd:	Input credentials
-	-g groupname:	Input group name
-	-r:		Relog
-	-nc:		No custom script import
-	--help:		Display this page
-		""")
+		print(__doc__)
 		sys.exit()
 	
 	creds = {}
 	if '-r' not in sys.argv:
 		creds = readFromFile()
+	else:
+		write_to_save = False
 
 	formatting = creds.get('formatting')
 	formatting = formatting == {} and None or formatting
 
 	#0th arg is the program, -c is at minimum the first arg, followed by the second and third args username and password
 	if len(sys.argv) >= 4 and '-c' in sys.argv:
+		write_to_save = False
 		try:
 			credpos = sys.argv.index('-c')
 			creds['user'] = sys.argv[credpos+1]
@@ -579,24 +599,6 @@ Options:
 			import custom #custom plugins
 		except ImportError as exc: pass
 			
-	#initialize colors
-	ordering = (
-		'blue',
-		'cyan',
-		'magenta',
-		'red',
-		'yellow',
-		)
-	ordlen = len(ordering)
-	for i in range(ordlen*2):
-		client.definepair(ordering[i%ordlen],i//ordlen) #0-10: user text
-	client.definepair('green',True)
-	client.definepair('green')		#11: >meme arrow
-	client.definepair('none',False,'none')	#12-15: channels
-	client.definepair('red',False,'red')
-	client.definepair('blue',False,'blue')
-	client.definepair('magenta',False,'magenta')
-	client.definepair('white',False,'white')	#16: extra drawing
 	#initialize chat bot
 	chatbot = chat_bot(creds)
 	#start
