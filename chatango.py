@@ -215,7 +215,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		if user == "none": user = "anon"
 		bit = (bit == "1" and 1) or -1
 		#notifications
-		self.parent.newBlurb("%s has %s" % (user,bit+1 and "left" or "joined"))
+		self.parent.newBlurb("%s has %s" % (user,bit-1 and "left" or "joined"))
 	
 	def recvg_participants(self,group):
 		self.members = group.users
