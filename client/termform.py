@@ -276,8 +276,8 @@ class scrollable:
 		text = self._str[:self._pos] + CHAR_CURSOR + self._str[self._pos:]
 		text = text.replace("\n",r"\n").expandtabs(_INDENT_LEN)
 		#how many characters off we are from that replace
-		adjust = self._disp + strlen(text[:text.find(CHAR_CURSOR)]) - strlen(self._str[:self._pos])
-		return text[adjust:adjust+self._width+len(CHAR_CURSOR)]
+		text = text[self._disp:self._disp+self._width+len(CHAR_CURSOR)]
+		return text[:fitwordtolength(text,self._width)]
 	def movepos(self,dist):
 		'''Move cursor by distance (can be negative). Adjusts display position'''
 		if not len(self._str):
