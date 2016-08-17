@@ -127,7 +127,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 	
 	def reconnect(self):
 		if not self.isinited: return
-		self.stop()
+		self.removeGroup(self.creds.get('room'))
 		self.start()
 	
 	def changeGroup(self,newgroup):

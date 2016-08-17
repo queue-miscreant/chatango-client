@@ -14,6 +14,7 @@ from webbrowser import open_new_tab
 
 #canonical link regex
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)[`\\s]")
+POST_FORMAT_RE = re.compile(r'\.(\w+)[&/\?]?')
 IMG_PATH = 'feh'
 MPV_PATH = 'mpv'
 _lastlinks = []
@@ -49,15 +50,10 @@ def parseLinks(raw):
 
 def extractext(link):
 	'''Ignore common post-extension formatting, e.g. .png?revision'''
-	ext = link[link.rfind('.')+1:]
-	lenext = len(ext)
-	slash = ext.find('/')+1 
-	quest = ext.find('?')+1
-	#yes this looks stupid, yes it works
-	trim = quest and (slash and min(slash,quest) or quest) or slash
-	if trim:
-		ext = ext[:trim-1]
-	return ext.lower()
+	ret = POST_FORMAT_RE.findall(link)
+	if ret:
+		return ret[-1].lower()
+	return ''
 
 #---------------------------------------------------------------
 def opener(func):
