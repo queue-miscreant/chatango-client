@@ -4,6 +4,7 @@
 system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different print() calls.'''
+#TODO: better _main._ins: make it so that less iteration is necessary?
 try:
 	import curses
 except ImportError:
@@ -323,7 +324,6 @@ class listOverlay(overlayBase):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
 			row = (len(value) > maxx) and value[:max(half-3,1)] + "..." + value[-half:] or value
-			row += CLEAR_FORMATTING
 			row = box.just(row)
 			if value and self._drawOther is not None:
 				rowcol = coloring(row)

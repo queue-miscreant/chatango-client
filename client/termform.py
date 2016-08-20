@@ -279,9 +279,8 @@ class scrollable:
 		text = text.replace("\n",r"\n").expandtabs(_INDENT_LEN)
 		#TIME TO ITERATE
 		escape,canbreak= 0,0
-		init = 0
-		#column num, position in string
-		width,pos= 0,0
+		#initial position, column num, position in string
+		init,width,pos= 0,0,0
 		#_disp is never greater than _pos, and it's impossible for 
 		#"s" to not be in a control sequence, so this should be sound
 		while pos < len(text) or not canbreak:
