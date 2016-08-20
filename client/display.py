@@ -850,7 +850,7 @@ class _main:
 		if not self.candisplay: return
 		_moveCursor(DIM_Y-RESERVE_LINES+2)
 		if strlen(string) > DIM_X:
-			string = string[fitwordtolength(string,DIM_X-3):]+'...'
+			string = string[columnslice(string,DIM_X-3):]+'...'
 		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 	def _updateinput(self):
 		'''Input display backend'''

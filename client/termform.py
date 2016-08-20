@@ -167,7 +167,7 @@ def strlen(string):
 		escape = temp
 	return a
 
-def fitwordtolength(string,length):
+def columnslice(string,length):
 	'''Fit string to column width'''
 	escape = False
 	#number of columns passed, number of chars passed
@@ -220,7 +220,7 @@ def breaklines(string,length):
 				line = line[match.end(0):]
 			#if there's room for some of the word, and we're not past a threshold
 			elif space >= THRESHOLD:
-				fitsize = fitwordtolength(word, space)
+				fitsize = columnslice(word, space)
 				line = line[fitsize:]
 				newline += word[:fitsize]
 			if newspace <= 0:
@@ -273,11 +273,33 @@ class scrollable:
 		self._width = new
 	def display(self):
 		'''Display text contained with cursor'''
+		#original string injections
 		text = self._str[:self._pos] + CHAR_CURSOR + self._str[self._pos:]
+		text = text[self._disp:self._disp+self._width+len(CHAR_CURSOR)] #worst case
 		text = text.replace("\n",r"\n").expandtabs(_INDENT_LEN)
-		#how many characters off we are from that replace
-		text = text[self._disp:self._disp+self._width+len(CHAR_CURSOR)]
-		return text[:fitwordtolength(text,self._width)]
+		#TIME TO ITERATE
+		escape,canbreak= 0,0
+		init = 0
+		#column num, position in string
+		width,pos= 0,0
+		#_disp is never greater than _pos, and it's impossible for 
+		#"s" to not be in a control sequence, so this should be sound
+		while pos < len(text) or not canbreak:
+			i = text[pos]
+			temp = (i == '\x1b') or escape
+			if not temp:
+				width += wcwidth(i)
+				if width >= self._width:
+					if canbreak: #don't go too far
+						break
+					init += 1
+			elif i.isalpha():	#is escaped and i is alpha
+				if i == 's':	#\x1b[s is save cursor position; if we go past it, great
+					canbreak = True
+				temp = False
+			pos += 1
+			escape = temp
+		return text[init:pos]
 	def movepos(self,dist):
 		'''Move cursor by distance (can be negative). Adjusts display position'''
 		if not len(self._str):
