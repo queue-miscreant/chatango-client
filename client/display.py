@@ -52,7 +52,6 @@ _KEY_LUT = {
 	#ctrl-m to ctrl-j (carriage return to line feed)
 	#this really shouldn't be necessary, since curses does that
 	,13:			10
-					
 }
 for i in dir(curses):
 	if "KEY_" in i:
@@ -65,6 +64,7 @@ for i in range(32):
 	_VALID_KEYNAMES['^%s'%chr(i+64).lower()] = i
 for i in range(32,256):
 	_VALID_KEYNAMES[chr(i)] = i
+del i
 
 class KeyException(Exception):
 	'''Exception for keys-related errors in client.display'''
@@ -157,6 +157,7 @@ class history:
 
 #DISPLAY/OVERLAY CLASSES----------------------------------------------------------
 SELECT_AND_MOVE = CHAR_CURSOR + getEffect('reverse')[0]
+SELECT = getEffect('reverse')[0]
 
 class DisplayException(Exception):
 	'''Exception for display-related errors in client.display'''
@@ -214,7 +215,7 @@ class overlayBase:
 	def _post(self):
 		'''Overridable function. Run after keypress if false (, None...) is returned'''
 		pass
-	def display(self,lines):
+	def display(self,lines,cursor):
 		'''Overridable function. Modify lines by address (i.e lines[value]) to display from _main'''
 		pass
 	@staticmethod
@@ -309,7 +310,7 @@ class listOverlay(overlayBase):
 	def chmode(self,amt):
 		'''Move to mode amt over, with looparound'''
 		self.mode = (self.mode + amt) % self._nummodes
-	def display(self,lines):
+	def display(self,lines,cursor):
 		'''Display a list in a box, basically. If too long, it gets shortened with an ellipsis in the middle'''
 		lines[0] = box.top()
 		size = DIM_Y-RESERVE_LINES-2
@@ -342,7 +343,7 @@ class colorOverlay(overlayBase):
 	replace = True
 	NAMES = ["Red","Green","Blue"]
 	#worst case column: |Red  GreenBlue |
-	#		    123456789ABCDEFGH = 17
+	#		  			123456789ABCDEFGH = 17
 	#worst case rows: |(color row) (name)(val) (hex)|(RESERVED)
 	#		  1	2     3	 4	5 6  7  8
 	setmins(17,8+RESERVE_LINES)
@@ -380,7 +381,7 @@ class colorOverlay(overlayBase):
 	def setHex(self,hexstr):
 		'''Set self.color from hex'''
 		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
-	def display(self,lines):
+	def display(self,lines,cursor):
 		'''Display 3 bars, their names, values, and string in hex'''
 		wide = (DIM_X-2)//3 - 1
 		space = DIM_Y-RESERVE_LINES-7
@@ -445,7 +446,7 @@ class inputOverlay(overlayBase):
 			active = False
 		self.text.clear()
 		return -1
-	def display(self,lines):
+	def display(self,lines,cursor):
 		'''Display the text in roughly the middle, in a box'''
 		start = DIM_Y//2 - self._numprompts//2
 		end = DIM_Y//2 + self._numprompts
@@ -522,7 +523,7 @@ class commandOverlay(overlayBase):
 				(type(exc).__name__,commandname, exc))
 		except KeyboardInterrupt: pass
 		return -1
-	def display(self,lines):
+	def display(self,lines,cursor):
 		'''Display as a line where mainOverlay puts the breaking char'''
 		lines[-1] = CHAR_COMMAND + self.text.display()
 		return lines
@@ -694,8 +695,9 @@ class mainOverlay(overlayBase):
 			self._linesup += b+1
 			self._unfiltup += 1
 
-	def display(self,lines):
+	def display(self,lines,cursor):
 		'''Display messages'''
+		select = (cursor or self._selector) and SELECT_AND_MOVE or SELECT
 		#seperate traversals
 		selftraverse,linetraverse = -1,-2
 		lenself, lenlines = len(self._lines),len(lines)
@@ -714,7 +716,7 @@ class mainOverlay(overlayBase):
 				selftraverse += direction #disregard this line
 				msgno -= direction #count lines down downward, up upward
 				continue
-			reverse = (msgno == self._unfiltup) and SELECT_AND_MOVE or ""
+			reverse = (msgno == self._unfiltup) and select or ""
 			lines[linetraverse] = reverse + self._lines[selftraverse]
 			selftraverse += direction
 			linetraverse += direction
@@ -831,10 +833,12 @@ class _main:
 		#justify number of lines
 		#start with the last "replacing" overlay, then draw all overlays afterward
 		start = 1
+		lastscroll = 0
 		while (start < len(self._ins)) and not self._ins[-start].replace:
 			start += 1
-		for i in self._ins[-start:]:
-			i.display(lines)
+		while start > 0:
+			self._ins[-start].display(lines,start == 1)	#only the last window gets cursor drawing privileges
+			start -= 1
 		#main display method: move to top of screen
 		_moveCursor()
 		curses.curs_set(0)

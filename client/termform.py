@@ -17,11 +17,12 @@ def dbmsg(*args):
 		a.close()
 
 #REGEXES------------------------------------------------------------------------
-_ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")	#general ANSI escape
+_SANE_TEXTBOX = r'\s\-/`~,;'			#sane textbox splitting characters
+_ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")		#general ANSI escape
 _LAST_COLOR_RE =	re.compile("\x1b"+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _LAST_EFFECT_RE =	re.compile("\x1b"+r"\[2?[47]m")			#all effects that are on
 _WORD_RE = re.compile("[^\\s-]*[\\s-]")				#split words by this regex
-_UP_TO_WORD_RE = re.compile('(.*[\\s/`~-])[^\\s/`~-]+[\\s/`~-]*')	#sane textbox word-backspace
+_UP_TO_WORD_RE = re.compile('(.*[{0}])*[^{0}]+[{0}]*'.format(_SANE_TEXTBOX))	#sane textbox word-backspace
 #valid color names to add
 _COLOR_NAMES =	['black'
 				,'red'
