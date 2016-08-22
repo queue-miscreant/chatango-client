@@ -195,11 +195,10 @@ def onkey(keyname):
 
 class overlayBase:
 	'''An overlay is a class that redirects input and modifies a list of strings'''
-	def __init__(self):
+	def __init__(self,parent):
+		self.parent = parent
 		self._altkeys =	 {None:	lambda: -1}
 		self._keys =	 {27:	self._callalt}
-		if not hasattr(self,'_resize'):
-			self._resize = lambda x,y: None
 	def __call__(self,chars):
 		'''Redirect input with this overlay'''
 		try:
@@ -212,39 +211,15 @@ class overlayBase:
 	def _callalt(self,chars):
 		'''Call a key from _altkeys.'''
 		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
+	def _resize(self):
+		'''Overridable function. Run on resize event'''
+		pass
 	def _post(self):
 		'''Overridable function. Run after keypress if false (, None...) is returned'''
 		pass
 	def display(self,lines,cursor):
 		'''Overridable function. Modify lines by address (i.e lines[value]) to display from _main'''
 		pass
-	@staticmethod
-	def decode(charlist):
-		'''Safer version that takes out invalid ASCII (chars above 256)'''
-		return bytes([i for i in charlist if i<256]).decode()
-	def controlscrollable(self,scroll):
-		'''Add key definitions for standard controls for scrollable `scroll`'''
-		global _scrollables
-		self._keys.update({
-			127:			staticize(scroll.backspace)
-			,curses.KEY_DC:		staticize(scroll.delchar)
-			,curses.KEY_SHOME:	staticize(scroll.clear)
-			,curses.KEY_RIGHT:	staticize(scroll.movepos,1)
-			,curses.KEY_LEFT:	staticize(scroll.movepos,-1)
-			,curses.KEY_HOME:	staticize(scroll.home)
-			,curses.KEY_END:	staticize(scroll.end)
-		})
-	def controlhistory(self,history,scroll):
-		'''Add key definitions for standard controls for history `history` '''+\
-		'''and scrollable `scroll`'''
-		nexthist = lambda x: scroll.setstr(history.nexthist())
-		prevhist = lambda x: scroll.setstr(history.prevhist())
-		nexthist.__doc__ = history.nexthist.__doc__
-		prevhist.__doc__ = history.prevhist.__doc__
-		self._keys.update({
-			curses.KEY_UP:		nexthist
-			,curses.KEY_DOWN:	prevhist
-		})
 	def addKeys(self,newFunctions = {}):
 		'''Nice method to add keys whenever'''
 		for i,j in newFunctions.items():
@@ -273,6 +248,42 @@ class overlayBase:
 		ret.sort()
 		return ret
 
+class textOverlay(overlayBase):
+	'''Virtual overlay with text input (at bottom of screen)'''
+	def __init__(self,parent):
+		overlayBase.__init__(self,parent)
+		self.text = parent.addScrollable()
+		self.controlscrollable(self.text)
+		self._keys.update({-1:	self._input})
+	def _resize(self,newx,newy):
+		'''Adjust scrollable on resize'''
+		self.text.setwidth(newx)
+	def _input(self,chars):
+		'''Safer version that takes out invalid ASCII (chars above 256)'''
+		self.text.append(bytes([i for i in chars if i<256]).decode())
+	def controlscrollable(self,scroll):
+		'''Add key definitions for standard controls for scrollable `scroll`'''
+		self._keys.update({
+			127:			staticize(scroll.backspace)
+			,curses.KEY_DC:		staticize(scroll.delchar)
+			,curses.KEY_SHOME:	staticize(scroll.clear)
+			,curses.KEY_RIGHT:	staticize(scroll.movepos,1)
+			,curses.KEY_LEFT:	staticize(scroll.movepos,-1)
+			,curses.KEY_HOME:	staticize(scroll.home)
+			,curses.KEY_END:	staticize(scroll.end)
+		})
+	def controlhistory(self,history,scroll):
+		'''Add key definitions for standard controls for history `history` '''+\
+		'''and scrollable `scroll`'''
+		nexthist = lambda x: scroll.setstr(history.nexthist())
+		prevhist = lambda x: scroll.setstr(history.prevhist())
+		nexthist.__doc__ = history.nexthist.__doc__
+		prevhist.__doc__ = history.prevhist.__doc__
+		self._keys.update({
+			curses.KEY_UP:		nexthist
+			,curses.KEY_DOWN:	prevhist
+		})
+
 class listOverlay(overlayBase):
 	'''Display a list of objects, optionally drawing something at the end of each line'''
 	replace = True
@@ -281,8 +292,8 @@ class listOverlay(overlayBase):
 	#worst case rows: |(list member)|(RESERVED)
 	#		  1	2	3
 	setmins(7,3+RESERVE_LINES)
-	def __init__(self,outList,drawOther = None,modes = [""]):
-		overlayBase.__init__(self)
+	def __init__(self,parent,outList,drawOther = None,modes = [""]):
+		overlayBase.__init__(self,parent)
 		self.it = 0
 		self.mode = 0
 		self.list = outList
@@ -347,8 +358,8 @@ class colorOverlay(overlayBase):
 	#worst case rows: |(color row) (name)(val) (hex)|(RESERVED)
 	#		  1	2     3	 4	5 6  7  8
 	setmins(17,8+RESERVE_LINES)
-	def __init__(self,initcolor = [127,127,127]):
-		overlayBase.__init__(self)
+	def __init__(self,parent,initcolor = [127,127,127]):
+		overlayBase.__init__(self,parent)
 		#allow setting from hex value
 		if isinstance(initcolor,str):
 			self.setHex(initcolor)
@@ -409,31 +420,25 @@ class colorOverlay(overlayBase):
 		lines[-1] = box.bottom() #last line
 		return lines
 
-class inputOverlay(overlayBase):
+class inputOverlay(textOverlay):
 	'''Replacement? for input()'''
 	replace = False
-	def __init__(self,prompt,password = False,end=False):
-		overlayBase.__init__(self)
+	def __init__(self,parent,prompt,password = False,end=False):
+		textOverlay.__init__(self,parent)
 		self._done = False
 		self._prompt = prompt+': '
 		self._password = password
 		self._end = end
-		self.text = scrollable(DIM_X-2)
-		self._resize(DIM_X,DIM_Y)
-		self.controlscrollable(self.text)
 		self._keys.update({
-			-1:	self._input
-			,10:	staticize(self._finish)
+			10:	staticize(self._finish)
 		})
 		self._altkeys.update({
 			None:	self._stop
 			,127:	self.text.delword
 		})
 	def _resize(self,newx,newy):
-		self.text.setwidth(newx-2)
+		textOverlay._resize(self,newx,newy)
 		self._prompts,self._numprompts = breaklines(self._prompt,newx-2)
-	def _input(self,chars):
-		self.text.append(self.decode(chars))
 	def _finish(self):
 		'''Regular stop (i.e, with enter)'''
 		self._done = True
@@ -473,28 +478,20 @@ class inputOverlay(overlayBase):
 		newThread.daemon = True
 		newThread.start()
 
-class commandOverlay(overlayBase):
+class commandOverlay(textOverlay):
 	replace = False
 	history = history()
-	def __init__(self,client):
-		overlayBase.__init__(self)
-		self.parent = client
-		self.text = scrollable(DIM_X-1)
-		self.controlscrollable(self.text)
+	def __init__(self,parent):
+		textOverlay.__init__(self,parent)
 		self.controlhistory(self.history,self.text)
 		self._keys.update({
-			-1:	self._input
-			,9:	staticize(self._complete)
+			9:	staticize(self._complete)
 			,10:	staticize(self._run)
 			,127:	staticize(self._backspacewrap)
 		})
 		self._altkeys.update({
 			127:	lambda: -1
 		})
-	def _resize(self,newx,newy):
-		self.text.setwidth(newx-1)
-	def _input(self,chars):
-		self.text.append(self.decode(chars))
 	def _complete(self):
 		#only search after the last space
 		lastSpace = self.text.rfind(" ")
@@ -531,8 +528,8 @@ class commandOverlay(overlayBase):
 class escapeOverlay(overlayBase):
 	'''Overlay for redirecting input after \ is pressed'''
 	replace = False
-	def __init__(self,appendobj):
-		overlayBase.__init__(self)
+	def __init__(self,parent,appendobj):
+		overlayBase.__init__(self,parent)
 		self._keys.update({
 			-1:		quitlambda
 			,10:		quitlambda
@@ -544,30 +541,26 @@ class escapeOverlay(overlayBase):
 class confirmOverlay(overlayBase):
 	'''Overlay to confirm selection confirm y/n (no slash)'''
 	replace = False
-	def __init__(self,confirmfunc):
-		overlayBase.__init__(self)
+	def __init__(self,parent,confirmfunc):
+		overlayBase.__init__(self,parent)
 		self._keys.update({
 			ord('y'):	lambda x: confirmfunc() or -1
 			,ord('n'):	quitlambda
 		})
 
-class mainOverlay(overlayBase):
+class mainOverlay(textOverlay):
 	'''The main overlay'''
 	replace = True
 	addoninit = {}
 	#sequence between messages to draw reversed
 	_msgSplit = "\x1b" 
 	def __init__(self,parent):
-		overlayBase.__init__(self)
-		self.text = scrollable(DIM_X)
+		textOverlay.__init__(self,parent)
 		self.history = history()
-		self.parent = parent
 		self.clearlines()
-		self.controlscrollable(self.text)
 		self.controlhistory(self.history,self.text)
 		self._keys.update({
-			-1:			self._input
-			,ord('\\'):		staticize(self._replaceback)
+			ord('\\'):		staticize(self._replaceback)
 		})
 		self._altkeys.update({
 			ord('k'):		self.selectup		#muh vim t. me
@@ -575,20 +568,7 @@ class mainOverlay(overlayBase):
 			,127:			self.text.delword
 		})
 		self.addKeys(self.addoninit)
-	def _resize(self,newx,newy):
-		self.text.setwidth(newx)
-		if newx != DIM_X:
-			self.redolines(newx,newy)
-	def _post(self):
-		'''Stop selecting'''
-		if self._selector:
-			self._selector = 0
-			self._linesup = 0
-			self._unfiltup = 0
-			self.parent.display()
-	def _replaceback(self):
-		'''Add a newline if the next character is n, or a tab if the next character is t'''
-		self.addOverlay(escapeOverlay(self.text))
+	#overlay methods------------------------------------------------------------
 	def _input(self,chars):
 		'''Input some text'''
 		if not str(self.text) and len(chars) == 1 and \
@@ -596,7 +576,22 @@ class mainOverlay(overlayBase):
 			self.addOverlay(commandOverlay(self.parent))
 			return
 		#allow unicode input
-		self.text.append(self.decode(chars))
+		textOverlay._input(self,chars)
+	def _post(self):
+		'''Stop selecting'''
+		if self._selector:
+			self._selector = 0
+			self._linesup = 0
+			self._unfiltup = 0
+			self.parent.display()
+	def _resize(self,newx,newy):
+		textOverlay._resize(self,newx,newy)
+		if newx != DIM_X:
+			self.redolines(newx,newy)
+	#---------------------------------------------------------------------------
+	def _replaceback(self):
+		'''Add a newline if the next character is n, or a tab if the next character is t'''
+		self.addOverlay(escapeOverlay(self.text,self.parent))
 	def selectup(self):
 		'''Select message up'''
 		#go up the number of lines of the "next" selected message
@@ -923,6 +918,8 @@ class _main:
 		if len(self._ins) == 1: return
 		self._ins.pop()
 		self.addOverlay(new)
+	def addScrollable(self):
+		return scrollable(DIM_X)
 	def resize(self):
 		'''Resize the GUI'''
 		global DIM_X,DIM_Y
@@ -996,7 +993,7 @@ def listcommands(cli,args):
 	def select(self):
 		new = commandOverlay(cli)
 		new.text.clear()
-		new.text.append(self.list[self.it])
+		new.text.append(cli,self.list[self.it])
 		cli.replaceOverlay(new)
 
 	commandsList = listOverlay(list(commands))
@@ -1007,8 +1004,8 @@ def listcommands(cli,args):
 
 @command('keys')
 def listkeys(cli,args):
-	'''Get list of mainOverlay's keys'''
-	keysList = listOverlay(cli.over.getKeynames())
+	'''Get list of mainOverlay'''
+	keysList = listOverlay(cli,cli.over.getKeynames())
 	keysList.addKeys({
 		'enter': quitlambda
 	})

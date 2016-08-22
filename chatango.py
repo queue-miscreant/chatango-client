@@ -105,7 +105,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			if self.creds.get(i):
 				continue
 			prompt = ['username', 'password', 'group name'][num]
-			inp = display.inputOverlay("Enter your " + prompt, num == 1,True)
+			inp = display.inputOverlay(self.parent,"Enter your " + prompt, num == 1,True)
 			self.parent.addOverlay(inp)
 			self.creds[i] = inp.waitForInput()
 			if not display.active: return
@@ -237,7 +237,7 @@ def onenter(self):
 			if len(alllinks) > 1:
 				self.parent.msgSystem('Really open %d links? (y/n)'%\
 					len(alllinks))
-				self.addOverlay(display.confirmOverlay(openall))
+				self.addOverlay(display.confirmOverlay(self.parent,openall))
 			else:
 				openall()
 		except Exception: pass
@@ -292,7 +292,7 @@ def linklist(self):
 		#exit
 		return -1
 
-	box = display.listOverlay(linkopen.reverselinks(),None,linkopen.getdefaults())
+	box = display.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
 	box.addKeys({'enter':select})
 	self.addOverlay(box)
 
@@ -324,7 +324,7 @@ def F3(self):
 		string.insertColor(-1,3)
 		string[:-1]+'i'
 	
-	box = display.listOverlay(sorted(dispList),drawIgnored)
+	box = display.listOverlay(self.parent,sorted(dispList),drawIgnored)
 	box.addKeys({
 		'enter':select,
 		'tab':tab,
@@ -346,7 +346,7 @@ def F4(self):
 				chatbot.setFormatting(formatting)
 				return -1
 
-			furtherInput = display.colorOverlay(formatting['fc'])
+			furtherInput = display.colorOverlay(self.parent,formatting['fc'])
 			furtherInput.addKeys({'enter':enter})
 		#ask for name color
 		elif me.it == 1:
@@ -355,7 +355,7 @@ def F4(self):
 				chatbot.setFormatting(formatting)
 				return -1
 		
-			furtherInput = display.colorOverlay(formatting['nc'])
+			furtherInput = display.colorOverlay(self.parent,formatting['nc'])
 			furtherInput.addKeys({'enter':enter})
 		#font face
 		elif me.it == 2:
@@ -364,7 +364,7 @@ def F4(self):
 				chatbot.setFormatting(formatting)
 				return -1
 			
-			furtherInput = display.listOverlay(FONT_FACES)
+			furtherInput = display.listOverlay(self.parent,FONT_FACES)
 			furtherInput.addKeys({'enter':enter})
 			furtherInput.it = int(formatting['ff'])
 		#ask for font size
@@ -374,7 +374,7 @@ def F4(self):
 				chatbot.setFormatting(formatting)
 				return -1
 				
-			furtherInput = display.listOverlay([i for i in map(str,FONT_SIZES)])
+			furtherInput = display.listOverlay(self.parent,[i for i in map(str,FONT_SIZES)])
 			furtherInput.addKeys({'enter':enter})
 			furtherInput.it = FONT_SIZES.index(formatting['fz'])
 		#insurance
@@ -383,7 +383,7 @@ def F4(self):
 		self.addOverlay(furtherInput)
 		#set formatting, even if changes didn't occur
 		
-	box = display.listOverlay(["Font Color","Name Color","Font Face","Font Size"])
+	box = display.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
 	box.addKeys({
 		'enter':select,
 	})
@@ -408,7 +408,7 @@ def F5(self):
 		col = i and i+12 or 16
 		string.insertColor(-1,col)
 					
-	box = display.listOverlay(["None","Red","Blue","Both"],drawActive)
+	box = display.listOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
 	box.addKeys({
 		'enter':select
 		,'tab':	ontab
@@ -451,7 +451,7 @@ def openlastlink(self):
 @display.onkey('^t')
 def joingroup(self):
 	'''Join a new group'''
-	inp = display.inputOverlay("Enter group name")
+	inp = display.inputOverlay(self.parent,"Enter group name")
 	self.addOverlay(inp)
 	inp.runOnDone(lambda x: self.clearlines() or chatbot.changeGroup(x))
 
