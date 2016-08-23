@@ -235,8 +235,8 @@ def breaklines(string,length):
 
 class scrollable:
 	'''Scrollable text input'''
-	def __init__(self,width):
-		self._str = ""
+	def __init__(self,width,string = ""):
+		self._str = string
 		self._pos = 0
 		self._disp = 0
 		self._width = width

@@ -489,6 +489,7 @@ class commandOverlay(textOverlay):
 	history = history()
 	def __init__(self,parent):
 		textOverlay.__init__(self,parent)
+		self.text.setstr(CHAR_COMMAND)
 		self.controlhistory(self.history,self.text)
 		self._keys.update({
 			9:	staticize(self._complete)
@@ -505,12 +506,12 @@ class commandOverlay(textOverlay):
 		self.text.append(findName(str(self.text),list(commands)) + " ")
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
+		self.text.backspace()
 		if str(self.text) == '':
 			return -1
-		self.text.backspace()
 	def _run(self):
 		'''Run command'''
-		text = str(self.text)
+		text = str(self.text)[1:]
 		if text: self.history.appendhist(text)
 		space = text.find(' ')
 		commandname = space == -1 and text or text[:space]
@@ -527,9 +528,7 @@ class commandOverlay(textOverlay):
 		except KeyboardInterrupt: pass
 		return -1
 	def display(self,lines):
-		'''Display as a line where mainOverlay puts the breaking char'''
-		lines[-1] = CHAR_COMMAND + self.text.display()
-		return lines
+		lines[-1] = 'COMMAND'
 
 class escapeOverlay(overlayBase):
 	'''Overlay for redirecting input after \ is pressed'''
@@ -805,7 +804,8 @@ class _main:
 		'''Main client loop'''
 		while active:
 			if self._input() == -1:
-				self._ins.pop()
+				if isinstance(self._ins.pop(),textOverlay):
+					self._scrolls.pop()
 				if not self._ins: break #insurance
 				self.resize()
 	def _timeloop(self):
