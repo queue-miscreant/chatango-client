@@ -528,14 +528,14 @@ class commandOverlay(textOverlay):
 class escapeOverlay(overlayBase):
 	'''Overlay for redirecting input after \ is pressed'''
 	replace = False
-	def __init__(self,parent,appendobj):
+	def __init__(self,parent,scroll):
 		overlayBase.__init__(self,parent)
 		self._keys.update({
 			-1:		quitlambda
 			,10:		quitlambda
-			,ord('n'):	lambda x: appendobj.append('\n') or -1
-			,ord('\\'):	lambda x: appendobj.append('\\') or -1
-			,ord('t'):	lambda x: appendobj.append('\t') or -1
+			,ord('n'):	lambda x: scroll.append('\n') or -1
+			,ord('\\'):	lambda x: scroll.append('\\') or -1
+			,ord('t'):	lambda x: scroll.append('\t') or -1
 		})
 
 class confirmOverlay(overlayBase):
@@ -591,7 +591,7 @@ class mainOverlay(textOverlay):
 	#---------------------------------------------------------------------------
 	def _replaceback(self):
 		'''Add a newline if the next character is n, or a tab if the next character is t'''
-		self.addOverlay(escapeOverlay(self.text,self.parent))
+		self.addOverlay(escapeOverlay(self.parent,self.text))
 	def selectup(self):
 		'''Select message up'''
 		#go up the number of lines of the "next" selected message
