@@ -106,7 +106,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 				continue
 			prompt = ['username', 'password', 'group name'][num]
 			inp = display.inputOverlay(self.parent,"Enter your " + prompt, num == 1,True)
-			self.parent.addOverlay(inp)
+			inp.addOverlay()
 			self.creds[i] = inp.waitForInput()
 			if not display.active: return
 
@@ -237,7 +237,7 @@ def onenter(self):
 			if len(alllinks) > 1:
 				self.parent.msgSystem('Really open %d links? (y/n)'%\
 					len(alllinks))
-				self.addOverlay(display.confirmOverlay(self.parent,openall))
+				display.confirmOverlay(self.parent,openall).addOverlay()
 			else:
 				openall()
 		except Exception: pass
@@ -294,7 +294,7 @@ def linklist(self):
 
 	box = display.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
 	box.addKeys({'enter':select})
-	self.addOverlay(box)
+	box.addOverlay()
 
 @display.onkey('f3')
 def F3(self):
@@ -329,8 +329,7 @@ def F3(self):
 		'enter':select,
 		'tab':tab,
 	})
-	
-	self.addOverlay(box)
+	box.addOverlay()
 
 @display.onkey('f4')
 def F4(self):
@@ -380,7 +379,7 @@ def F4(self):
 		#insurance
 		if furtherInput is None: raise Exception("How is this error even possible?")
 		#add the overlay
-		self.addOverlay(furtherInput)
+		furtherInput.addOverlay()
 		#set formatting, even if changes didn't occur
 		
 	box = display.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
@@ -388,7 +387,7 @@ def F4(self):
 		'enter':select,
 	})
 	
-	self.addOverlay(box)
+	box.addOverlay()
 
 @display.onkey('f5')
 def F5(self):
@@ -415,7 +414,7 @@ def F5(self):
 	})
 	box.it = chatbot.channel
 	
-	self.addOverlay(box)
+	box.addOverlay()
 
 @display.onkey('btab')
 def addignore(self):
@@ -452,7 +451,7 @@ def openlastlink(self):
 def joingroup(self):
 	'''Join a new group'''
 	inp = display.inputOverlay(self.parent,"Enter group name")
-	self.addOverlay(inp)
+	inp.addOverlay()
 	inp.runOnDone(lambda x: self.clearlines() or chatbot.changeGroup(x))
 
 #COLORIZERS---------------------------------------------------------------------

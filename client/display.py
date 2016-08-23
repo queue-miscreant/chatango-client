@@ -168,6 +168,7 @@ def soundBell():
 	'''Raise console bell'''
 	print('\a',end="")
 
+#TODO generalize into class
 def findName(given,lis):
 	'''Find rest of a name in a list'''
 	for i in lis:
@@ -197,17 +198,22 @@ class overlayBase:
 	'''An overlay is a class that redirects input and modifies a list of strings'''
 	def __init__(self,parent):
 		self.parent = parent
+		self._keys =	{27:	self._callalt
+						,curses.KEY_RESIZE:	staticize(parent.resize)
+						}
 		self._altkeys =	 {None:	lambda: -1}
-		self._keys =	 {27:	self._callalt}
 	def __call__(self,chars):
 		'''Redirect input with this overlay'''
+		ret = 0
 		try:
 			char = _KEY_LUT[chars[0]]
 		except: char = chars[0]
 		if char in self._keys:	#ignore the command character and trailing -1
-			return self._keys[char](chars[1:-1] or [None]) or self._post()
+			ret = self._keys[char](chars[1:-1] or [None]) or self._post()
+			self.parent.display()
 		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
-			return self._keys[-1](chars[:-1]) or self._post()
+			ret = self._keys[-1](chars[:-1]) or self._post()
+		return ret
 	def _callalt(self,chars):
 		'''Call a key from _altkeys.'''
 		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
@@ -217,11 +223,14 @@ class overlayBase:
 	def _post(self):
 		'''Overridable function. Run after keypress if false (, None...) is returned'''
 		pass
-	def display(self,lines,cursor):
+	def display(self,lines):
 		'''Overridable function. Modify lines by address (i.e lines[value]) to display from _main'''
 		pass
+	def addOverlay(self):
+		self.parent.addOverlay(self)
 	def addKeys(self,newFunctions = {}):
-		'''Nice method to add keys whenever'''
+		'''Nice method to add keys after instantiation. Support for '''+\
+		'''a- (alt keys), or curses keynames.'''
 		for i,j in newFunctions.items():
 			if isinstance(i,str):
 				if i.lower().find('a-') == 0:
@@ -233,9 +242,6 @@ class overlayBase:
 					i = _VALID_KEYNAMES[i]
 				except: raise KeyException('key %s not defined'%i)
 			self._keys[i] = staticize(j,self)
-	def addResize(self,other):
-		'''Add resize. Done automatically on addOverlay'''
-		self._keys[curses.KEY_RESIZE] = staticize(other.resize)
 	def getKeynames(self):
 		'''Get a list of keynames and their documentation'''
 		ret = []
@@ -321,7 +327,7 @@ class listOverlay(overlayBase):
 	def chmode(self,amt):
 		'''Move to mode amt over, with looparound'''
 		self.mode = (self.mode + amt) % self._nummodes
-	def display(self,lines,cursor):
+	def display(self,lines):
 		'''Display a list in a box, basically. If too long, it gets shortened with an ellipsis in the middle'''
 		lines[0] = box.top()
 		size = DIM_Y-RESERVE_LINES-2
@@ -392,7 +398,7 @@ class colorOverlay(overlayBase):
 	def setHex(self,hexstr):
 		'''Set self.color from hex'''
 		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
-	def display(self,lines,cursor):
+	def display(self,lines):
 		'''Display 3 bars, their names, values, and string in hex'''
 		wide = (DIM_X-2)//3 - 1
 		space = DIM_Y-RESERVE_LINES-7
@@ -451,7 +457,7 @@ class inputOverlay(textOverlay):
 			active = False
 		self.text.clear()
 		return -1
-	def display(self,lines,cursor):
+	def display(self,lines):
 		'''Display the text in roughly the middle, in a box'''
 		start = DIM_Y//2 - self._numprompts//2
 		end = DIM_Y//2 + self._numprompts
@@ -520,7 +526,7 @@ class commandOverlay(textOverlay):
 				(type(exc).__name__,commandname, exc))
 		except KeyboardInterrupt: pass
 		return -1
-	def display(self,lines,cursor):
+	def display(self,lines):
 		'''Display as a line where mainOverlay puts the breaking char'''
 		lines[-1] = CHAR_COMMAND + self.text.display()
 		return lines
@@ -573,7 +579,7 @@ class mainOverlay(textOverlay):
 		'''Input some text'''
 		if not str(self.text) and len(chars) == 1 and \
 		chars[0] == ord(CHAR_COMMAND):
-			self.addOverlay(commandOverlay(self.parent))
+			commandOverlay(self.parent).addOverlay()
 			return
 		#allow unicode input
 		textOverlay._input(self,chars)
@@ -591,7 +597,7 @@ class mainOverlay(textOverlay):
 	#---------------------------------------------------------------------------
 	def _replaceback(self):
 		'''Add a newline if the next character is n, or a tab if the next character is t'''
-		self.addOverlay(escapeOverlay(self.parent,self.text))
+		escapeOverlay(self.parent,self.text).addOverlay()
 	def selectup(self):
 		'''Select message up'''
 		#go up the number of lines of the "next" selected message
@@ -629,9 +635,9 @@ class mainOverlay(textOverlay):
 		return addlines
 		
 	#FRONTENDS--------------------------------------------------
-	def addOverlay(self,new):
-		'''Add overlay to parent'''
-		self.parent.addOverlay(new)
+#	def addOverlay(self,new):
+#		'''Add overlay to parent'''
+#		self.parent.addOverlay(new)
 	def isselecting(self):
 		'''Whether a message is selected or not'''
 		return self._selector
@@ -690,9 +696,9 @@ class mainOverlay(textOverlay):
 			self._linesup += b+1
 			self._unfiltup += 1
 
-	def display(self,lines,cursor):
+	def display(self,lines):
 		'''Display messages'''
-		select = (cursor or self._selector) and SELECT_AND_MOVE or SELECT
+		select = SELECT_AND_MOVE
 		#seperate traversals
 		selftraverse,linetraverse = -1,-2
 		lenself, lenlines = len(self._lines),len(lines)
@@ -770,10 +776,11 @@ class _main:
 		self._bottom_edges = [" "," "]
 		self.candisplay = 1
 		chatbot.setparent(self)
-		self.over = mainOverlay(self)
-		self.over.addResize(self)
 		#input/display stack
-		self._ins = [self.over]
+		self._ins = []
+		self._scrolls = []
+		self.over = mainOverlay(self)
+		self.over.addOverlay()
 
 	#=----------------------=
 	#|	Loop Backends		|
@@ -801,11 +808,6 @@ class _main:
 				self._ins.pop()
 				if not self._ins: break #insurance
 				self.resize()
-				
-			if len(self._ins)-1 or self.over.isselecting():
-				self.display()
-			else:
-				self.updateinput()
 	def _timeloop(self):
 		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
 		i = 0
@@ -832,7 +834,7 @@ class _main:
 		while (start < len(self._ins)) and not self._ins[-start].replace:
 			start += 1
 		while start > 0:
-			self._ins[-start].display(lines,start == 1)	#only the last window gets cursor drawing privileges
+			self._ins[-start].display(lines)
 			start -= 1
 		#main display method: move to top of screen
 		_moveCursor()
@@ -854,7 +856,8 @@ class _main:
 	def _updateinput(self):
 		'''Input display backend'''
 		if not self.candisplay: return
-		string = self.over.text.display()
+		if not self._scrolls: return	#no textoverlays added
+		string = self._scrolls[-1].display()
 		_moveCursor(DIM_Y-RESERVE_LINES+1)
 		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 	def _updateinfo(self,right,left):
@@ -907,19 +910,19 @@ class _main:
 	def addOverlay(self,new):
 		'''Add overlay'''
 		if not isinstance(new,overlayBase): return
-		new.addResize(self)
 		self._ins.append(new)
 		#yes, this is still too fast
 		time.sleep(.01)
-		self.display()
-		self.updateinfo() #this looks ugly otherwise
 	def replaceOverlay(self,new):
 		'''Replace the top overlay'''
 		if len(self._ins) == 1: return
 		self._ins.pop()
 		self.addOverlay(new)
 	def addScrollable(self):
-		return scrollable(DIM_X)
+		newScroll = scrollable(DIM_X)
+		newScroll.setchanged(lambda: self.updateinput())
+		self._scrolls.append(newScroll)
+		return newScroll
 	def resize(self):
 		'''Resize the GUI'''
 		global DIM_X,DIM_Y

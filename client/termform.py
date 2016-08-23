@@ -262,16 +262,6 @@ class scrollable:
 		if end is None:
 			end = self._pos
 		return self._str.rfind(string,start,end)
-	#-----------------
-	def setstr(self,new = None):
-		if new is None: return
-		self._str = new
-		self.end()
-	def setwidth(self,new = None):
-		if new is None: return
-		if new <= 0:
-			raise FormattingException()
-		self._width = new
 	def display(self):
 		'''Display text contained with cursor'''
 		#original string injections
@@ -300,10 +290,23 @@ class scrollable:
 			pos += 1
 			escape = temp
 		return text[init:pos]
+	#-----------------
+	def setstr(self,new = None):
+		if new is None: return
+		self._str = new
+		self.end()
+		self.onchanged()
+	def setwidth(self,new = None):
+		if new is None: return
+		if new <= 0:
+			raise FormattingException()
+		self._width = new
+		self.onchanged()
 	def movepos(self,dist):
 		'''Move cursor by distance (can be negative). Adjusts display position'''
 		if not len(self._str):
 			self._pos,self._disp = 0,0
+			self.onchanged()
 			return
 		self._pos = max(0,min(len(self._str),self._pos+dist))
 		curspos = self._pos - self._disp
@@ -311,6 +314,7 @@ class scrollable:
 			self._disp = max(0,self._disp+dist)
 		elif (curspos+1) >= self._width: #right hand side
 			self._disp = min(self._pos-self._width+1,self._disp+dist)
+		self.onchanged()
 			
 	def append(self,new):
 		'''Append string at cursor'''
@@ -324,6 +328,7 @@ class scrollable:
 	def delchar(self):
 		'''Delete one char ahead of cursor'''
 		self._str = self._str[:self._pos] + self._str[self._pos+1:]
+		self.onchanged()
 	def delword(self):
 		'''Delete word behind cursor, like in sane text boxes'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
@@ -337,17 +342,25 @@ class scrollable:
 			self._str = self._str[self._pos:]
 			self._disp = 0
 			self._pos = 0
+			self.onchanged()
 	def clear(self):
 		'''Clear cursor and string'''
 		self._str = ""
 		self._pos = 0
 		self._disp = 0
+		self.onchanged()
 	def home(self):
 		'''Return to the beginning'''
 		self._pos = 0
 		self._disp = 0
+		self.onchanged()
 	def end(self):
 		'''Move to the end'''
 		self._pos = 0
 		self._disp = 0
 		self.movepos(len(self._str))
+		self.onchanged()
+	def onchanged(self):
+		pass
+	def setchanged(self,other):
+		setattr(self,'onchanged',other)
