@@ -29,15 +29,15 @@ SAVE_PATH = os.path.expanduser('~/.chatango_creds')
 XML_TAGS_RE = re.compile("(<[^<>]*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 #constants for chatango
-FONT_FACES = ["Arial",
-		  "Comic Sans",
-		  "Georgia",
-		  "Handwriting",
-		  "Impact",
-		  "Palatino",
-		  "Papyrus",
-		  "Times New Roman",
-		  "Typewriter",
+FONT_FACES=	["Arial"
+			,"Comic Sans"
+			,"Georgia"
+			,"Handwriting"
+			,"Impact"
+			,"Palatino"
+			,"Papyrus"
+			,"Times New Roman"
+			,"Typewriter"
 		  ]
 FONT_SIZES = [9,10,11,12,13,14]
 HTML_CODES = [
@@ -91,21 +91,22 @@ def formatRaw(raw):
 	return raw.replace("&nbsp;"," ")
 
 #bot for interacting with chat
-class chat_bot(chlib.ConnectionManager,client.botclass):
+class chat_bot(chlib.ConnectionManager):
 	members = []
 
-	def __init__(self,creds):
+	def __init__(self,creds,parent):
 		self.creds = creds
 		self.channel = 0
 		self.isinited = 0
+		self.mainOverlay = chatangoOverlay(parent,self)
+		self.mainOverlay.addOverlay()
 		
 	def main(self):
 		for num,i in enumerate(['user','passwd','room']):
 			#skip if supplied
 			if self.creds.get(i):
 				continue
-			prompt = ['username', 'password', 'group name'][num]
-			inp = display.inputOverlay(self.parent,"Enter your " + prompt, num == 1,True)
+			inp = display.inputOverlay(self.mainOverlay.parent,"Enter your " + i, num == 1,True)
 			inp.addOverlay()
 			self.creds[i] = inp.waitForInput()
 			if not display.active: return
@@ -117,8 +118,8 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		chlib.ConnectionManager.main(self)
 
 	def start(self,*args):
-		self.parent.msgSystem('Connecting')
-		self.parent.updateinfo(None,self.creds.get('user'))
+		self.mainOverlay.msgSystem('Connecting')
+		self.mainOverlay.parent.updateinfo(None,self.creds.get('user'))
 		self.addGroup(self.creds.get('room'))
 	
 	def stop(self):
@@ -165,7 +166,7 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 			display.dbmsg(exc)
 	
 	def recvinited(self, group):
-		self.parent.msgSystem("Connected to "+group.name)
+		self.mainOverlay.msgSystem("Connected to "+group.name)
 		self.joinedGroup = group
 		self.setFormatting()
 		#I modified the library to pull history messages, and put them in the group's message array
@@ -175,8 +176,8 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		for i in past:
 			self.recvPost(group, i.user, i, 1)
 		
-		self.parent.msgTime(float(past[-1].time),"Last message at ")
-		self.parent.msgTime()
+		self.mainOverlay.msgTime(float(past[-1].time),"Last message at ")
+		self.mainOverlay.msgTime()
 
 	#on disconnect
 	def recvRemove(self,group):
@@ -196,264 +197,272 @@ class chat_bot(chlib.ConnectionManager,client.botclass):
 		#format as ' user: message'
 		msg = '%s: %s'%(user,formatRaw(post.raw))
 		linkopen.parseLinks(msg)
-		self.parent.msgPost(msg, post.user, isreply, ishistory, post.channel)
+		self.mainOverlay.msgPost(msg, post.user, isreply, ishistory, post.channel)
 		#extra arguments. use in colorizers
 
 	def recvshow_fw(self, group):
-		self.parent.msgSystem("Flood ban warning issued")
+		self.mainOverlay.msgSystem("Flood ban warning issued")
 
 	def recvshow_tb(self, group, mins, secs):
 		self.recvtb(group, mins, secs)
 
 	def recvtb(self, group, mins, secs):
-		self.parent.msgSystem("You are banned for %d seconds"%(60*mins+secs))
+		self.mainOverlay.msgSystem("You are banned for %d seconds"%(60*mins+secs))
 	
 	#pull members when any of these are invoked
 	def recvparticipant(self, group, bit, user, uid):
 		self.members = group.users
-		self.parent.updateinfo(str(int(group.unum,16)))
+		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 		if user == "none": user = "anon"
 		bit = (bit == "1" and 1) or -1
 		#notifications
-		self.parent.newBlurb("%s has %s" % (user,bit-1 and "left" or "joined"))
+		self.mainOverlay.parent.newBlurb("%s has %s" % (user,bit-1 and "left" or "joined"))
 	
 	def recvg_participants(self,group):
 		self.members = group.users
-		self.parent.updateinfo(str(int(group.unum,16)))
+		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 
 #-------------------------------------------------------------------------------------------------------
 #KEYS
-@display.onkey("enter")
-def onenter(self):
-	'''Open selected message's links or send message'''
-	if self.isselecting():
-		try:
-			message = self.getselect()
-			msg = client.decolor(message[0])+' '
-			alllinks = linkopen.LINK_RE.findall(msg)
-			def openall():
-				for i in alllinks:
-					linkopen.open_link(self.parent,i)
-			if len(alllinks) > 1:
-				self.parent.msgSystem('Really open %d links? (y/n)'%\
-					len(alllinks))
-				display.confirmOverlay(self.parent,openall).addOverlay()
-			else:
-				openall()
-		except Exception: pass
-		return
-	text = str(self.text)
-	#if it's not just spaces
-	if text.count(" ") != len(text):
-		#add it to the history
-		self.text.clear()
-		self.history.appendhist(text)
-		#call the send
-		chatbot.tryPost(text)
-	return 1
-
-@display.onkey("tab")
-def ontab(self):
-	'''Reply to selected message or complete member name'''
-	if self.isselecting():
-		try:
-			#allmessages contain the colored message and arguments
-			message = self.getselect()
-			msg = client.decolor(message[0])
-			#first colon is separating the name from the message
-			colon = msg.find(':')
-			name = msg[1:colon]
-			msg = msg[colon+2:]
-			if name[0] in "!#":
-				name = name[1:]
-			self.text.append('@%s: `%s`'%(name,msg.replace('`','')))
-		except: pass
-		return 
-	#only search after the last space
-	lastSpace = self.text.rfind(" ")
-	search = self.text[lastSpace + 1 and lastSpace:]
-	#find the last @
-	reply = search.rfind("@")
-	if reply+1:
-		afterReply = search[reply+1:]
-		#look for the name starting with the text given
-		if afterReply != "":
-			#up until the @
-			self.text.append(display.findName(afterReply,chatbot.members) + " ")
-
-@display.onkey('f2')
-def linklist(self):
-	'''List accumulated links'''
-	#enter key
-	def select(me):
-		if not linkopen.getlinks(): return
-		current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
-		current = linkopen.getlinks()[int(current)-1] #this enforces the wanted link is selected
-		linkopen.open_link(self.parent,current,me.mode)
-		#exit
-		return -1
-
-	box = display.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
-	box.addKeys({'enter':select})
-	box.addOverlay()
-
-@display.onkey('f3')
-def F3(self):
-	'''List members of current group'''
-	def select(me):
-		current = me.list[me.it]
-		current = current.split(' ')[0]
-		if current[0] in "!#":
-			current = current[1:]
-		#reply
-		self.text.append("@%s " % current)
-		return -1
-	def tab(me):
-		global ignores
-		current = me.list[me.it]
-		current = current.split(' ')[0]
-		if current not in ignores:
-			ignores.append(current)
-		else:
-			ignores.remove(current)
-		self.redolines()
-
-	dispList = {i:chatbot.members.count(i) for i in chatbot.members}
-	dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
-	def drawIgnored(string,i):
-		if dispList[i].split(' ')[0] not in ignores: return
-		string.insertColor(-1,3)
-		string[:-1]+'i'
-	
-	box = display.listOverlay(self.parent,sorted(dispList),drawIgnored)
-	box.addKeys({
-		'enter':select,
-		'tab':tab,
-	})
-	box.addOverlay()
-
-@display.onkey('f4')
-def F4(self):
-	'''Chatango formatting settings'''
-	#select which further input to display
-	def select(me):
-		formatting = chatbot.creds['formatting']
-		furtherInput = None
-		#ask for font color
-		if me.it == 0:
-			def enter(me):
-				formatting['fc'] = me.getHex()
-				chatbot.setFormatting(formatting)
-				return -1
-
-			furtherInput = display.colorOverlay(self.parent,formatting['fc'])
-			furtherInput.addKeys({'enter':enter})
-		#ask for name color
-		elif me.it == 1:
-			def enter(me):
-				formatting['nc'] = me.getHex()
-				chatbot.setFormatting(formatting)
-				return -1
-		
-			furtherInput = display.colorOverlay(self.parent,formatting['nc'])
-			furtherInput.addKeys({'enter':enter})
-		#font face
-		elif me.it == 2:
-			def enter(me):
-				formatting['ff'] = str(me.it)
-				chatbot.setFormatting(formatting)
-				return -1
-			
-			furtherInput = display.listOverlay(self.parent,FONT_FACES)
-			furtherInput.addKeys({'enter':enter})
-			furtherInput.it = int(formatting['ff'])
-		#ask for font size
-		elif me.it == 3:
-			def enter(me):
-				formatting['fz'] = FONT_SIZES[me.it]
-				chatbot.setFormatting(formatting)
-				return -1
+class chatangoOverlay(display.mainOverlay):
+	def __init__(self,parent,bot):
+		display.mainOverlay.__init__(self,parent)
+		self.bot = bot
+		self.addKeys({	'enter':	self.onenter
+						,'tab':		self.ontab
+						,'f2':		self.linklist
+						,'f3':		self.F3
+						,'f4':		self.F4
+						,'f5':		self.F5
+						,'btab':	self.addignore
+						,'^t':		self.joingroup
+						,'^g':		self.openlastlink
+						,'^r':		self.reloadclient
+		},1)	#these are methods, so they're defined on __init__
+		client.dbmsg(self.getKeynames())
 				
-			furtherInput = display.listOverlay(self.parent,[i for i in map(str,FONT_SIZES)])
-			furtherInput.addKeys({'enter':enter})
-			furtherInput.it = FONT_SIZES.index(formatting['fz'])
-		#insurance
-		if furtherInput is None: raise Exception("How is this error even possible?")
-		#add the overlay
-		furtherInput.addOverlay()
-		#set formatting, even if changes didn't occur
-		
-	box = display.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
-	box.addKeys({
-		'enter':select,
-	})
-	
-	box.addOverlay()
+	def onenter(self):
+		'''Open selected message's links or send message'''
+		if self.isselecting():
+			try:
+				message = self.getselect()
+				msg = client.decolor(message[0])+' '
+				alllinks = linkopen.LINK_RE.findall(msg)
+				def openall():
+					for i in alllinks:
+						linkopen.open_link(self.parent,i)
+				if len(alllinks) > 1:
+					self.parent.msgSystem('Really open %d links? (y/n)'%\
+						len(alllinks))
+					display.confirmOverlay(self.parent,openall).addOverlay()
+				else:
+					openall()
+			except Exception: pass
+			self.stopselect()
+			return
+		text = str(self.text)
+		#if it's not just spaces
+		if text.count(" ") != len(text):
+			#add it to the history
+			self.text.clear()
+			self.history.appendhist(text)
+			#call the send
+			self.bot.tryPost(text)
 
-@display.onkey('f5')
-def F5(self):
-	'''List channels'''
-	def select(me):
-		chatbot.channel = me.it
-		return -1
-	
-	def ontab(me):
-		global filtered_channels
-		#space only
-		filtered_channels[me.it] = not filtered_channels[me.it]
-		self.redolines()
-	
-	def drawActive(string,i):
-		if filtered_channels[i]: return
-		col = i and i+12 or 16
-		string.insertColor(-1,col)
-					
-	box = display.listOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
-	box.addKeys({
-		'enter':select
-		,'tab':	ontab
-	})
-	box.it = chatbot.channel
-	
-	box.addOverlay()
+	def ontab(self):
+		'''Reply to selected message or complete member name'''
+		if self.isselecting():
+			try:
+				#allmessages contain the colored message and arguments
+				message = self.getselect()
+				msg = client.decolor(message[0])
+				#first colon is separating the name from the message
+				colon = msg.find(':')
+				name = msg[1:colon]
+				msg = msg[colon+2:]
+				if name[0] in "!#":
+					name = name[1:]
+				self.text.append('@%s: `%s`'%(name,msg.replace('`','')))
+			except: pass
+			self.stopselect()
+			return 
+		#only search after the last space
+		lastSpace = self.text.rfind(" ")
+		search = self.text[lastSpace + 1 and lastSpace:]
+		#find the last @
+		reply = search.rfind("@")
+		if reply+1:
+			afterReply = search[reply+1:]
+			#look for the name starting with the text given
+			if afterReply != "":
+				#up until the @
+				self.text.append(display.findName(afterReply,self.bot.members) + " ")
 
-@display.onkey('btab')
-def addignore(self):
-	if self.isselecting():
-		global ignores
-		try:
-			#allmessages contain the colored message and arguments
-			message = self.getselect()
-			msg = client.decolor(message[0])
-			#first colon is separating the name from the message
-			colon = msg.find(':')
-			name = msg[1:colon]
-			if name[0] in "!#":
-				name = name[1:]
-			if name in ignores: return
-			ignores.append(name)
+	def linklist(self):
+		'''List accumulated links'''
+		#enter key
+		def select(me):
+			if not linkopen.getlinks(): return
+			current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
+			current = linkopen.getlinks()[int(current)-1] #this enforces the wanted link is selected
+			linkopen.open_link(self.parent,current,me.mode)
+			#exit
+			return -1
+
+		box = display.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
+		box.addKeys({'enter':select})
+		box.addOverlay()
+
+	def F3(self):
+		'''List members of current group'''
+		def select(me):
+			current = me.list[me.it]
+			current = current.split(' ')[0]
+			if current[0] in "!#":
+				current = current[1:]
+			#reply
+			self.text.append("@%s " % current)
+			return -1
+		def tab(me):
+			global ignores
+			current = me.list[me.it]
+			current = current.split(' ')[0]
+			if current not in ignores:
+				ignores.append(current)
+			else:
+				ignores.remove(current)
 			self.redolines()
-		except: pass
-	return
 
-@display.onkey('^r')
-def reloadclient(self):
-	'''Reload current group'''
-	self.clearlines()
-	chatbot.reconnect()
+		dispList = {i:self.bot.members.count(i) for i in self.bot.members}
+		dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
+		def drawIgnored(string,i):
+			if dispList[i].split(' ')[0] not in ignores: return
+			string.insertColor(-1,3)
+			string[:-1]+'i'
+		
+		box = display.listOverlay(self.parent,sorted(dispList),drawIgnored)
+		box.addKeys({
+			'enter':select,
+			'tab':tab,
+		})
+		box.addOverlay()
 
-@display.onkey('^g')
-def openlastlink(self):
-	'''Open last link'''
-	if not linkopen.getlinks(): return
-	linkopen.open_link(self.parent,linkopen.getlinks()[-1])
+	def F4(self):
+		'''Chatango formatting settings'''
+		#select which further input to display
+		def select(me):
+			formatting = self.bot.creds['formatting']
+			furtherInput = None
+			#ask for font color
+			if me.it == 0:
+				def enter(me):
+					formatting['fc'] = me.getHex()
+					self.bot.setFormatting(formatting)
+					return -1
 
-@display.onkey('^t')
-def joingroup(self):
-	'''Join a new group'''
-	inp = display.inputOverlay(self.parent,"Enter group name")
-	inp.addOverlay()
-	inp.runOnDone(lambda x: self.clearlines() or chatbot.changeGroup(x))
+				furtherInput = display.colorOverlay(self.parent,formatting['fc'])
+				furtherInput.addKeys({'enter':enter})
+			#ask for name color
+			elif me.it == 1:
+				def enter(me):
+					formatting['nc'] = me.getHex()
+					self.bot.setFormatting(formatting)
+					return -1
+			
+				furtherInput = display.colorOverlay(self.parent,formatting['nc'])
+				furtherInput.addKeys({'enter':enter})
+			#font face
+			elif me.it == 2:
+				def enter(me):
+					formatting['ff'] = str(me.it)
+					self.bot.setFormatting(formatting)
+					return -1
+				
+				furtherInput = display.listOverlay(self.parent,FONT_FACES)
+				furtherInput.addKeys({'enter':enter})
+				furtherInput.it = int(formatting['ff'])
+			#ask for font size
+			elif me.it == 3:
+				def enter(me):
+					formatting['fz'] = FONT_SIZES[me.it]
+					self.bot.setFormatting(formatting)
+					return -1
+					
+				furtherInput = display.listOverlay(self.parent,[i for i in map(str,FONT_SIZES)])
+				furtherInput.addKeys({'enter':enter})
+				furtherInput.it = FONT_SIZES.index(formatting['fz'])
+			#insurance
+			if furtherInput is None: raise Exception("How is this error even possible?")
+			#add the overlay
+			furtherInput.addOverlay()
+			#set formatting, even if changes didn't occur
+			
+		box = display.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
+		box.addKeys({
+			'enter':select,
+		})
+		
+		box.addOverlay()
+
+	def F5(self):
+		'''List channels'''
+		def select(me):
+			self.bot.channel = me.it
+			return -1
+		
+		def ontab(me):
+			global filtered_channels
+			#space only
+			filtered_channels[me.it] = not filtered_channels[me.it]
+			self.redolines()
+		
+		def drawActive(string,i):
+			if filtered_channels[i]: return
+			col = i and i+12 or 16
+			string.insertColor(-1,col)
+						
+		box = display.listOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
+		box.addKeys({
+			'enter':select
+			,'tab':	ontab
+		})
+		box.it = self.bot.channel
+		
+		box.addOverlay()
+
+	def addignore(self):
+		if self.isselecting():
+			global ignores
+			try:
+				#allmessages contain the colored message and arguments
+				message = self.getselect()
+				msg = client.decolor(message[0])
+				#first colon is separating the name from the message
+				colon = msg.find(':')
+				name = msg[1:colon]
+				if name[0] in "!#":
+					name = name[1:]
+				if name in ignores: return
+				ignores.append(name)
+				self.redolines()
+			except: pass
+		return
+
+	def reloadclient(self):
+		'''Reload current group'''
+		self.clearlines()
+		self.bot.reconnect()
+
+	def openlastlink(self):
+		'''Open last link'''
+		if not linkopen.getlinks(): return
+		linkopen.open_link(self.parent,linkopen.getlinks()[-1])
+
+	def joingroup(self):
+		'''Join a new group'''
+		inp = display.inputOverlay(self.parent,"Enter group name")
+		inp.addOverlay()
+		inp.runOnDone(lambda x: self.clearlines() or self.bot.changeGroup(x))
 
 #COLORIZERS---------------------------------------------------------------------
 #initialize colors
@@ -600,9 +609,10 @@ if __name__ == '__main__':
 		except ImportError as exc: pass
 			
 	#initialize chat bot
-	chatbot = chat_bot(creds)
+	main = display.main()
+	chatbot = chat_bot(creds,main)
 	#start
 	try:
-		display.start(chatbot,chatbot.main)
+		display.start(main,chatbot.main)
 	finally:
 		chatbot.stop()

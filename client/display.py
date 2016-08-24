@@ -4,7 +4,7 @@
 system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different print() calls.'''
-#TODO: better _main._ins: make it so that less iteration is necessary?
+#TODO: better main._ins: make it so that less iteration is necessary?
 try:
 	import curses
 except ImportError:
@@ -199,8 +199,7 @@ class overlayBase:
 	def __init__(self,parent):
 		self.parent = parent
 		self._keys =	{27:	self._callalt
-						,curses.KEY_RESIZE:	staticize(parent.resize)
-						}
+				,curses.KEY_RESIZE:	parent.resize}
 		self._altkeys =	 {None:	lambda: -1}
 	def __call__(self,chars):
 		'''Redirect input with this overlay'''
@@ -219,15 +218,14 @@ class overlayBase:
 		'''Overridable function. Run on resize event'''
 		pass
 	def display(self,lines):
-		'''Overridable function. Modify lines by address (i.e lines[value]) to display from _main'''
+		'''Overridable function. Modify lines by address (i.e lines[value]) to display from main'''
 		pass
 	def remove(self):
 		'''Safe method to run when the overlay needs to be removed'''
 		self.parent.popOverlay()
-
 	def addOverlay(self):
 		self.parent.addOverlay(self)
-	def addKeys(self,newFunctions = {}):
+	def addKeys(self,newFunctions = {},areMethods = 0):
 		'''Nice method to add keys after instantiation. Support for '''+\
 		'''a- (alt keys), or curses keynames.'''
 		for i,j in newFunctions.items():
@@ -240,7 +238,10 @@ class overlayBase:
 				try:
 					i = _VALID_KEYNAMES[i]
 				except: raise KeyException('key %s not defined'%i)
-			self._keys[i] = staticize(j,self)
+			if areMethods:
+				self._keys[i] = staticize(j)
+			else:
+				self._keys[i] = staticize(j,self)
 	def getKeynames(self):
 		'''Get a list of keynames and their documentation'''
 		ret = []
@@ -255,7 +256,7 @@ class overlayBase:
 
 class textOverlay(overlayBase):
 	'''Virtual overlay with text input (at bottom of screen)'''
-	def __init__(self,parent):
+	def __init__(self,parent = None):
 		overlayBase.__init__(self,parent)
 		self.text = parent.addScrollable()
 		self._keys.update({
@@ -490,7 +491,7 @@ class inputOverlay(textOverlay):
 class commandOverlay(textOverlay):
 	replace = False
 	history = history()
-	def __init__(self,parent):
+	def __init__(self,parent = None):
 		textOverlay.__init__(self,parent)
 		self.text.setstr(CHAR_COMMAND)
 		self.controlhistory(self.history,self.text)
@@ -562,7 +563,7 @@ class mainOverlay(textOverlay):
 	addoninit = {}
 	#sequence between messages to draw reversed
 	_msgSplit = "\x1b" 
-	def __init__(self,parent):
+	def __init__(self,parent = None):
 		textOverlay.__init__(self,parent)
 		self.history = history()
 		self.clearlines()
@@ -573,7 +574,6 @@ class mainOverlay(textOverlay):
 		self._altkeys.update({
 			ord('k'):		self.selectup		#muh vim t. me
 			,ord('j'):		self.selectdown
-			,127:			self.text.delword
 		})
 		self.addKeys(self.addoninit)
 	#overlay methods------------------------------------------------------------
@@ -614,6 +614,7 @@ class mainOverlay(textOverlay):
 				a.append(self._msgSplit)
 				self._lines = a + self._lines
 				cur[2] = b
+		return 1
 	def selectdown(self):
 		'''Select message down'''
 		#go down the number of lines of the currently selected message
@@ -641,7 +642,7 @@ class mainOverlay(textOverlay):
 #		self.parent.addOverlay(new)
 	def isselecting(self):
 		'''Whether a message is selected or not'''
-		return self._selector
+		return bool(self._selector)
 	def getselect(self):
 		'''Frontend for getting the selected message'''
 		return self._allMessages[-self._selector]
@@ -676,10 +677,25 @@ class mainOverlay(textOverlay):
 		self._selector = 0
 		self._unfiltup = 0
 		self._linesup = 0
+	def msgSystem(self, base):
+		'''System message'''
+		self._append(getColor(rawNum(1))+base+CLEAR_FORMATTING)
+		self.parent.display()
+	def msgTime(self, numtime = None, predicate=""):
+		'''Push a system message of the time'''
+		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
+		self.msgSystem(predicate+dtime)
+	def msgPost(self,post,*args):
+		'''Parse a message and apply all colorizers'''
+		post = coloring(post)
+		for i in colorizers:
+			i(post,*args)
+		self._append(str(post),list(args))
+		self.parent.display()
 
 	#BACKENDS--------------------------------------------------
-	def append(self,newline,args = None):
-		'''Add new message. Use _main.msgPost instead'''
+	def _append(self,newline,args = None):
+		'''Add new message. Use msgPost instead'''
 		#undisplayed messages have length zero
 		msg = [newline,args,0]
 		self._selector += (self._selector>0)
@@ -724,6 +740,15 @@ class mainOverlay(textOverlay):
 			linetraverse += direction
 		lines[-1] = box.CHAR_HSPACE*DIM_X
 
+class nscrollable(scrollable):
+	'''A scrollable that expects a main object as parent so that it '''+\
+	'''can updateinput()'''
+	def __init__(self,width,parent):
+		scrollable.__init__(self,width)
+		self.parent = parent
+	def onchanged(self):
+		self.parent.updateinput()
+
 #MAIN CLIENT--------------------------------------------------------------------
 class BotException(Exception):
 	'''Exception for incorrect bots passed into client.display'''
@@ -731,8 +756,8 @@ class BotException(Exception):
 class botclass:
 	parent = None
 	def setparent(self,overlay):
-		if not isinstance(overlay,_main):
-			raise BotException("botclass.setparent attempted on object other than display._main")
+		if not isinstance(overlay,main):
+			raise BotException("botclass.setparent attempted on object other than display.main")
 		self.parent = overlay
 
 class _schedule:
@@ -765,23 +790,20 @@ class _schedule:
 		self._debounce = newbounce
 		return prev
 
-class _main:
+class main:
 	'''Main class; handles all IO and defers to overlays'''
 	_screen = None
 	_last = 0
-	def __init__(self,chatbot):
-		if not isinstance(chatbot,botclass):
-			raise BotException("%s not descendent of client.botclass"%\
-			type(chatbot).__name__)
+	def __init__(self):
+#		if not isinstance(chatbot,botclass):
+#			raise BotException("%s not descendent of client.botclass"%\
+#			type(chatbot).__name__)
 		self._schedule = _schedule()
 		self._bottom_edges = [" "," "]
 		self.candisplay = 1
-		chatbot.setparent(self)
 		#input/display stack
 		self._ins = []
 		self._scrolls = []
-		self.over = mainOverlay(self)
-		self.over.addOverlay()
 
 	#=----------------------=
 	#|	Loop Backends		|
@@ -806,13 +828,11 @@ class _main:
 		'''Main client loop'''
 		while active:
 			inp = self._input()
-			if not inp:
+			if inp:
+				if inp == -1:
+					self._ins[-1].remove()
+					if not self._ins: break #insurance
 				self.display()
-			elif inp == 1:
-				self.updateinput()
-			elif inp == -1:
-				self._ins[-1].remove()
-				if not self._ins: break #insurance
 	def _timeloop(self):
 		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
 		i = 0
@@ -861,8 +881,8 @@ class _main:
 	def _updateinput(self):
 		'''Input display backend'''
 		if not self.candisplay: return
-		if not self._scrolls: return	#no textoverlays added
-		string = self._scrolls[-1].display()
+		if not self._scrolls: return	#no textoverlays added, but how are you firing this
+		string = format(self._scrolls[-1])
 		_moveCursor(DIM_Y-RESERVE_LINES+1)
 		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 	def _updateinfo(self,right,left):
@@ -883,22 +903,6 @@ class _main:
 	#=----------------------=
 	def display(self):
 		self._schedule(self._display)
-	def msgSystem(self, base):
-		'''System message'''
-		self.over.append(getColor(rawNum(1))+base+CLEAR_FORMATTING)
-		self.display()
-	def msgTime(self, numtime = None, predicate=""):
-		'''Push a system message of the time'''
-		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
-		self.msgSystem(predicate+dtime)
-	def msgPost(self,post,*args):
-		'''Parse a message and apply all colorizers'''
-		post = coloring(post)
-		for i in colorizers:
-			i(post,*args)
-		#push the message and move the cursor back to the input window
-		self.over.append(str(post),list(args))
-		self.display()
 	def updateinput(self):
 		'''Update input'''
 		self._schedule(self._updateinput)
@@ -926,11 +930,13 @@ class _main:
 		self._ins.pop()
 		self.addOverlay(new)
 	def addScrollable(self):
-		newScroll = scrollable(DIM_X)
+		newScroll = nscrollable(DIM_X,self)
 		self._scrolls.append(newScroll)
+		self.updateinput()
 		return newScroll
 	def popScrollable(self):
 		self._scrolls.pop()
+		self.updateinput()
 	def resize(self):
 		'''Resize the GUI'''
 		global DIM_X,DIM_Y
@@ -984,14 +990,13 @@ class _main:
 		self._loop()
 		active = False
 
-def start(bot_object,main_function):
+def start(main_instance,main_function):
 	'''Start the client. Run this!'''
-	client = _main(bot_object)
 	#start 
 	scr = curses.initscr()
 	curses.noecho(); curses.cbreak(); scr.keypad(1)
 	try:
-		client.start(scr, main_function)
+		main_instance.start(scr, main_function)
 	finally:
 		curses.echo(); curses.nocbreak(); scr.keypad(0)
 		curses.endwin()

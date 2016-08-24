@@ -251,18 +251,7 @@ class scrollable:
 		if not sliced.stop: newstop = self._pos
 		else: newstop = min(newstop,self._pos)
 		return self._str[slice(sliced.start,newstop,sliced.step)]
-	#str-like frontends
-	def find(self,string,start=0,end=None):
-		'''Find up to cursor position'''
-		if end is None:
-			end = self._pos
-		return self._str.find(string,start,end)
-	def rfind(self,string,start=0,end=None):
-		'''Right find up to cursor position'''
-		if end is None:
-			end = self._pos
-		return self._str.rfind(string,start,end)
-	def display(self):
+	def __format__(self,*args):
 		'''Display text contained with cursor'''
 		#original string injections
 		text = self._str[:self._pos] + CHAR_CURSOR + self._str[self._pos:]
@@ -290,22 +279,37 @@ class scrollable:
 			pos += 1
 			escape = temp
 		return text[init:pos]
+	#str-like frontends
+	def find(self,string,start=0,end=None):
+		'''Find up to cursor position'''
+		if end is None:
+			end = self._pos
+		return self._str.find(string,start,end)
+	def rfind(self,string,start=0,end=None):
+		'''Right find up to cursor position'''
+		if end is None:
+			end = self._pos
+		return self._str.rfind(string,start,end)
 	#-----------------
+	def onchanged(self):
+		'''Since this class is meant to take a 'good' slice of a string,'''+\
+		''' It's useful to have this method when that slice is updated'''
+		pass
 	def setstr(self,new = None):
 		if new is None: return
 		self._str = new
 		self.end()
-		return 1
 	def setwidth(self,new = None):
 		if new is None: return
 		if new <= 0:
 			raise FormattingException()
 		self._width = new
-		return 1
+		self.onchanged()
 	def movepos(self,dist):
 		'''Move cursor by distance (can be negative). Adjusts display position'''
 		if not len(self._str):
 			self._pos,self._disp = 0,0
+			self.onchanged()
 			return
 		self._pos = max(0,min(len(self._str),self._pos+dist))
 		curspos = self._pos - self._disp
@@ -313,22 +317,21 @@ class scrollable:
 			self._disp = max(0,self._disp+dist)
 		elif (curspos+1) >= self._width: #right hand side
 			self._disp = min(self._pos-self._width+1,self._disp+dist)
+		self.onchanged()
 			
 	def append(self,new):
 		'''Append string at cursor'''
 		self._str = self._str[:self._pos] + new + self._str[self._pos:]
 		self.movepos(len(new))
-		return 1
 	def backspace(self):
 		'''Backspace one char at cursor'''
 		if not self._pos: return #don't backspace at the beginning of the line
 		self._str = self._str[:self._pos-1] + self._str[self._pos:]
 		self.movepos(-1)
-		return 1
 	def delchar(self):
 		'''Delete one char ahead of cursor'''
 		self._str = self._str[:self._pos] + self._str[self._pos+1:]
-		return 1
+		self.onchanged()
 	def delword(self):
 		'''Delete word behind cursor, like in sane text boxes'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
@@ -342,21 +345,18 @@ class scrollable:
 			self._str = self._str[self._pos:]
 			self._disp = 0
 			self._pos = 0
-		return 1
+			self.onchanged()
 	def clear(self):
 		'''Clear cursor and string'''
 		self._str = ""
-		self._pos = 0
-		self._disp = 0
-		return 1
+		self.home()
 	def home(self):
 		'''Return to the beginning'''
 		self._pos = 0
 		self._disp = 0
-		return 1
+		self.onchanged()
 	def end(self):
 		'''Move to the end'''
 		self._pos = 0
 		self._disp = 0
 		self.movepos(len(self._str))
-		return 1
