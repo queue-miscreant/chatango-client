@@ -241,7 +241,7 @@ def onenter(self):
 			else:
 				openall()
 		except Exception: pass
-		return 1
+		return
 	text = str(self.text)
 	#if it's not just spaces
 	if text.count(" ") != len(text):
@@ -250,6 +250,7 @@ def onenter(self):
 		self.history.appendhist(text)
 		#call the send
 		chatbot.tryPost(text)
+	return 1
 
 @display.onkey("tab")
 def ontab(self):

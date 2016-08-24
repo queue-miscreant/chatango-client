@@ -209,23 +209,22 @@ class overlayBase:
 			char = _KEY_LUT[chars[0]]
 		except: char = chars[0]
 		if char in self._keys:	#ignore the command character and trailing -1
-			ret = self._keys[char](chars[1:-1] or [None]) or self._post()
-			self.parent.display()
+			return self._keys[char](chars[1:-1] or [None])
 		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
-			ret = self._keys[-1](chars[:-1]) or self._post()
-		return ret
+			return self._keys[-1](chars[:-1])
 	def _callalt(self,chars):
 		'''Call a key from _altkeys.'''
 		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
 	def _resize(self):
 		'''Overridable function. Run on resize event'''
 		pass
-	def _post(self):
-		'''Overridable function. Run after keypress if false (, None...) is returned'''
-		pass
 	def display(self,lines):
 		'''Overridable function. Modify lines by address (i.e lines[value]) to display from _main'''
 		pass
+	def remove(self):
+		'''Safe method to run when the overlay needs to be removed'''
+		self.parent.popOverlay()
+
 	def addOverlay(self):
 		self.parent.addOverlay(self)
 	def addKeys(self,newFunctions = {}):
@@ -259,30 +258,35 @@ class textOverlay(overlayBase):
 	def __init__(self,parent):
 		overlayBase.__init__(self,parent)
 		self.text = parent.addScrollable()
-		self.controlscrollable(self.text)
-		self._keys.update({-1:	self._input})
+		self._keys.update({
+			-1:				self._input
+			,127:			staticize(self.text.backspace)
+			,curses.KEY_DC:		staticize(self.text.delchar)
+			,curses.KEY_SHOME:	staticize(self.text.clear)
+			,curses.KEY_RIGHT:	staticize(self.text.movepos,1)
+			,curses.KEY_LEFT:	staticize(self.text.movepos,-1)
+			,curses.KEY_HOME:	staticize(self.text.home)
+			,curses.KEY_END:	staticize(self.text.end)
+		})
+		self._altkeys.update({
+			127:			self.text.delword
+		})
 	def _resize(self,newx,newy):
 		'''Adjust scrollable on resize'''
 		self.text.setwidth(newx)
 	def _input(self,chars):
 		'''Safer version that takes out invalid ASCII (chars above 256)'''
-		self.text.append(bytes([i for i in chars if i<256]).decode())
-	def controlscrollable(self,scroll):
-		'''Add key definitions for standard controls for scrollable `scroll`'''
-		self._keys.update({
-			127:			staticize(scroll.backspace)
-			,curses.KEY_DC:		staticize(scroll.delchar)
-			,curses.KEY_SHOME:	staticize(scroll.clear)
-			,curses.KEY_RIGHT:	staticize(scroll.movepos,1)
-			,curses.KEY_LEFT:	staticize(scroll.movepos,-1)
-			,curses.KEY_HOME:	staticize(scroll.home)
-			,curses.KEY_END:	staticize(scroll.end)
-		})
+		return self.text.append(bytes([i for i in chars if i<256]).decode())
+	def remove(self):
+		'''Don't forget to pop scrollable'''
+		overlayBase.remove(self)
+		self.parent.popScrollable()
 	def controlhistory(self,history,scroll):
 		'''Add key definitions for standard controls for history `history` '''+\
 		'''and scrollable `scroll`'''
 		nexthist = lambda x: scroll.setstr(history.nexthist())
 		prevhist = lambda x: scroll.setstr(history.prevhist())
+		#preserve docstrings for getKeynames
 		nexthist.__doc__ = history.nexthist.__doc__
 		prevhist.__doc__ = history.prevhist.__doc__
 		self._keys.update({
@@ -440,7 +444,6 @@ class inputOverlay(textOverlay):
 		})
 		self._altkeys.update({
 			None:	self._stop
-			,127:	self.text.delword
 		})
 	def _resize(self,newx,newy):
 		textOverlay._resize(self,newx,newy)
@@ -581,8 +584,8 @@ class mainOverlay(textOverlay):
 			commandOverlay(self.parent).addOverlay()
 			return
 		#allow unicode input
-		textOverlay._input(self,chars)
-	def _post(self):
+		return textOverlay._input(self,chars)
+	def stopselect(self):
 		'''Stop selecting'''
 		if self._selector:
 			self._selector = 0
@@ -611,7 +614,6 @@ class mainOverlay(textOverlay):
 				a.append(self._msgSplit)
 				self._lines = a + self._lines
 				cur[2] = b
-		return 1 #don't stop selecting
 	def selectdown(self):
 		'''Select message down'''
 		#go down the number of lines of the currently selected message
@@ -803,11 +805,14 @@ class _main:
 	def _loop(self):
 		'''Main client loop'''
 		while active:
-			if self._input() == -1:
-				if isinstance(self._ins.pop(),textOverlay):
-					self._scrolls.pop()
+			inp = self._input()
+			if not inp:
+				self.display()
+			elif inp == 1:
+				self.updateinput()
+			elif inp == -1:
+				self._ins[-1].remove()
 				if not self._ins: break #insurance
-				self.resize()
 	def _timeloop(self):
 		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
 		i = 0
@@ -913,6 +918,8 @@ class _main:
 		self._ins.append(new)
 		#yes, this is still too fast
 		time.sleep(.01)
+	def popOverlay(self):
+		self._ins.pop()
 	def replaceOverlay(self,new):
 		'''Replace the top overlay'''
 		if len(self._ins) == 1: return
@@ -920,9 +927,10 @@ class _main:
 		self.addOverlay(new)
 	def addScrollable(self):
 		newScroll = scrollable(DIM_X)
-		newScroll.setchanged(lambda: self.updateinput())
 		self._scrolls.append(newScroll)
 		return newScroll
+	def popScrollable(self):
+		self._scrolls.pop()
 	def resize(self):
 		'''Resize the GUI'''
 		global DIM_X,DIM_Y
