@@ -4,7 +4,6 @@
 system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different print() calls.'''
-#TODO: better main._ins: make it so that less iteration is necessary?
 try:
 	import curses
 except ImportError:
@@ -21,16 +20,11 @@ from .termform import *
 import time
 from threading import Thread
 
-active = False
 lasterr = None
-
-#guessed terminal dimensions
-DIM_X = 40
-DIM_Y = 70
-RESERVE_LINES = 3
 #break if smaller than these
+RESERVE_LINES = 3
 _MIN_X = 0
-_MIN_Y = RESERVE_LINES
+_MIN_Y = 0
 def setmins(newx,newy):
 	'''Set minimum width/height'''
 	global _MIN_X,_MIN_Y
@@ -115,13 +109,14 @@ class box:
 	CHAR_TOPR = "┐"
 	CHAR_BTML = "└"
 	CHAR_BTMR = "┘"
+	width = 0
 	noform = lambda x: box.CHAR_VSPACE + x + box.CHAR_VSPACE
 	def format(left,string,right,justchar = ' '):
 		'''Format and justify part of box'''
 		return '%s%s%s' % (left,box.just(string,justchar),right)
 	def just(string,justchar = ' '):
 		'''Justify string by column width'''
-		return '%s%s' % (string,justchar*(DIM_X-2-strlen(string)))
+		return '%s%s' % (string,justchar*(box.width-2-strlen(string)))
 	def part(fmt = '') :
 		'''Format with vertical spaces'''
 		return box.format(box.CHAR_VSPACE,fmt,box.CHAR_VSPACE)
@@ -186,45 +181,60 @@ def staticize(func,*args):
 	ret.__doc__ = func.__doc__	#preserve documentation text
 	return ret
 
-def onkey(keyname):
-	'''Wrapper for adding keys to client.display.mainOverlay'''
-	def wrapper(func):
-		try:
-			mainOverlay.addoninit[_VALID_KEYNAMES[keyname]] = func
-		except:	raise KeyException("key %s not defined" % keyname)
-	return wrapper
-
 class overlayBase:
 	'''An overlay is a class that redirects input and modifies a list of strings'''
 	def __init__(self,parent):
 		self.parent = parent
 		self._keys =	{27:	self._callalt
-				,curses.KEY_RESIZE:	parent.resize}
+				,curses.KEY_RESIZE:	staticize(parent.resize)}
 		self._altkeys =	 {None:	lambda: -1}
+	def __dir__(self):
+		'''Get a list of keynames and their documentation'''
+		ret = []
+		for i,j in _VALID_KEYNAMES.items():
+			if i in ('^[','^i','^j',chr(127)): continue	#ignore named characters and escape
+			if j in self._keys:
+				ret.append('%s: %s' % (i,self._keys[j].__doc__))
+			if j in self._altkeys:
+				ret.append('a-%s: %s' % (i,self._altkeys[j].__doc__))
+		ret.sort()
+		return ret
 	def __call__(self,chars):
-		'''Redirect input with this overlay'''
+		'''Call the overlay. This expects a single argument: a list of numbers '''+\
+		'''terminated by -1'''
 		ret = 0
 		try:
 			char = _KEY_LUT[chars[0]]
 		except: char = chars[0]
 		if char in self._keys:	#ignore the command character and trailing -1
-			return self._keys[char](chars[1:-1] or [None])
+			return self._keys[char](chars[1:-1] or [None]) or self._post()
 		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
-			return self._keys[-1](chars[:-1])
+			return self._keys[-1](chars[:-1]) or self._post()
 	def _callalt(self,chars):
 		'''Call a key from _altkeys.'''
 		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
-	def _resize(self):
-		'''Overridable function. Run on resize event'''
-		pass
+	def _post(self):
+		'''Run after a keypress if the associated function returns boolean false\n'''+\
+		'''If either the keypress or this return boolean true, the overlay's '''+\
+		'''parent redraws'''
+		return 1
 	def display(self,lines):
 		'''Overridable function. Modify lines by address (i.e lines[value]) to display from main'''
 		pass
+	def resize(self):
+		'''Overridable function. On resize event, all added overlays have this called'''
+		pass
+	#frontend methods----------------------------
 	def remove(self):
 		'''Safe method to run when the overlay needs to be removed'''
 		self.parent.popOverlay()
-	def addOverlay(self):
+	def add(self):
+		'''Safe method to run when the overlay needs to be added. '''
 		self.parent.addOverlay(self)
+	def swap(self,new):
+		'''Safe method to pop overlay and add new one in succession.'''
+		self.remove()
+		new.add()
 	def addKeys(self,newFunctions = {},areMethods = 0):
 		'''Nice method to add keys after instantiation. Support for '''+\
 		'''a- (alt keys), or curses keynames.'''
@@ -242,17 +252,6 @@ class overlayBase:
 				self._keys[i] = staticize(j)
 			else:
 				self._keys[i] = staticize(j,self)
-	def getKeynames(self):
-		'''Get a list of keynames and their documentation'''
-		ret = []
-		for i,j in _VALID_KEYNAMES.items():
-			if i in ('^[','^i','^j',chr(127)): continue	#ignore named characters and escape
-			if j in self._keys:
-				ret.append('%s: %s' % (i,self._keys[j].__doc__))
-			if j in self._altkeys:
-				ret.append('a-%s: %s' % (i,self._altkeys[j].__doc__))
-		ret.sort()
-		return ret
 
 class textOverlay(overlayBase):
 	'''Virtual overlay with text input (at bottom of screen)'''
@@ -272,7 +271,7 @@ class textOverlay(overlayBase):
 		self._altkeys.update({
 			127:			self.text.delword
 		})
-	def _resize(self,newx,newy):
+	def resize(self,newx,newy):
 		'''Adjust scrollable on resize'''
 		self.text.setwidth(newx)
 	def _input(self,chars):
@@ -302,7 +301,7 @@ class listOverlay(overlayBase):
 	#		    1    2     345  6	    7
 	#worst case rows: |(list member)|(RESERVED)
 	#		  1	2	3
-	setmins(7,3+RESERVE_LINES)
+	setmins(7,3)
 	def __init__(self,parent,outList,drawOther = None,modes = [""]):
 		overlayBase.__init__(self,parent)
 		self.it = 0
@@ -335,8 +334,8 @@ class listOverlay(overlayBase):
 	def display(self,lines):
 		'''Display a list in a box, basically. If too long, it gets shortened with an ellipsis in the middle'''
 		lines[0] = box.top()
-		size = DIM_Y-RESERVE_LINES-2
-		maxx = DIM_X-2
+		size = self.parent.y-2
+		maxx = self.parent.x-2
 		#which portion of the lmaxyist is currently displaced
 		partition = (self.it//size)*size
 		#get the partition of the list we're at, pad the list
@@ -368,7 +367,7 @@ class colorOverlay(overlayBase):
 	#		  			123456789ABCDEFGH = 17
 	#worst case rows: |(color row) (name)(val) (hex)|(RESERVED)
 	#		  1	2     3	 4	5 6  7  8
-	setmins(17,8+RESERVE_LINES)
+	setmins(17,8)
 	def __init__(self,parent,initcolor = [127,127,127]):
 		overlayBase.__init__(self,parent)
 		#allow setting from hex value
@@ -405,8 +404,8 @@ class colorOverlay(overlayBase):
 		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
 	def display(self,lines):
 		'''Display 3 bars, their names, values, and string in hex'''
-		wide = (DIM_X-2)//3 - 1
-		space = DIM_Y-RESERVE_LINES-7
+		wide = (self.parent.x-2)//3 - 1
+		space = self.parent.y-7
 		lines[0] = box.top()
 		for i in range(space):
 			string = ""
@@ -457,14 +456,13 @@ class inputOverlay(textOverlay):
 		'''Premature stops, clear beforehand'''
 		if self._end:
 			#raising SystemExit is dodgy, since curses.endwin won't get called
-			global active
-			active = False
+			self.parent.active = False
 		self.text.clear()
 		return -1
 	def display(self,lines):
 		'''Display the text in roughly the middle, in a box'''
-		start = DIM_Y//2 - self._numprompts//2
-		end = DIM_Y//2 + self._numprompts
+		start = self.parent.y//2 - self._numprompts//2
+		end = self.parent.y//2 + self._numprompts
 		lines[start] = box.top()
 		for i,j in enumerate(self._prompts):
 			lines[start+i+1] = box.part(j)
@@ -507,7 +505,7 @@ class commandOverlay(textOverlay):
 		#only search after the last space
 		lastSpace = self.text.rfind(" ")
 		if lastSpace+1: return #only complete if there are no spaces
-		self.text.append(findName(str(self.text),list(commands)) + " ")
+		self.text.append(findName(str(self.text)[1:],list(commands)) + " ")
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		self.text.backspace()
@@ -524,7 +522,7 @@ class commandOverlay(textOverlay):
 		try:
 			add = command(self.parent,text[space+1:].split(' '))
 			if isinstance(add,overlayBase):
-				self.parent.replaceOverlay(add)
+				self.swap(add)
 				return
 		except Exception as exc:
 			dbmsg('%s occurred in command %s: %s' % \
@@ -558,13 +556,14 @@ class confirmOverlay(overlayBase):
 		})
 
 class mainOverlay(textOverlay):
-	'''The main overlay'''
+	'''The main overlay. Optionally pushes time messages every 10 minutes '''+\
+	'''and can refresh blurbs every few seconds'''
 	replace = True
-	addoninit = {}
 	#sequence between messages to draw reversed
 	_msgSplit = "\x1b" 
-	def __init__(self,parent = None):
+	def __init__(self,parent,pushtimes = True):
 		textOverlay.__init__(self,parent)
+		self._pushtimes = pushtimes
 		self.history = history()
 		self.clearlines()
 		self.controlhistory(self.history,self.text)
@@ -575,31 +574,53 @@ class mainOverlay(textOverlay):
 			ord('k'):		self.selectup		#muh vim t. me
 			,ord('j'):		self.selectdown
 		})
-		self.addKeys(self.addoninit)
-	#overlay methods------------------------------------------------------------
+	#method overloading---------------------------------------------------------
 	def _input(self,chars):
 		'''Input some text'''
 		if not str(self.text) and len(chars) == 1 and \
 		chars[0] == ord(CHAR_COMMAND):
-			commandOverlay(self.parent).addOverlay()
+			commandOverlay(self.parent).add()
 			return
 		#allow unicode input
 		return textOverlay._input(self,chars)
-	def stopselect(self):
+	def _resize(self,newx,newy):
+		textOverlay._resize(self,newx,newy)
+		if newx != self.parent.x:
+			self.redolines(newx,newy)
+	def _post(self):
 		'''Stop selecting'''
 		if self._selector:
 			self._selector = 0
 			self._linesup = 0
 			self._unfiltup = 0
-			self.parent.display()
-	def _resize(self,newx,newy):
-		textOverlay._resize(self,newx,newy)
-		if newx != DIM_X:
-			self.redolines(newx,newy)
+			return 1
+	def add(self):
+		'''Start timeloop and add overlay'''
+		times = Thread(target=self._timeloop)
+		times.daemon = True
+		times.start()
+		textOverlay.add(self)
+	def remove(self):
+		'''Quit timeloop (if it hasn't already exited)'''
+		self._pushtimes = False
+		textOverlay.remove(self)
+	def _timeloop(self):
+		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
+		i = 0
+		parent = self.parent
+		while self._pushtimes:
+			time.sleep(2)
+			i+=1
+			if time.time() - parent.last > 4:	#erase blurbs
+				parent.newBlurb()
+			#every 600 seconds
+			if not i % 300:
+				self.msgTime(time.time())
+				i=0
 	#---------------------------------------------------------------------------
 	def _replaceback(self):
 		'''Add a newline if the next character is n, or a tab if the next character is t'''
-		escapeOverlay(self.parent,self.text).addOverlay()
+		escapeOverlay(self.parent,self.text).add()
 	def selectup(self):
 		'''Select message up'''
 		#go up the number of lines of the "next" selected message
@@ -610,7 +631,7 @@ class mainOverlay(textOverlay):
 			self._linesup += upmsg+1
 			if self._linesup > len(self._lines):	#don't forget the new lines
 				cur = self.getselect()
-				a,b = breaklines(cur[0],DIM_X)
+				a,b = breaklines(cur[0],self.parent.x)
 				a.append(self._msgSplit)
 				self._lines = a + self._lines
 				cur[2] = b
@@ -621,7 +642,7 @@ class mainOverlay(textOverlay):
 		self._linesup = max(0,self._linesup-self.getselect()[2]-1)
 		self._getnextmessage(-1)
 		if not self._selector:
-			self.parent.display()
+			self.parent.updateinput()	#move the cursor back
 		return 1
 	def _getnextmessage(self,step):
 		'''Backend for selecting message'''
@@ -637,9 +658,6 @@ class mainOverlay(textOverlay):
 		return addlines
 		
 	#FRONTENDS--------------------------------------------------
-#	def addOverlay(self,new):
-#		'''Add overlay to parent'''
-#		self.parent.addOverlay(new)
 	def isselecting(self):
 		'''Whether a message is selected or not'''
 		return bool(self._selector)
@@ -649,11 +667,11 @@ class mainOverlay(textOverlay):
 	def redolines(self,width = None,height = None):
 		'''Redo lines, if current lines does not represent the unfiltered messages ''' + \
 		'''or if the width has changed'''
-		if width is None: width = DIM_X
-		if height is None: height = DIM_Y
+		if width is None: width = self.parent.x
+		if height is None: height = self.parent.y
 		newlines = []
 		numup,nummsg = 0,1
-		while numup < (height - RESERVE_LINES) and nummsg < len(self._allMessages):
+		while numup < (height) and nummsg < len(self._allMessages):
 			i = self._allMessages[-nummsg]
 			try:
 				if any(j(*i[1]) for j in filters):
@@ -704,7 +722,7 @@ class mainOverlay(textOverlay):
 				self._allMessages.append(msg)
 				return
 		except: pass
-		a,b = breaklines(newline,DIM_X)
+		a,b = breaklines(newline,self.parent.x)
 		self._lines += a
 		msg[2] = b
 		self._allMessages.append(msg)
@@ -738,7 +756,7 @@ class mainOverlay(textOverlay):
 			lines[linetraverse] = reverse + self._lines[selftraverse]
 			selftraverse += direction
 			linetraverse += direction
-		lines[-1] = box.CHAR_HSPACE*DIM_X
+		lines[-1] = box.CHAR_HSPACE*self.parent.x
 
 class nscrollable(scrollable):
 	'''A scrollable that expects a main object as parent so that it '''+\
@@ -750,16 +768,6 @@ class nscrollable(scrollable):
 		self.parent.updateinput()
 
 #MAIN CLIENT--------------------------------------------------------------------
-class BotException(Exception):
-	'''Exception for incorrect bots passed into client.display'''
-
-class botclass:
-	parent = None
-	def setparent(self,overlay):
-		if not isinstance(overlay,main):
-			raise BotException("botclass.setparent attempted on object other than display.main")
-		self.parent = overlay
-
 class _schedule:
 	'''Simple class for scheduling displays'''
 	def __init__(self):
@@ -793,65 +801,24 @@ class _schedule:
 class main:
 	'''Main class; handles all IO and defers to overlays'''
 	_screen = None
-	_last = 0
+	last = 0
 	def __init__(self):
-#		if not isinstance(chatbot,botclass):
-#			raise BotException("%s not descendent of client.botclass"%\
-#			type(chatbot).__name__)
 		self._schedule = _schedule()
 		self._bottom_edges = [" "," "]
+		self.active = False
 		self.candisplay = 1
+		#guessed terminal dimensions
+		self.x = 40
+		self.y = 70
 		#input/display stack
 		self._ins = []
 		self._scrolls = []
-
-	#=----------------------=
-	#|	Loop Backends		|
-	#=----------------------=
-	def _input(self):
-		'''Crux of input. Submain client loop'''
-		try:
-			next = -1
-			while next == -1:
-				next = self._screen.getch()
-				time.sleep(.01) #less CPU intensive
-			chars = [next]
-			while next != -1:
-				next = self._screen.getch()
-				chars.append(next)
-		except KeyboardInterrupt:
-			global active
-			active = False
-			return
-		return self._ins[-1](chars)
-	def _loop(self):
-		'''Main client loop'''
-		while active:
-			inp = self._input()
-			if inp:
-				if inp == -1:
-					self._ins[-1].remove()
-					if not self._ins: break #insurance
-				self.display()
-	def _timeloop(self):
-		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
-		i = 0
-		while active:
-			time.sleep(2)
-			i+=1
-			if time.time() - self._last > 4:
-				self.newBlurb()
-			#every 600 seconds
-			if not i % 300:
-				self.msgTime(time.time())
-				i=0
-	#=----------------------=
-	#|	Display Backends	|
-	#=----------------------=
+	#Display Backends----------------------------------------------------------
 	def _display(self):
 		'''Display backend'''
+		if not self.active: return
 		if not self.candisplay: return
-		lines = ["" for i in range(DIM_Y-RESERVE_LINES)]
+		lines = ["" for i in range(self.y)]
 		#justify number of lines
 		#start with the last "replacing" overlay, then draw all overlays afterward
 		start = 1
@@ -870,132 +837,145 @@ class main:
 			print(i,end="\x1b[K\n\r") 
 		curses.curs_set(1)
 		print(CHAR_RETURN_CURSOR,end='')
-	def _printblurb(self,string):
-		'''Blurb display backend'''
-		self._last = time.time()
-		if not self.candisplay: return
-		_moveCursor(DIM_Y-RESERVE_LINES+2)
-		if strlen(string) > DIM_X:
-			string = string[columnslice(string,DIM_X-3):]+'...'
-		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 	def _updateinput(self):
 		'''Input display backend'''
 		if not self.candisplay: return
 		if not self._scrolls: return	#no textoverlays added, but how are you firing this
 		string = format(self._scrolls[-1])
-		_moveCursor(DIM_Y-RESERVE_LINES+1)
+		_moveCursor(self.y+1)
+		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
+	def _printblurb(self,string):
+		'''Blurb display backend'''
+		self._last = time.time()
+		if not self.candisplay: return
+		_moveCursor(self.y+2)
+		if strlen(string) > self.x:
+			string = string[:columnslice(string,self.x-3)]+'...'
 		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 	def _updateinfo(self,right,left):
 		'''Info window backend'''
 		if not self.candisplay: return
-		_moveCursor(DIM_Y)
+		_moveCursor(self.y+3)
 		self._bottom_edges[0] = left or self._bottom_edges[0]
 		self._bottom_edges[1] = right or self._bottom_edges[1]
-		room = DIM_X - len(self._bottom_edges[0]) - len(self._bottom_edges[1])
+		room = self.x - len(self._bottom_edges[0]) - len(self._bottom_edges[1])
 		if room < 1:
 			return
 		#selected, then turn off
 		print("\x1b[7m{}{}{}\x1b[0m".format(self._bottom_edges[0],
 			" "*room,self._bottom_edges[1]),end=CHAR_RETURN_CURSOR)
-
-	#=----------------------=
-	#|	Display Frontends	|
-	#=----------------------=
+	#Display Frontends----------------------------------------------------------
 	def display(self):
 		self._schedule(self._display)
 	def updateinput(self):
 		'''Update input'''
 		self._schedule(self._updateinput)
 	def newBlurb(self,message = ""):
-		'''(Roughly) 5 second blurb'''
+		'''Add blurb. Use in conjunction with mainOverlay to erase'''
 		self._schedule(self._printblurb,message)
 	def updateinfo(self,right = None,left = None):
 		'''Update screen bottom'''
 		self._schedule(self._updateinfo,right,left)
 
-	#=----------------------=
-	#|	Overlay Frontends	|
-	#=----------------------=
+	#Overlay Frontends---------------------------------------------------------
 	def addOverlay(self,new):
 		'''Add overlay'''
 		if not isinstance(new,overlayBase): return
 		self._ins.append(new)
-		#yes, this is still too fast
-		time.sleep(.01)
+		#display is not strictly called beforehand, so better safe than sorry
+		self.display()
 	def popOverlay(self):
+		'''Pop the top overlay'''
 		self._ins.pop()
-	def replaceOverlay(self,new):
-		'''Replace the top overlay'''
-		if len(self._ins) == 1: return
-		self._ins.pop()
-		self.addOverlay(new)
+		self.display()
 	def addScrollable(self):
-		newScroll = nscrollable(DIM_X,self)
+		newScroll = nscrollable(self.x,self)
 		self._scrolls.append(newScroll)
 		self.updateinput()
 		return newScroll
 	def popScrollable(self):
 		self._scrolls.pop()
 		self.updateinput()
+	#Loop Backends-------------------------------------------------------------
+	def _input(self):
+		'''Crux of input. Submain client loop'''
+		try:
+			next = -1
+			while next == -1:
+				next = self._screen.getch()
+				time.sleep(.01) #less CPU intensive
+			chars = [next]
+			while next != -1:
+				next = self._screen.getch()
+				chars.append(next)
+		except KeyboardInterrupt:
+			self.active = False
+			return
+		return self._ins[-1](chars)
+	def _loop(self):
+		'''Main client loop'''
+		while self.active:
+			inp = self._input()
+			if inp:
+				if inp == -1:
+					self._ins[-1].remove()
+					if not self._ins: break #insurance
+				self.display()
+	#Frontends------------------------------------------------------------------
 	def resize(self):
 		'''Resize the GUI'''
-		global DIM_X,DIM_Y
 		newy, newx = self._screen.getmaxyx()
+		newy -= RESERVE_LINES
+		box.width = newx
 		if newy < _MIN_Y or newx < _MIN_X:
-			DIM_X,DIM_Y = newx,newy
+			self.x,self.y = newx,newy
 			self.candisplay = 0
 			return
-		#only redo lines if the width changed
 		try:
 			for i in self._ins:
-				i._resize(newx,newy)
+				i.resize(newx,newy)
 		except FormattingException:
-			DIM_X,DIM_Y = newx,newy
+			self.x,self.y = newx,newy
 			self.candisplay = 0
 			return
-		DIM_X,DIM_Y = newx,newy
+		self.x,self.y = newx,newy
 		self.candisplay = 1
 		self.updateinput()
 		self.updateinfo()
 		self.display()
-	#--------------------------------
 	def catcherr(self,func,*args):
 		'''Catch error and end client'''
 		def wrap():
 			try:
 				func(*args)
 			except Exception as e:
-				global lasterr,active
+				global lasterr
 				lasterr = e
-				active = False
+				self.active = False
 				curses.ungetch('\x1b')
 		return wrap
-
 	def start(self,screen,main_function):
 		'''Start _loop, _timeloop, and bot_thread (threaded main)'''
-		global active
-		active = True
 		self._screen = screen
 		self._screen.nodelay(1)
 		self.resize()
 		#daemonize functions
-		#printtime
-		printtime = Thread(target=self._timeloop)
-		printtime.daemon = True
-		printtime.start()
 		#bot_thread
 		bot_thread = Thread(target=self.catcherr(main_function))
 		bot_thread.daemon = True
 		bot_thread.start()
+		self.active = True
 		self._loop()
-		active = False
+		self.active = False
 
+#TODO better start, more like it was before
+#maybe subclasses, maybe expect a start() method
 def start(main_instance,main_function):
 	'''Start the client. Run this!'''
-	#start 
-	scr = curses.initscr()
-	curses.noecho(); curses.cbreak(); scr.keypad(1)
 	try:
+		#start 
+		scr = curses.initscr()
+		curses.noecho(); curses.cbreak(); scr.keypad(1)
 		main_instance.start(scr, main_function)
 	finally:
 		curses.echo(); curses.nocbreak(); scr.keypad(0)
@@ -1005,24 +985,14 @@ def start(main_instance,main_function):
 
 #display list of defined commands
 @command('help')
-def listcommands(cli,args):
+def listcommands(parent,args):
 	def select(self):
-		new = commandOverlay(cli)
-		new.text.clear()
-		new.text.append(cli,self.list[self.it])
-		cli.replaceOverlay(new)
+		new = commandOverlay(parent)
+		new.text.append(self.list[self.it])
+		self.swap(new)
 
-	commandsList = listOverlay(list(commands))
+	commandsList = listOverlay(parent,list(commands))
 	commandsList.addKeys({
 		'enter':select
 	})
 	return commandsList
-
-@command('keys')
-def listkeys(cli,args):
-	'''Get list of mainOverlay'''
-	keysList = listOverlay(cli,cli.over.getKeynames())
-	keysList.addKeys({
-		'enter': quitlambda
-	})
-	return keysList

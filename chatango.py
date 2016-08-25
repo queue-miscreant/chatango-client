@@ -99,7 +99,7 @@ class chat_bot(chlib.ConnectionManager):
 		self.channel = 0
 		self.isinited = 0
 		self.mainOverlay = chatangoOverlay(parent,self)
-		self.mainOverlay.addOverlay()
+		self.mainOverlay.add()
 		
 	def main(self):
 		for num,i in enumerate(['user','passwd','room']):
@@ -107,7 +107,7 @@ class chat_bot(chlib.ConnectionManager):
 			if self.creds.get(i):
 				continue
 			inp = display.inputOverlay(self.mainOverlay.parent,"Enter your " + i, num == 1,True)
-			inp.addOverlay()
+			inp.add()
 			self.creds[i] = inp.waitForInput()
 			if not display.active: return
 
@@ -239,7 +239,6 @@ class chatangoOverlay(display.mainOverlay):
 						,'^g':		self.openlastlink
 						,'^r':		self.reloadclient
 		},1)	#these are methods, so they're defined on __init__
-		client.dbmsg(self.getKeynames())
 				
 	def onenter(self):
 		'''Open selected message's links or send message'''
@@ -254,7 +253,7 @@ class chatangoOverlay(display.mainOverlay):
 				if len(alllinks) > 1:
 					self.parent.msgSystem('Really open %d links? (y/n)'%\
 						len(alllinks))
-					display.confirmOverlay(self.parent,openall).addOverlay()
+					display.confirmOverlay(self.parent,openall).add()
 				else:
 					openall()
 			except Exception: pass
@@ -311,7 +310,7 @@ class chatangoOverlay(display.mainOverlay):
 
 		box = display.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
 		box.addKeys({'enter':select})
-		box.addOverlay()
+		box.add()
 
 	def F3(self):
 		'''List members of current group'''
@@ -345,7 +344,7 @@ class chatangoOverlay(display.mainOverlay):
 			'enter':select,
 			'tab':tab,
 		})
-		box.addOverlay()
+		box.add()
 
 	def F4(self):
 		'''Chatango formatting settings'''
@@ -394,7 +393,7 @@ class chatangoOverlay(display.mainOverlay):
 			#insurance
 			if furtherInput is None: raise Exception("How is this error even possible?")
 			#add the overlay
-			furtherInput.addOverlay()
+			furtherInput.add()
 			#set formatting, even if changes didn't occur
 			
 		box = display.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
@@ -402,7 +401,7 @@ class chatangoOverlay(display.mainOverlay):
 			'enter':select,
 		})
 		
-		box.addOverlay()
+		box.add()
 
 	def F5(self):
 		'''List channels'''
@@ -428,7 +427,7 @@ class chatangoOverlay(display.mainOverlay):
 		})
 		box.it = self.bot.channel
 		
-		box.addOverlay()
+		box.add()
 
 	def addignore(self):
 		if self.isselecting():
@@ -461,7 +460,7 @@ class chatangoOverlay(display.mainOverlay):
 	def joingroup(self):
 		'''Join a new group'''
 		inp = display.inputOverlay(self.parent,"Enter group name")
-		inp.addOverlay()
+		inp.add()
 		inp.runOnDone(lambda x: self.clearlines() or self.bot.changeGroup(x))
 
 #COLORIZERS---------------------------------------------------------------------
@@ -550,6 +549,15 @@ def unignore(parent,arglist):
 	if person not in ignores: return
 	ignores.pop(ignores.index(person))
 	parent.over.redolines()
+
+@display.command('keys')
+def listkeys(parent,args):
+	'''Get list of mainOverlay'''
+	keysList = display.listOverlay(parent,[])
+	keysList.addKeys({
+		'enter': lambda x: -1
+	})
+	return keysList
 
 #-------------------------------------------------------------------------------------------------------
 #FILTERS
