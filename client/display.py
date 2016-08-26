@@ -839,6 +839,7 @@ class main:
 		print(CHAR_RETURN_CURSOR,end='')
 	def _updateinput(self):
 		'''Input display backend'''
+		if not self.active: return
 		if not self.candisplay: return
 		if not self._scrolls: return	#no textoverlays added, but how are you firing this
 		string = format(self._scrolls[-1])
@@ -887,7 +888,6 @@ class main:
 	def popOverlay(self):
 		'''Pop the top overlay'''
 		self._ins.pop()
-		self.display()
 	def addScrollable(self):
 		newScroll = nscrollable(self.x,self)
 		self._scrolls.append(newScroll)
@@ -927,11 +927,9 @@ class main:
 		newy, newx = self._screen.getmaxyx()
 		newy -= RESERVE_LINES
 		box.width = newx
-		if newy < _MIN_Y or newx < _MIN_X:
-			self.x,self.y = newx,newy
-			self.candisplay = 0
-			return
 		try:
+			if newy < _MIN_Y or newx < _MIN_X:
+				raise FormattingException()
 			for i in self._ins:
 				i.resize(newx,newy)
 		except FormattingException:

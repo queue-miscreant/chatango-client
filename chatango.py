@@ -257,8 +257,7 @@ class chatangoOverlay(display.mainOverlay):
 				else:
 					openall()
 			except Exception: pass
-			self.stopselect()
-			return
+			return 1
 		text = str(self.text)
 		#if it's not just spaces
 		if text.count(" ") != len(text):
@@ -283,7 +282,6 @@ class chatangoOverlay(display.mainOverlay):
 					name = name[1:]
 				self.text.append('@%s: `%s`'%(name,msg.replace('`','')))
 			except: pass
-			self.stopselect()
 			return 
 		#only search after the last space
 		lastSpace = self.text.rfind(" ")

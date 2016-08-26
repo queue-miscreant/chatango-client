@@ -2,6 +2,7 @@
 #termform.py
 '''Module for terminal formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations'''
+#TODO move onchanged to _onchanged
 
 import re
 from .wcwidth import wcwidth
