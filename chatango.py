@@ -24,6 +24,7 @@ import re
 import json
 import os
 
+chatbot = None
 write_to_save = 1
 SAVE_PATH = os.path.expanduser('~/.chatango_creds')
 XML_TAGS_RE = re.compile("(<[^<>]*?>)")
@@ -576,6 +577,13 @@ def ignorefilter(*args):
 		return True
 #-------------------------------------------------------------------------------------------------------
 
+def runClient(main,creds):
+	#initialize chat bot
+	global chatbot
+	chatbot = chat_bot(creds,main)
+	#main.setbot(chatbot)
+	return chatbot.main
+
 if __name__ == '__main__':
 	if "--help" in sys.argv:
 		print(__doc__)
@@ -613,12 +621,8 @@ if __name__ == '__main__':
 		try:
 			import custom #custom plugins
 		except ImportError as exc: pass
-			
-	#initialize chat bot
-	main = display.main()
-	chatbot = chat_bot(creds,main)
 	#start
 	try:
-		display.start(main,chatbot.main)
+		client.start(runClient,creds)
 	finally:
 		chatbot.stop()

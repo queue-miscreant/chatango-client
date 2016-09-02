@@ -241,8 +241,6 @@ class scrollable:
 		self._pos = 0
 		self._disp = 0
 		self._width = width
-		self.history = []
-		self._selhis = 0
 	def __repr__(self):
 		'''Return the raw text contained'''
 		return self._str
@@ -292,7 +290,7 @@ class scrollable:
 			end = self._pos
 		return self._str.rfind(string,start,end)
 	#-----------------
-	def onchanged(self):
+	def _onchanged(self):
 		'''Since this class is meant to take a 'good' slice of a string,'''+\
 		''' It's useful to have this method when that slice is updated'''
 		pass
@@ -305,12 +303,12 @@ class scrollable:
 		if new <= 0:
 			raise FormattingException()
 		self._width = new
-		self.onchanged()
+		self._onchanged()
 	def movepos(self,dist):
 		'''Move cursor by distance (can be negative). Adjusts display position'''
 		if not len(self._str):
 			self._pos,self._disp = 0,0
-			self.onchanged()
+			self._onchanged()
 			return
 		self._pos = max(0,min(len(self._str),self._pos+dist))
 		curspos = self._pos - self._disp
@@ -318,7 +316,7 @@ class scrollable:
 			self._disp = max(0,self._disp+dist)
 		elif (curspos+1) >= self._width: #right hand side
 			self._disp = min(self._pos-self._width+1,self._disp+dist)
-		self.onchanged()
+		self._onchanged()
 			
 	def append(self,new):
 		'''Append string at cursor'''
@@ -332,7 +330,7 @@ class scrollable:
 	def delchar(self):
 		'''Delete one char ahead of cursor'''
 		self._str = self._str[:self._pos] + self._str[self._pos+1:]
-		self.onchanged()
+		self._onchanged()
 	def delword(self):
 		'''Delete word behind cursor, like in sane text boxes'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
@@ -346,7 +344,7 @@ class scrollable:
 			self._str = self._str[self._pos:]
 			self._disp = 0
 			self._pos = 0
-			self.onchanged()
+			self._onchanged()
 	def clear(self):
 		'''Clear cursor and string'''
 		self._str = ""
@@ -355,7 +353,7 @@ class scrollable:
 		'''Return to the beginning'''
 		self._pos = 0
 		self._disp = 0
-		self.onchanged()
+		self._onchanged()
 	def end(self):
 		'''Move to the end'''
 		self._pos = 0

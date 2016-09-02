@@ -764,7 +764,7 @@ class nscrollable(scrollable):
 	def __init__(self,width,parent):
 		scrollable.__init__(self,width)
 		self.parent = parent
-	def onchanged(self):
+	def _onchanged(self):
 		self.parent.updateinput()
 
 #MAIN CLIENT--------------------------------------------------------------------
@@ -802,7 +802,8 @@ class main:
 	'''Main class; handles all IO and defers to overlays'''
 	_screen = None
 	last = 0
-	def __init__(self):
+	def __init__(self,screen):
+		self._screen = screen
 		self._schedule = _schedule()
 		self._bottom_edges = [" "," "]
 		self.active = False
@@ -952,9 +953,9 @@ class main:
 				self.active = False
 				curses.ungetch('\x1b')
 		return wrap
-	def start(self,screen,main_function):
+	def start(self,main_function):
 		'''Start _loop, _timeloop, and bot_thread (threaded main)'''
-		self._screen = screen
+		curses.noecho(); curses.cbreak(); self._screen.keypad(1)
 		self._screen.nodelay(1)
 		self.resize()
 		#daemonize functions
@@ -963,21 +964,17 @@ class main:
 		bot_thread.daemon = True
 		bot_thread.start()
 		self.active = True
-		self._loop()
+		try:
+			self._loop()
+		finally:
+			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
+			curses.endwin()
 		self.active = False
 
-#TODO better start, more like it was before
-#maybe subclasses, maybe expect a start() method
-def start(main_instance,main_function):
+def start(target,*args):
 	'''Start the client. Run this!'''
-	try:
-		#start 
-		scr = curses.initscr()
-		curses.noecho(); curses.cbreak(); scr.keypad(1)
-		main_instance.start(scr, main_function)
-	finally:
-		curses.echo(); curses.nocbreak(); scr.keypad(0)
-		curses.endwin()
+	main_instance = main(curses.initscr())
+	main_instance.start(target(main_instance,*args))
 	if lasterr:
 		raise lasterr
 
