@@ -17,7 +17,7 @@ Options:
 import sys
 import client
 #readablity
-from client import display
+from client import overlay
 from client import linkopen
 import chlib
 import re
@@ -101,16 +101,18 @@ class chat_bot(chlib.ConnectionManager):
 		self.isinited = 0
 		self.mainOverlay = chatangoOverlay(parent,self)
 		self.mainOverlay.add()
+		client.tabber("@",self.members)
 		
 	def main(self):
 		for num,i in enumerate(['user','passwd','room']):
 			#skip if supplied
 			if self.creds.get(i):
 				continue
-			inp = display.inputOverlay(self.mainOverlay.parent,"Enter your " + i, num == 1,True)
+			client.dbmsg(i,"needed");
+			inp = overlay.inputOverlay(self.mainOverlay.parent,"Enter your " + ['username','password','room name'][num], num == 1,True)
 			inp.add()
 			self.creds[i] = inp.waitForInput()
-			if not display.active: return
+			if not self.mainOverlay.parent.active: return
 
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, self.creds['user'], self.creds['passwd'], False)
@@ -164,7 +166,7 @@ class chat_bot(chlib.ConnectionManager):
 				text = text.replace(i[1],i[0])
 			group.sendPost(text.replace("\n","<br/>"),self.channel)
 		except Exception as exc:
-			display.dbmsg(exc)
+			overlay.dbmsg(exc)
 	
 	def recvinited(self, group):
 		self.mainOverlay.msgSystem("Connected to "+group.name)
@@ -194,7 +196,7 @@ class chat_bot(chlib.ConnectionManager):
 		#and is short-circuited
 		isreply = me is not None and ("@"+me.lower() in post.raw.lower())
 		#sound bell
-		if isreply and not ishistory: display.soundBell()
+		if isreply and not ishistory: overlay.soundBell()
 		#format as ' user: message'
 		msg = '%s: %s'%(user,formatRaw(post.raw))
 		linkopen.parseLinks(msg)
@@ -225,9 +227,9 @@ class chat_bot(chlib.ConnectionManager):
 
 #-------------------------------------------------------------------------------------------------------
 #KEYS
-class chatangoOverlay(display.mainOverlay):
+class chatangoOverlay(overlay.mainOverlay):
 	def __init__(self,parent,bot):
-		display.mainOverlay.__init__(self,parent)
+		overlay.mainOverlay.__init__(self,parent)
 		self.bot = bot
 		self.addKeys({	'enter':	self.onenter
 						,'tab':		self.ontab
@@ -254,7 +256,7 @@ class chatangoOverlay(display.mainOverlay):
 				if len(alllinks) > 1:
 					self.parent.msgSystem('Really open %d links? (y/n)'%\
 						len(alllinks))
-					display.confirmOverlay(self.parent,openall).add()
+					overlay.confirmOverlay(self.parent,openall).add()
 				else:
 					openall()
 			except Exception: pass
@@ -264,7 +266,7 @@ class chatangoOverlay(display.mainOverlay):
 		if text.count(" ") != len(text):
 			#add it to the history
 			self.text.clear()
-			self.history.appendhist(text)
+			self.history.append(text)
 			#call the send
 			self.bot.tryPost(text)
 
@@ -284,17 +286,7 @@ class chatangoOverlay(display.mainOverlay):
 				self.text.append('@%s: `%s`'%(name,msg.replace('`','')))
 			except: pass
 			return 
-		#only search after the last space
-		lastSpace = self.text.rfind(" ")
-		search = self.text[lastSpace + 1 and lastSpace:]
-		#find the last @
-		reply = search.rfind("@")
-		if reply+1:
-			afterReply = search[reply+1:]
-			#look for the name starting with the text given
-			if afterReply != "":
-				#up until the @
-				self.text.append(display.findName(afterReply,self.bot.members) + " ")
+		self.text.complete()
 
 	def linklist(self):
 		'''List accumulated links'''
@@ -307,7 +299,7 @@ class chatangoOverlay(display.mainOverlay):
 			#exit
 			return -1
 
-		box = display.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
+		box = overlay.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
 		box.addKeys({'enter':select})
 		box.add()
 
@@ -338,7 +330,7 @@ class chatangoOverlay(display.mainOverlay):
 			string.insertColor(-1,3)
 			string[:-1]+'i'
 		
-		box = display.listOverlay(self.parent,sorted(dispList),drawIgnored)
+		box = overlay.listOverlay(self.parent,sorted(dispList),drawIgnored)
 		box.addKeys({
 			'enter':select,
 			'tab':tab,
@@ -358,7 +350,7 @@ class chatangoOverlay(display.mainOverlay):
 					self.bot.setFormatting(formatting)
 					return -1
 
-				furtherInput = display.colorOverlay(self.parent,formatting['fc'])
+				furtherInput = overlay.colorOverlay(self.parent,formatting['fc'])
 				furtherInput.addKeys({'enter':enter})
 			#ask for name color
 			elif me.it == 1:
@@ -367,7 +359,7 @@ class chatangoOverlay(display.mainOverlay):
 					self.bot.setFormatting(formatting)
 					return -1
 			
-				furtherInput = display.colorOverlay(self.parent,formatting['nc'])
+				furtherInput = overlay.colorOverlay(self.parent,formatting['nc'])
 				furtherInput.addKeys({'enter':enter})
 			#font face
 			elif me.it == 2:
@@ -376,7 +368,7 @@ class chatangoOverlay(display.mainOverlay):
 					self.bot.setFormatting(formatting)
 					return -1
 				
-				furtherInput = display.listOverlay(self.parent,FONT_FACES)
+				furtherInput = overlay.listOverlay(self.parent,FONT_FACES)
 				furtherInput.addKeys({'enter':enter})
 				furtherInput.it = int(formatting['ff'])
 			#ask for font size
@@ -386,7 +378,7 @@ class chatangoOverlay(display.mainOverlay):
 					self.bot.setFormatting(formatting)
 					return -1
 					
-				furtherInput = display.listOverlay(self.parent,[i for i in map(str,FONT_SIZES)])
+				furtherInput = overlay.listOverlay(self.parent,[i for i in map(str,FONT_SIZES)])
 				furtherInput.addKeys({'enter':enter})
 				furtherInput.it = FONT_SIZES.index(formatting['fz'])
 			#insurance
@@ -395,7 +387,7 @@ class chatangoOverlay(display.mainOverlay):
 			furtherInput.add()
 			#set formatting, even if changes didn't occur
 			
-		box = display.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
+		box = overlay.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
 		box.addKeys({
 			'enter':select,
 		})
@@ -419,7 +411,7 @@ class chatangoOverlay(display.mainOverlay):
 			col = i and i+12 or 16
 			string.insertColor(-1,col)
 						
-		box = display.listOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
+		box = overlay.listOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
 		box.addKeys({
 			'enter':select
 			,'tab':	ontab
@@ -458,7 +450,7 @@ class chatangoOverlay(display.mainOverlay):
 
 	def joingroup(self):
 		'''Join a new group'''
-		inp = display.inputOverlay(self.parent,"Enter group name")
+		inp = overlay.inputOverlay(self.parent,"Enter group name")
 		inp.add()
 		inp.runOnDone(lambda x: self.clearlines() or self.bot.changeGroup(x))
 
@@ -489,25 +481,25 @@ def getColor(name,init = 6,split = 109,rot = 6):
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-@display.colorize
+@overlay.colorize
 def defaultcolor(msg,*args):
 	msg.default = getColor(args[0])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
 LINE_RE = re.compile(r'^([!#]?\w+?: )?(@\w* )*(.+)$',re.MULTILINE)
-@display.colorize
+@overlay.colorize
 def greentext(msg,*args):
 	#match group 3 (the message sans leading replies)
 	msg.colorByRegex(LINE_RE,lambda x: x[0] == '>' and 11 or None,3,'')
 
 #color links white
-@display.colorize
+@overlay.colorize
 def link(msg,*args):
-	msg.colorByRegex(linkopen.LINK_RE,display.rawNum(0),1)
+	msg.colorByRegex(linkopen.LINK_RE,overlay.rawNum(0),1)
 
 #color replies by the color of the replier
 REPLY_RE = re.compile(r"@\w+?\b")
-@display.colorize
+@overlay.colorize
 def names(msg,*args):
 	def check(group):
 		name = group[1:].lower()	#sans the @
@@ -518,12 +510,12 @@ def names(msg,*args):
 
 #underline quotes
 QUOTE_RE = re.compile(r"`[^`]+`")
-@display.colorize
+@overlay.colorize
 def quotes(msg,*args):
 	msg.effectByRegex(QUOTE_RE,'underline')
 		
 #draw replies, history, and channel
-@display.colorize
+@overlay.colorize
 def chatcolors(msg,*args):
 	args[1] and msg.addGlobalEffect('reverse')	#reply
 	args[2] and msg.addGlobalEffect('underline')	#history
@@ -531,28 +523,28 @@ def chatcolors(msg,*args):
 	(' ' + msg).insertColor(0,args[3]+12)	#channel
 
 #COMMANDS-----------------------------------------------------------------------------------------------
-@display.command('ignore')
+@overlay.command('ignore')
 def ignore(parent,arglist):
-	global ignores
+	global chatbot,ignores
 	person = arglist[0]
 	if '@' == person[0]: person = person[1:]
 	if person in ignores: return
 	ignores.append(person)
-	parent.over.redolines()
+	chatbot.mainOverlay.redolines()
 
-@display.command('unignore')
+@overlay.command('unignore')
 def unignore(parent,arglist):
-	global ignores
+	global chatbot,ignores
 	person = arglist[0]
 	if '@' == person[0]: person = person[1:]
 	if person not in ignores: return
 	ignores.pop(ignores.index(person))
-	parent.over.redolines()
+	chatbot.mainOverlay.redolines()
 
-@display.command('keys')
+@overlay.command('keys')
 def listkeys(parent,args):
-	'''Get list of mainOverlay'''
-	keysList = display.listOverlay(parent,[])
+	'''Get list of the chatbot's keys'''
+	keysList = overlay.listOverlay(parent,dir(chatbot.mainOverlay))
 	keysList.addKeys({
 		'enter': lambda x: -1
 	})
@@ -562,14 +554,14 @@ def listkeys(parent,args):
 #FILTERS
 
 #filter filtered channels
-@display.filter
+@overlay.filter
 def channelfilter(*args):
 	try:
 		return filtered_channels[args[3]]
 	except:
 		return True
 
-@display.filter
+@overlay.filter
 def ignorefilter(*args):
 	try:
 		return args[0] in ignores
