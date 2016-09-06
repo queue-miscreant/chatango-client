@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.28
+Version 6.283
 --------------------------
 
 A CLI application written in python with curses input and ANSI escape-colored output.   
@@ -15,7 +15,7 @@ My custom script: https://puu.sh/qu6w1/84c4e26f77.py
 Requires livestreamer, youtube-dl, and xclip, but if you don't already have
 these, seriously consider installing them  
 
-If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
+If you want to extend the client somehow, consider looking at the [docs](DOCS.md) (currently out-of-date)
 
 FEATURES:
 --------------------------
@@ -35,7 +35,7 @@ FEATURES:
 DEPENDENCIES
 --------------------------
 * Python 3
-* Curses (You probably already have this)  
+* Curses (But if you don't have either of these things, I don't know what to tell you)
 ### Technically these are optional since you can change how they open  
 * Feh image viewer
 * MPV
@@ -44,11 +44,31 @@ TODO
 -------------------------
 ### Chatango client-side  
 Checking login success better
-Better (global) tabbing interface
 In-client relogging
 
 CHANGELOG
 =========================
+## v6.283	*2016/9/5*
+* Made all input (i.e. in mainOverlay's and inputOverlay's) draw in the same location.
+	* This introduces the need for a new subclass of overlay: textOverlay
+	* textOverlays have the field `text` attached to them. 
+	* They push and pop to a stack of scrollables in main
+* Re-renamed the modules in package client
+	* client.overlay contains the main code, client.display contains disp
+* At some point, moved DIM_X and DIM_Y to (overlay.)main.x and main.y
+* All overlays have an instance of main as a parent (not just commandOverlay, etc)
+* Handled inheritance of overlays much better
+	* Something something methods something something resize (NOT \_resize)
+	* Add overlays with add() and remove with remove(). Do both in succession with swap()
+	* This isn't safe if the overlay calling overlay isn't on "top"
+* Moved blurb erasing and time printing to mainOverlay
+* chatango.py now extends the mainOverlay by defining a new instance, not injectively onto class definitions
+* New prefix-based tabbing.
+	* /->tab now autocompletes commands (regardless of which overlay)
+	*  @->tab for room members
+* Probably some other changes I'm forgetting
+* Update custom.py if you use it
+
 ## v6.28	*2016/8/11*
 * Lods of ebug fixes (Prob'ly)
 * Merged client.coloring and client.formatting into client.termform

@@ -232,6 +232,7 @@ class chatangoOverlay(overlay.mainOverlay):
 		overlay.mainOverlay.__init__(self,parent)
 		self.bot = bot
 		self.addKeys({	'enter':	self.onenter
+						,'a-enter':	self.onaltenter
 						,'tab':		self.ontab
 						,'f2':		self.linklist
 						,'f3':		self.F3
@@ -254,13 +255,13 @@ class chatangoOverlay(overlay.mainOverlay):
 					for i in alllinks:
 						linkopen.open_link(self.parent,i)
 				if len(alllinks) > 1:
-					self.parent.msgSystem('Really open %d links? (y/n)'%\
+					self.msgSystem('Really open %d links? (y/n)'%\
 						len(alllinks))
 					overlay.confirmOverlay(self.parent,openall).add()
 				else:
 					openall()
 			except Exception: pass
-			return 1
+			return
 		text = str(self.text)
 		#if it's not just spaces
 		if text.count(" ") != len(text):
@@ -269,6 +270,25 @@ class chatangoOverlay(overlay.mainOverlay):
 			self.history.append(text)
 			#call the send
 			self.bot.tryPost(text)
+	
+	def onaltenter(self):
+		'''Open link and don't stop selecting'''
+		if self.isselecting():
+			try:
+				message = self.getselect()
+				msg = client.decolor(message[0])+' '
+				alllinks = linkopen.LINK_RE.findall(msg)
+				def openall():
+					for i in alllinks:
+						linkopen.open_link(self.parent,i)
+				if len(alllinks) > 1:
+					self.parent.msgSystem('Really open %d links? (y/n)'%\
+						len(alllinks))
+					overlay.confirmOverlay(self.parent,openall).add()
+				else:
+					openall()
+			except Exception as exc: client.dbmsg(exc)
+		return 1
 
 	def ontab(self):
 		'''Reply to selected message or complete member name'''

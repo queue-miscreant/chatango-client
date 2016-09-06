@@ -230,14 +230,20 @@ class overlayBase:
 		'''a- (alt keys), or curses keynames.'''
 		for i,j in newFunctions.items():
 			if isinstance(i,str):
-				if i.lower().find('a-') == 0:
+				if not i.lower().find('a-'):
 					i = i[2:]
-					if i in _VALID_KEYNAMES[i]:
+					if i in _VALID_KEYNAMES:
 						i = _VALID_KEYNAMES[i]
+						if areMethods:
+							self._altkeys[i] = j
+						else:
+							self._altkeys[i] = lambda: j(self)
+						continue
 					else: raise KeyException('key alt-%s invalid'%i)
-				try:
-					i = _VALID_KEYNAMES[i]
-				except: raise KeyException('key %s not defined'%i)
+				else:
+					try:
+						i = _VALID_KEYNAMES[i]
+					except: raise KeyException('key %s not defined'%i)
 			if areMethods:
 				self._keys[i] = staticize(j)
 			else:
