@@ -214,7 +214,8 @@ class chat_bot(chlib.ConnectionManager):
 	
 	#pull members when any of these are invoked
 	def recvparticipant(self, group, bit, user, uid):
-		self.members = group.users
+		self.members.clear() 		#preserve the current list reference
+		self.members.extend(group.users)
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 		if user == "none": user = "anon"
 		bit = (bit == "1" and 1) or -1
@@ -222,7 +223,8 @@ class chat_bot(chlib.ConnectionManager):
 		self.mainOverlay.parent.newBlurb("%s has %s" % (user,bit-1 and "left" or "joined"))
 	
 	def recvg_participants(self,group):
-		self.members = group.users
+		self.members.clear()
+		self.members.extend(group.users)
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 
 #-------------------------------------------------------------------------------------------------------
