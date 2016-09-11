@@ -11,7 +11,7 @@ or especially have a million files in ~/
 
 This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses wcwidth from <https://github.com/jquast/wcwidth>.
 
-My custom script: https://puu.sh/qu6w1/84c4e26f77.py
+My custom script: https://puu.sh/r82XW/51a9d5fd57.py
 Requires livestreamer, youtube-dl, and xclip, but if you don't already have
 these, seriously consider installing them  
 
