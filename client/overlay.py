@@ -448,8 +448,8 @@ class inputOverlay(textOverlay):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
 		self.text.backspace()
-	def _resize(self,newx,newy):
-		textOverlay._resize(self,newx,newy)
+	def resize(self,newx,newy):
+		textOverlay.resize(self,newx,newy)
 		self._prompts,self._numprompts = breaklines(self._prompt,newx-2)
 	def _finish(self):
 		'''Regular stop (i.e, with enter)'''
@@ -578,8 +578,8 @@ class mainOverlay(textOverlay):
 			return
 		#allow unicode input
 		return textOverlay._input(self,chars)
-	def _resize(self,newx,newy):
-		textOverlay._resize(self,newx,newy)
+	def resize(self,newx,newy):
+		textOverlay.resize(self,newx,newy)
 		if newx != self.parent.x:
 			self.redolines(newx,newy)
 	def _post(self):
