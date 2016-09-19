@@ -257,12 +257,11 @@ class chatangoOverlay(overlay.mainOverlay):
 					for i in alllinks:
 						linkopen.open_link(self.parent,i)
 				if len(alllinks) > 1:
-					self.msgSystem('Really open %d links? (y/n)'%\
-						len(alllinks))
-					overlay.confirmOverlay(self.parent,openall).add()
+					overlay.confirmOverlay(self.parent,'Really open %d links? (y/n)'%\
+						len(alllinks),openall).add()
 				else:
 					openall()
-			except Exception: pass
+			except Exception as exc: client.dbmsg(exc)
 			return
 		text = str(self.text)
 		#if it's not just spaces
