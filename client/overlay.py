@@ -543,11 +543,12 @@ class escapeOverlay(overlayBase):
 class confirmOverlay(overlayBase):
 	'''Overlay to confirm selection confirm y/n (no slash)'''
 	replace = False
-	def __init__(self,parent,confirmfunc):
+	def __init__(self,parent,prompt,confirmfunc):
 		overlayBase.__init__(self,parent)
-		self._keys.update({
-			ord('y'):	lambda x: confirmfunc() or -1
-			,ord('n'):	quitlambda
+		self.parent.holdBlurb(prompt)
+		self._keys.update({ #run these in order
+			ord('y'):	lambda x: confirmfunc() or self.parent.releaseBlurb() or -1
+			,ord('n'):	lambda x: self.parent.releaseBlurb() or -1
 		})
 
 class mainOverlay(textOverlay):
@@ -843,12 +844,24 @@ class main:
 		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
 	def _printblurb(self,string):
 		'''Blurb display backend'''
+		if self.last < 0: return
 		self.last = time.time()
 		if not self.candisplay: return
 		_moveCursor(self.y+2)
 		if strlen(string) > self.x:
 			string = string[:columnslice(string,self.x-3)]+'...'
 		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
+	def _holdblurb(self,string):
+		'''Hold blurb backend'''
+		if self.last < 0: return
+		self.last = -1
+		_moveCursor(self.y+2)
+		if strlen(string) > self.x:
+			string = string[:columnslice(string,self.x-3)]+'...'
+		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
+	def _releaseblurb(self):
+		'''Release blurb backend'''
+		self.last = time.time()
 	def _updateinfo(self,right,left):
 		'''Info window backend'''
 		if not self.candisplay: return
@@ -870,6 +883,13 @@ class main:
 	def newBlurb(self,message = ""):
 		'''Add blurb. Use in conjunction with mainOverlay to erase'''
 		self._schedule(self._printblurb,message)
+	def holdBlurb(self,string):
+		'''Hold blurb. Sets self.last to -1, making newBlurb not draw'''
+		self._holdblurb(string)
+	def releaseBlurb(self):
+		'''Release blurb. Sets self.last to a valid time, making newBlurb start drawing again'''
+		self._releaseblurb()
+		self._printblurb("")
 	def updateinfo(self,right = None,left = None):
 		'''Update screen bottom'''
 		self._schedule(self._updateinfo,right,left)
