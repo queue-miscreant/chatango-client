@@ -210,7 +210,7 @@ class overlayBase:
 	def display(self,lines):
 		'''Overridable function. Modify lines by address (i.e lines[value]) to display from main'''
 		pass
-	def resize(self):
+	def resize(self,newx,newy):
 		'''Overridable function. On resize event, all added overlays have this called'''
 		pass
 	#frontend methods----------------------------
@@ -341,7 +341,7 @@ class listOverlay(overlayBase):
 		for i,value in enumerate(subList):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
-			row = (len(value) > maxx) and value[:max(half-3,1)] + "..." + value[-half:] or value
+			row = (len(value) > maxx) and value[:max(half,1)] + "..." + value[min(-half+3,-1):] or value
 			row = box.just(row)
 			if value and self._drawOther is not None:
 				rowcol = coloring(row)
