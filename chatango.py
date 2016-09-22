@@ -27,8 +27,6 @@ import os
 chatbot = None
 write_to_save = 1
 SAVE_PATH = os.path.expanduser('~/.chatango_creds')
-XML_TAGS_RE = re.compile("(<[^<>]*?>)")
-THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 #constants for chatango
 FONT_FACES=	["Arial"
 			,"Comic Sans"
@@ -41,14 +39,6 @@ FONT_FACES=	["Arial"
 			,"Typewriter"
 		  ]
 FONT_SIZES = [9,10,11,12,13,14]
-HTML_CODES = [
-	["&#39;","'"],
-	["&gt;",">"],
-	["&lt;","<"],
-	["&quot;",'"'],
-	["&apos;","'"],
-	["&amp;",'&'],
-]
 
 #ignore list
 #needed here so that commands can access it
@@ -75,21 +65,6 @@ def sendToFile(jsonData,filePath = SAVE_PATH):
 	out.write(encoder.encode(jsonData)) 
 #the normal chatango library just takes out HTML without formatting it
 #so I'm adding <br> to \n. This further gets converted by the client into multiple lines
-def formatRaw(raw):
-	if len(raw) == 0: return raw
-	#replace <br>s with actual line breaks
-	#otherwise, remove html
-	for i in XML_TAGS_RE.findall(raw):
-		raw = raw.replace(i,i == "<br/>" and "\n" or "")
-	for i in HTML_CODES:
-		raw = raw.replace(i[0],i[1])
-	#remove trailing \n's
-	while len(raw) and raw[-1] == "\n":
-		raw = raw[:-1]
-	#thumbnail fix in chatango
-	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2",raw)[0]
-
-	return raw.replace("&nbsp;"," ")
 
 #bot for interacting with chat
 class chat_bot(chlib.ConnectionManager):
@@ -108,7 +83,6 @@ class chat_bot(chlib.ConnectionManager):
 			#skip if supplied
 			if self.creds.get(i):
 				continue
-			client.dbmsg(i,"needed");
 			inp = overlay.inputOverlay(self.mainOverlay.parent,"Enter your " + ['username','password','room name'][num], num == 1,True)
 			inp.add()
 			self.creds[i] = inp.waitForInput()
@@ -161,10 +135,7 @@ class chat_bot(chlib.ConnectionManager):
 	def tryPost(self,text):
 		try:
 			group = getattr(self,'joinedGroup')
-			#replace HTML equivalents
-			for i in reversed(HTML_CODES):
-				text = text.replace(i[1],i[0])
-			group.sendPost(text.replace("\n","<br/>"),self.channel)
+			group.sendPost(text,self.channel)
 		except Exception as exc:
 			overlay.dbmsg(exc)
 	
@@ -189,16 +160,18 @@ class chat_bot(chlib.ConnectionManager):
 		
 	#on message
 	def recvPost(self, group, user, post, ishistory = 0):
-		if user not in self.members:
-			self.members.append(user)
+		#double check for anons
+		if not ishistory and user not in self.members:
+			group.uArray[post.uid] = post.user
+			self.members.append(post.user.lower())
 		me = group.user
 		if me[0] in '!#': me = me[1:]
 		#and is short-circuited
-		isreply = me is not None and ("@"+me.lower() in post.raw.lower())
+		isreply = me is not None and ("@"+me.lower() in post.post.lower())
 		#sound bell
 		if isreply and not ishistory: overlay.soundBell()
 		#format as ' user: message'
-		msg = '%s: %s'%(user,formatRaw(post.raw))
+		msg = '%s: %s'%(user,post.post)
 		linkopen.parseLinks(msg)
 		self.mainOverlay.msgPost(msg, post.user, isreply, ishistory, post.channel)
 		#extra arguments. use in colorizers
@@ -213,19 +186,20 @@ class chat_bot(chlib.ConnectionManager):
 		self.mainOverlay.msgSystem("You are banned for %d seconds"%(60*mins+secs))
 	
 	#pull members when any of these are invoked
-	def recvparticipant(self, group, bit, user, uid):
-		self.members.clear() 		#preserve the current list reference
-		self.members.extend(group.users)
-		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
-		if user == "none": user = "anon"
-		bit = (bit == "1" and 1) or -1
-		#notifications
-		self.mainOverlay.parent.newBlurb("%s has %s" % (user,bit-1 and "left" or "joined"))
-	
 	def recvg_participants(self,group):
-		self.members.clear()
-		self.members.extend(group.users)
+		self.members.clear()		#preserve the current list reference for tabber
+		self.members.extend(group.uArray.values())
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
+
+	def recvparticipant(self, group, bit, user, uid):
+		if user == "none":
+			user = "anon"
+		else:
+			self.members.clear()
+			self.members.extend(group.uArray.values())
+		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
+		#notifications
+		self.mainOverlay.parent.newBlurb("%s has %s" % (user,(bit=="1") and "joined" or "left"))
 
 #-------------------------------------------------------------------------------------------------------
 #KEYS

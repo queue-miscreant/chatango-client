@@ -58,7 +58,6 @@ for i in range(32):
 	_VALID_KEYNAMES['^%s'%chr(i+64).lower()] = i
 for i in range(32,256):
 	_VALID_KEYNAMES[chr(i)] = i
-del i
 
 class KeyException(Exception):
 	'''Exception for keys-related errors in client.display'''
@@ -172,7 +171,7 @@ def staticize(func,*args):
 	return ret
 
 class overlayBase:
-	'''An overlay is a class that redirects input and modifies a list of strings'''
+	'''An overlay is a class that redirects input and modifies a list of (output) strings'''
 	def __init__(self,parent):
 		self.parent = parent
 		self._keys =	{27:	self._callalt
