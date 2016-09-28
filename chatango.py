@@ -6,13 +6,21 @@ Usage:
 	chatango [options]:	Start the chatango client. 
 
 Options:
-	-c uname pwd:	Input credentials
+	-c user pass:	Input credentials
 	-g groupname:	Input group name
 	-r:				Relog
 	-nc:			No custom script import
 	--help:			Display this page
 '''
 #TODO		Something with checking premature group removes
+#TODO		read more into how cArray works
+
+#			create anonNames (which also contains tempnames)
+
+#			mess about members to make it sort itself based on last message
+#				this will resolve names by recency (@ab -> resolves to @abz over @abc if abz spoke more recently)
+
+#TODO		iterate over argv
 
 import sys
 import client
@@ -27,28 +35,23 @@ import os
 chatbot = None
 write_to_save = 1
 SAVE_PATH = os.path.expanduser('~/.chatango_creds')
-XML_TAGS_RE = re.compile("(<[^<>]*?>)")
-THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 #constants for chatango
-FONT_FACES=	["Arial"
-			,"Comic Sans"
-			,"Georgia"
-			,"Handwriting"
-			,"Impact"
-			,"Palatino"
-			,"Papyrus"
-			,"Times New Roman"
-			,"Typewriter"
-		  ]
+FONT_FACES = \
+	["Arial"
+	,"Comic Sans"
+	,"Georgia"
+	,"Handwriting"
+	,"Impact"
+	,"Palatino"
+	,"Papyrus"
+	,"Times New Roman"
+	,"Typewriter" ]
 FONT_SIZES = [9,10,11,12,13,14]
-HTML_CODES = [
-	["&#39;","'"],
-	["&gt;",">"],
-	["&lt;","<"],
-	["&quot;",'"'],
-	["&apos;","'"],
-	["&amp;",'&'],
-]
+DEFAULT_FORMATTING = \
+	["DD9211" #font color
+	,"232323" #name color
+	,"0"	  #font face
+	,12]	  #font size
 
 #ignore list
 #needed here so that commands can access it
@@ -73,26 +76,11 @@ def sendToFile(jsonData,filePath = SAVE_PATH):
 	encoder = json.JSONEncoder(ensure_ascii=False)
 	out = open(filePath,'w')
 	out.write(encoder.encode(jsonData)) 
-#the normal chatango library just takes out HTML without formatting it
-#so I'm adding <br> to \n. This further gets converted by the client into multiple lines
-def formatRaw(raw):
-	if len(raw) == 0: return raw
-	#replace <br>s with actual line breaks
-	#otherwise, remove html
-	for i in XML_TAGS_RE.findall(raw):
-		raw = raw.replace(i,i == "<br/>" and "\n" or "")
-	for i in HTML_CODES:
-		raw = raw.replace(i[0],i[1])
-	#remove trailing \n's
-	while len(raw) and raw[-1] == "\n":
-		raw = raw[:-1]
-	#thumbnail fix in chatango
-	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2",raw)[0]
-
-	return raw.replace("&nbsp;"," ")
 
 #bot for interacting with chat
 class chat_bot(chlib.ConnectionManager):
+	anon_names = []		#and tempnames
+	user_names = []		#list of people
 	members = []
 
 	def __init__(self,creds,parent):
@@ -101,19 +89,10 @@ class chat_bot(chlib.ConnectionManager):
 		self.isinited = 0
 		self.mainOverlay = chatangoOverlay(parent,self)
 		self.mainOverlay.add()
-		client.tabber("@",self.members)
+		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
+		client.tabber("@",self.members,lambda x: x[0] in "!#" and x[1:] or x)
 		
 	def main(self):
-		for num,i in enumerate(['user','passwd','room']):
-			#skip if supplied
-			if self.creds.get(i):
-				continue
-			client.dbmsg(i,"needed");
-			inp = overlay.inputOverlay(self.mainOverlay.parent,"Enter your " + ['username','password','room name'][num], num == 1,True)
-			inp.add()
-			self.creds[i] = inp.waitForInput()
-			if not self.mainOverlay.parent.active: return
-
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, self.creds['user'], self.creds['passwd'], False)
 		self.isinited = 1
@@ -131,7 +110,7 @@ class chat_bot(chlib.ConnectionManager):
 	
 	def reconnect(self):
 		if not self.isinited: return
-		self.removeGroup(self.creds.get('room'))
+		self.stop()
 		self.start()
 	
 	def changeGroup(self,newgroup):
@@ -145,26 +124,17 @@ class chat_bot(chlib.ConnectionManager):
 		if newFormat is not None:
 			self.creds['formatting'] = newFormat
 		
-		if self.creds.get('formatting') is None:
-			self.creds['formatting'] = {
-			'fc': "DD9211"
-			,'nc': "232323"
-			,'ff': "0"
-			,'fz': 12}
-		group.setFontColor(self.creds['formatting']['fc'])
-		group.setNameColor(self.creds['formatting']['nc'])
-		group.setFontFace(self.creds['formatting']['ff'])
-		group.setFontSize(self.creds['formatting']['fz'])
+		group.setFontColor(self.creds['formatting'][0])
+		group.setNameColor(self.creds['formatting'][1])
+		group.setFontFace(self.creds['formatting'][2])
+		group.setFontSize(self.creds['formatting'][3])
 		
 		sendToFile(self.creds)
 	
 	def tryPost(self,text):
 		try:
 			group = getattr(self,'joinedGroup')
-			#replace HTML equivalents
-			for i in reversed(HTML_CODES):
-				text = text.replace(i[1],i[0])
-			group.sendPost(text.replace("\n","<br/>"),self.channel)
+			group.sendPost(text,self.channel)
 		except Exception as exc:
 			overlay.dbmsg(exc)
 	
@@ -189,16 +159,18 @@ class chat_bot(chlib.ConnectionManager):
 		
 	#on message
 	def recvPost(self, group, user, post, ishistory = 0):
-		if user not in self.members:
-			self.members.append(user)
+		#double check for anons
+		if not ishistory and user not in self.members:
+			group.uArray[post.uid] = post.user
+			self.members.append(post.user.lower())
 		me = group.user
 		if me[0] in '!#': me = me[1:]
 		#and is short-circuited
-		isreply = me is not None and ("@"+me.lower() in post.raw.lower())
+		isreply = me is not None and ("@"+me.lower() in post.post.lower())
 		#sound bell
 		if isreply and not ishistory: overlay.soundBell()
 		#format as ' user: message'
-		msg = '%s: %s'%(user,formatRaw(post.raw))
+		msg = '%s: %s'%(user,post.post)
 		linkopen.parseLinks(msg)
 		self.mainOverlay.msgPost(msg, post.user, isreply, ishistory, post.channel)
 		#extra arguments. use in colorizers
@@ -213,17 +185,25 @@ class chat_bot(chlib.ConnectionManager):
 		self.mainOverlay.msgSystem("You are banned for %d seconds"%(60*mins+secs))
 	
 	#pull members when any of these are invoked
-	def recvparticipant(self, group, bit, user, uid):
-		self.members = group.users
-		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
-		if user == "none": user = "anon"
-		bit = (bit == "1" and 1) or -1
-		#notifications
-		self.mainOverlay.parent.newBlurb("%s has %s" % (user,bit-1 and "left" or "joined"))
-	
 	def recvg_participants(self,group):
-		self.members = group.users
+		#self.members.append(
+		self.members.clear()		#preserve the current list reference for tabber
+		self.members.extend(group.uArray.values())
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
+
+	def recvparticipant(self, group, bit, user, uid):
+		if user == "none":
+			user = "anon"
+		else:
+#			self.members.clear()
+#			self.members.extend(group.uArray.values())
+			if (bit == "1"):
+				self.members.append(user)
+				self.user_names.append(user)
+
+		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
+		#notifications
+		self.mainOverlay.parent.newBlurb("%s has %s" % (user,(bit=="1") and "joined" or "left"))
 
 #-------------------------------------------------------------------------------------------------------
 #KEYS
@@ -232,6 +212,7 @@ class chatangoOverlay(overlay.mainOverlay):
 		overlay.mainOverlay.__init__(self,parent)
 		self.bot = bot
 		self.addKeys({	'enter':	self.onenter
+						,'a-enter':	self.onaltenter
 						,'tab':		self.ontab
 						,'f2':		self.linklist
 						,'f3':		self.F3
@@ -254,13 +235,12 @@ class chatangoOverlay(overlay.mainOverlay):
 					for i in alllinks:
 						linkopen.open_link(self.parent,i)
 				if len(alllinks) > 1:
-					self.parent.msgSystem('Really open %d links? (y/n)'%\
-						len(alllinks))
-					overlay.confirmOverlay(self.parent,openall).add()
+					overlay.confirmOverlay(self.parent,'Really open %d links? (y/n)'%\
+						len(alllinks),openall).add()
 				else:
 					openall()
-			except Exception: pass
-			return 1
+			except Exception as exc: client.dbmsg(exc)
+			return
 		text = str(self.text)
 		#if it's not just spaces
 		if text.count(" ") != len(text):
@@ -269,6 +249,25 @@ class chatangoOverlay(overlay.mainOverlay):
 			self.history.append(text)
 			#call the send
 			self.bot.tryPost(text)
+	
+	def onaltenter(self):
+		'''Open link and don't stop selecting'''
+		if self.isselecting():
+			try:
+				message = self.getselect()
+				msg = client.decolor(message[0])+' '
+				alllinks = linkopen.LINK_RE.findall(msg)
+				def openall():
+					for i in alllinks:
+						linkopen.open_link(self.parent,i)
+				if len(alllinks) > 1:
+					self.parent.msgSystem('Really open %d links? (y/n)'%\
+						len(alllinks))
+					overlay.confirmOverlay(self.parent,openall).add()
+				else:
+					openall()
+			except Exception as exc: client.dbmsg(exc)
+		return 1
 
 	def ontab(self):
 		'''Reply to selected message or complete member name'''
@@ -346,41 +345,41 @@ class chatangoOverlay(overlay.mainOverlay):
 			#ask for font color
 			if me.it == 0:
 				def enter(me):
-					formatting['fc'] = me.getHex()
+					formatting[0] = me.getHex()
 					self.bot.setFormatting(formatting)
 					return -1
 
-				furtherInput = overlay.colorOverlay(self.parent,formatting['fc'])
+				furtherInput = overlay.colorOverlay(self.parent,formatting[0])
 				furtherInput.addKeys({'enter':enter})
 			#ask for name color
 			elif me.it == 1:
 				def enter(me):
-					formatting['nc'] = me.getHex()
+					formatting[1] = me.getHex()
 					self.bot.setFormatting(formatting)
 					return -1
 			
-				furtherInput = overlay.colorOverlay(self.parent,formatting['nc'])
+				furtherInput = overlay.colorOverlay(self.parent,formatting[1])
 				furtherInput.addKeys({'enter':enter})
 			#font face
 			elif me.it == 2:
 				def enter(me):
-					formatting['ff'] = str(me.it)
+					formatting[2] = str(me.it)
 					self.bot.setFormatting(formatting)
 					return -1
 				
 				furtherInput = overlay.listOverlay(self.parent,FONT_FACES)
 				furtherInput.addKeys({'enter':enter})
-				furtherInput.it = int(formatting['ff'])
+				furtherInput.it = int(formatting[2])
 			#ask for font size
 			elif me.it == 3:
 				def enter(me):
-					formatting['fz'] = FONT_SIZES[me.it]
+					formatting[3] = FONT_SIZES[me.it]
 					self.bot.setFormatting(formatting)
 					return -1
 					
-				furtherInput = overlay.listOverlay(self.parent,[i for i in map(str,FONT_SIZES)])
+				furtherInput = overlay.listOverlay(self.parent,list(map(str,FONT_SIZES)))
 				furtherInput.addKeys({'enter':enter})
-				furtherInput.it = FONT_SIZES.index(formatting['fz'])
+				furtherInput.it = FONT_SIZES.index(formatting[3])
 			#insurance
 			if furtherInput is None: raise Exception("How is this error even possible?")
 			#add the overlay
@@ -570,11 +569,31 @@ def ignorefilter(*args):
 #-------------------------------------------------------------------------------------------------------
 
 def runClient(main,creds):
-	#initialize chat bot
+	#fill in credential holes
+	for num,i in enumerate(['user','passwd','room']):
+		#skip if supplied
+		if creds.get(i):
+			continue
+		inp = overlay.inputOverlay(main,"Enter your " + ['username','password','room name'][num], num == 1,True)
+		inp.add()
+		creds[i] = inp.waitForInput()
+		if not main.active: return
+	#fill in formatting hole
+	if creds.get('formatting') is None:
+		#letting the program write into the constant would be stupid
+		self.creds['formatting'] = []
+		for i in DEFAULT_FORMATTING:
+			self.creds['formatting'].append(i)
+	elif isinstance(creds['formatting'],dict):	#backward compatible
+		new = []
+		for i in ['fc','nc','ff','fz']:
+			new.append(creds['formatting'][i])
+		creds['formatting'] = new
+
 	global chatbot
+	#initialize chat bot
 	chatbot = chat_bot(creds,main)
-	#main.setbot(chatbot)
-	return chatbot.main
+	chatbot.main()
 
 if __name__ == '__main__':
 	if "--help" in sys.argv:
@@ -617,4 +636,5 @@ if __name__ == '__main__':
 	try:
 		client.start(runClient,creds)
 	finally:
-		chatbot.stop()
+		if chatbot is not None:
+			chatbot.stop()
