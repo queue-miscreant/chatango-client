@@ -46,13 +46,15 @@ _COLORS =	['\x1b[39;49m'	#Normal/Normal
 			,'\x1b[32;42m'	#green
 			,'\x1b[34;44m'	#blue
 			]
-_NUM_PREDEFINED = 5
+_NUM_PREDEFINED = len(_COLORS)
 #clear formatting
 CLEAR_FORMATTING = '\x1b[m'
 SELECTED = lambda x: _EFFECTS['reverse'][0] + x + CLEAR_FORMATTING
 CHAR_CURSOR = '\x1b[s'
 _INDENT_LEN = 4
 _INDENT_STR = "    " 
+#arbitrary number of characters a scrollable can have and not scroll
+MAX_NONSCROLL_WIDTH = 5
 
 class FormattingException(Exception):
 	'''Exception for client.termform'''
@@ -91,7 +93,7 @@ def decolor(string):
 	return new[0]
 
 class coloring:
-	'''Simple container for a string and default color'''
+	'''Container for a string and default color'''
 	def __init__(self,string,default=None):
 		self._str = string
 		self.default = default
@@ -118,7 +120,7 @@ class coloring:
 		#return amount added to string
 		return len(c)
 	def addGlobalEffect(self, effect):
-		'''Add effect to string (if test is true)'''
+		'''Add effect to string'''
 		effect = getEffect(effect)
 		self._str = effect[0] + self._str
 		#take all effect offs out
@@ -236,10 +238,13 @@ def breaklines(string,length):
 
 class scrollable:
 	'''Scrollable text input'''
-	def __init__(self,width,string = ""):
+	def __init__(self,width,string=''):
 		self._str = string
 		self._pos = 0
 		self._disp = 0
+		#nonscrolling characters
+		self._nonscroll = ''
+		self._nonscroll_width = 0
 		self._width = width
 		self.password = False;
 	def __repr__(self):
@@ -265,7 +270,7 @@ class scrollable:
 		#TIME TO ITERATE
 		escape,canbreak= 0,0
 		#initial position, column num, position in string
-		init,width,pos= 0,0,0
+		init,width,pos= 0,self._nonscroll_width,0
 		#_disp is never greater than _pos, and it's impossible for 
 		#"s" to not be in a control sequence, so this should be sound
 		while pos < len(text) or not canbreak:
@@ -283,7 +288,7 @@ class scrollable:
 				temp = False
 			pos += 1
 			escape = temp
-		return text[init:pos]
+		return self._nonscroll+text[init:pos]
 	#str-like frontends
 	def find(self,string,start=0,end=None):
 		'''Find up to cursor position'''
@@ -300,6 +305,7 @@ class scrollable:
 		lastSpace = self._str.rfind(" ",0,self._pos)
 		#if there is no lastspace, settle for 0
 		search = self._str[lastSpace+1:self._pos]
+		if lastSpace == -1: search = self._nonscroll + search
 		ret = tabber.complete(search)
 		if ret:
 			self.append(ret + " ")
@@ -309,11 +315,17 @@ class scrollable:
 		'''Since this class is meant to take a 'good' slice of a string,'''+\
 		''' It's useful to have this method when that slice is updated'''
 		pass
-	def setstr(self,new = None):
-		if new is None: return
+	def setstr(self,new):
 		self._str = new
 		self.end()
-	def setwidth(self,new = None):
+	def setnonscroll(self,new):
+		check = strlen(new)
+		if check > MAX_NONSCROLL_WIDTH:
+			new = new[:columnslice(new,MAX_NONSCROLL_WIDTH)]
+		self._nonscroll = new
+		self._nonscroll_width = min(check,MAX_NONSCROLL_WIDTH)
+		self._onchanged()
+	def setwidth(self,new):
 		if new is None: return
 		if new <= 0:
 			raise FormattingException()
@@ -379,20 +391,75 @@ class scrollable:
 class tabber:
 	'''Class for holding new tab-completers'''
 	prefixes = []			#list of prefixes to search for
+	fittinglambdas = []		#functions that take an incomplete argument and transform it to something in the list
 	suggestionlists = []	#list of (references to) lists for each prefix paradigm
-	def __init__(self,newPrefix,newList):
+	def __init__(self,newPrefix,newList,ignore=None):
 		'''Add a new tabbing method'''
 		self.prefixes.append(newPrefix)
 		self.suggestionlists.append(newList)
+		self.fittinglambdas.append(ignore)
 	
 	def complete(incomplete):
 		'''Find rest of a name in a list'''
-		#O(|prefixes|*|suggestionlists|)
+		#O(|prefixes|*|suggestionlists|), so n**2
 		for pno,prefix in enumerate(tabber.prefixes):
 			preflen = len(prefix)
 			if (incomplete[:preflen] == prefix):
+				istransformed = bool(callable(tabber.fittinglambdas[pno]))
+				search = incomplete[preflen:]
+				#search for the transformed search
 				for complete in list(tabber.suggestionlists[pno]):
-					if not complete.find(incomplete[preflen:]):	#in is bad practice
+					#run the transforming lambda
+					if istransformed: complete = tabber.fittinglambdas[pno](complete)
+					if not complete.find(search):	#in is bad practice
 						return complete[len(incomplete)-1:]
 				return ""
 		return ""
+
+class promoteList:
+	'''List class that allows promotion of elements to the front'''
+	def __init__(self,iterable = None):
+		self._list = list()
+		self._indices = dict()
+		self._len = 0
+		if iterable is not None:
+			for i in iterable:
+				self.append(i)
+	def __repr__(self):
+		return "promoteList({})".format(repr(self._list))
+	def __iter__(self):
+		return iter(self._list)
+	def __len__(self):
+		return self._len
+	
+	def includes(self,index):
+		'''O(1) version of 'in' keyword (which uses iter and thus, O(n))'''
+		return self._indices.get(index) is not None
+	def append(self,new):
+		'''Add an item to the list'''
+		self._list.append(new)
+		self._indices[new] = self._len
+		self._len += 1
+	def remove(self,old):
+		'''Remove an item from the list'''
+		if not self.includes(index):
+			raise IndexError("Index to remove not in list")
+		self._list.remove(old)
+		prevIndex = self._indices.pop(old)
+		while prevIndex < self._len:
+			self._indices[self._list[prevIndex]] = prevIndex
+			prevIndex += 1
+	def promote(self,index):
+		'''Promote index to the front of the list'''
+		if not self.includes(index):
+			raise IndexError("Index to promote not in list")
+		#promotion, what for?
+		prevPos = self._indices[index]
+		#increment every index before its current position
+		for i in range(prevPos):
+			self._indices[self._list[i]] += 1
+		self._indices[index] = 0
+		#complete the transaction by modifying the list
+		self._list.remove(index)
+		self._list.insert(0,index)
+
