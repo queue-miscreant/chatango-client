@@ -12,15 +12,15 @@ Options:
 	-nc:			No custom script import
 	--help:			Display this page
 '''
-#TODO		Something with checking premature group removes
-#TODO		read more into how cArray works
+#TODO	Something with checking premature group removes
+#TODO	read more into how cArray works
 
-#			create anonNames (which also contains tempnames)
+#		create anonNames (which also contains tempnames)
 
-#			mess about members to make it sort itself based on last message
-#				this will resolve names by recency (@ab -> resolves to @abz over @abc if abz spoke more recently)
+#		mess about members to make it sort itself based on last message
+#			this will resolve names by recency (@ab -> resolves to @abz over @abc if abz spoke more recently)
 
-#TODO		iterate over argv
+#TODO	iterate over argv
 
 import sys
 import client
@@ -79,24 +79,22 @@ def sendToFile(jsonData,filePath = SAVE_PATH):
 
 #bot for interacting with chat
 class chat_bot(chlib.ConnectionManager):
-	anon_names = []		#and tempnames
-	user_names = []		#list of people
-	members = []
+	members = client.promoteSet()
 
 	def __init__(self,creds,parent):
 		self.creds = creds
 		self.channel = 0
 		self.isinited = 0
+		self.joinedGroup = None
 		self.mainOverlay = chatangoOverlay(parent,self)
 		self.mainOverlay.add()
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
-		client.tabber("@",self.members,lambda x: x[0] in "!#" and x[1:] or x)
+		client.tabber("@",self.members)
 		
 	def main(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, self.creds['user'], self.creds['passwd'], False)
 		self.isinited = 1
-
 		chlib.ConnectionManager.main(self)
 
 	def start(self,*args):
@@ -132,11 +130,8 @@ class chat_bot(chlib.ConnectionManager):
 		sendToFile(self.creds)
 	
 	def tryPost(self,text):
-		try:
-			group = getattr(self,'joinedGroup')
-			group.sendPost(text,self.channel)
-		except Exception as exc:
-			overlay.dbmsg(exc)
+		if self.joinedGroup is None: return
+		self.joinedGroup.sendPost(text,self.channel)
 	
 	def recvinited(self, group):
 		self.mainOverlay.msgSystem("Connected to "+group.name)
@@ -160,9 +155,10 @@ class chat_bot(chlib.ConnectionManager):
 	#on message
 	def recvPost(self, group, user, post, ishistory = 0):
 		#double check for anons
-		if not ishistory and user not in self.members:
-			group.uArray[post.uid] = post.user
-			self.members.append(post.user.lower())
+		if not ishistory:
+			if not self.members.includes(user):
+				self.members.append(user)
+			self.members.promote(user)
 		me = group.user
 		if me[0] in '!#': me = me[1:]
 		#and is short-circuited
@@ -187,7 +183,7 @@ class chat_bot(chlib.ConnectionManager):
 	#pull members when any of these are invoked
 	def recvg_participants(self,group):
 		#self.members.append(
-		self.members.clear()		#preserve the current list reference for tabber
+#		self.members.clear()		#preserve the current list reference for tabber
 		self.members.extend(group.uArray.values())
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 
@@ -195,11 +191,9 @@ class chat_bot(chlib.ConnectionManager):
 		if user == "none":
 			user = "anon"
 		else:
-#			self.members.clear()
-#			self.members.extend(group.uArray.values())
 			if (bit == "1"):
-				self.members.append(user)
-				self.user_names.append(user)
+				if not self.members.includes(user):
+					self.members.append(user)
 
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 		#notifications
@@ -322,7 +316,9 @@ class chatangoOverlay(overlay.mainOverlay):
 				ignores.remove(current)
 			self.redolines()
 
-		dispList = {i:self.bot.members.count(i) for i in self.bot.members}
+		if self.bot.joinedGroup is None: return
+		dispList = [i for i in self.bot.joinedGroup.uArray.values()]
+		dispList = {i:dispList.count(i) for i in dispList}
 		dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
 		def drawIgnored(string,i):
 			if dispList[i].split(' ')[0] not in ignores: return
@@ -502,7 +498,7 @@ REPLY_RE = re.compile(r"@\w+?\b")
 def names(msg,*args):
 	def check(group):
 		name = group[1:].lower()	#sans the @
-		if name in chatbot.members:
+		if chatbot.members.includes(name):
 			return getColor(name)
 		return ''
 	msg.colorByRegex(REPLY_RE,check)

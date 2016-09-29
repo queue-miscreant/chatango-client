@@ -416,7 +416,7 @@ class tabber:
 				return ""
 		return ""
 
-class promoteList:
+class promoteSet:
 	'''List class that allows promotion of elements to the front'''
 	def __init__(self,iterable = None):
 		self._list = list()
@@ -437,9 +437,15 @@ class promoteList:
 		return self._indices.get(index) is not None
 	def append(self,new):
 		'''Add an item to the list'''
+		if self.includes(new):
+			raise IndexError("Index already in list")
 		self._list.append(new)
 		self._indices[new] = self._len
 		self._len += 1
+	def extend(self,iterable):
+		for i in iterable:
+			if not self.includes(i):
+				self.append(i)
 	def remove(self,old):
 		'''Remove an item from the list'''
 		if not self.includes(index):
@@ -462,4 +468,3 @@ class promoteList:
 		#complete the transaction by modifying the list
 		self._list.remove(index)
 		self._list.insert(0,index)
-

@@ -12,7 +12,9 @@
 #				1:	red
 #				2:	blue
 #				3:	both
-#MODIFIED 2016/8/8:	New protocol appears to be bauth as anon, then blogin. Changed Group.login during Digest.ok accordingly
+#MODIFIED 2016/8/8:		New protocol appears to be bauth as anon, then blogin. Changed Group.login during Digest.ok accordingly
+#MODIFIED 2016/9/22:	Anons can't change name color because chatango, compiled regexes, changed inline concats to formats, and
+#						improved some readability
 ################################
 
 ################################
@@ -27,6 +29,10 @@ import urllib.request
 import random
 import threading
 import queue
+
+POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1}|[a-fA-F0-9]{3}|[a-fA-F0-9]{4}|[a-fA-F0-9]{6})\/>)?(<f x([\d]{0}|[\d]{2})([0-9a-fA-F]{1}|[0-9a-fA-F]{3}|[0-9a-fA-F]{6})=\"([0-9a-zA-Z]*)\">)?")
+XML_TAG_RE = re.compile("(<.*?>)")
+THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 
 ################################
 #Get server number
@@ -58,8 +64,6 @@ class Generate:
 	def aid(n, uid):
 		'''Generate anon ID'''
 		n, uid = str(n).split(".")[0], str(uid)  # Fault-Tolerance
-		if '<' in n:
-			n = n[2:-2]
 		try:
 			if int(n) == 0 or len(n) < 4:
 				n = "3452"
@@ -85,6 +89,34 @@ class Generate:
 			return re.search("auth.chatango.com=(.*?);", auth).group(1)
 		except:
 			return None
+
+################################
+#XML deformatting
+################################
+
+HTML_CODES = [
+	["&#39;","'"],
+	["&gt;",">"],
+	["&lt;","<"],
+	["&quot;",'"'],
+	["&apos;","'"],
+	["&amp;",'&'],
+]
+def formatRaw(raw):
+	if len(raw) == 0: return raw
+	#replace <br>s with actual line breaks
+	#otherwise, remove html
+	for i in XML_TAG_RE.findall(raw):
+		raw = raw.replace(i,i == "<br/>" and "\n" or "")
+	for i in HTML_CODES:
+		raw = raw.replace(i[0],i[1])
+	#remove trailing \n's
+	while len(raw) and raw[-1] == "\n":
+		raw = raw[:-1]
+	#thumbnail fix in chatango
+	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2",raw)[0]
+
+	return raw.replace("&nbsp;"," ")
 
 ################################
 #Represents event objects
@@ -177,7 +209,7 @@ class Group(object):
 		self.chSocket.setblocking(True)
 		try:
 			if self.name != self.user:
-				self.chSocket.connect(("s"+str(self.snum)+".chatango.com", 443))
+				self.chSocket.connect(("s{}.chatango.com".format(self.snum), 443))
 				self.sendCmd("bauth", self.name, self.uid, self.user, self.password, firstcmd=True)
 			else:
 				self.chSocket.connect(("c1.chatango.com", 5222))
@@ -223,9 +255,9 @@ class Group(object):
 
 	def cleanPM(self, pm):
 		'''Clean's all PM XML'''
-		return re.sub("<(.*?)>", "", pm)
+		return XML_TAG_RE.sub("", pm)
 
-	def sendPost(self, post, channel = 0, html = True):
+	def sendPost(self, post, channel = 0, html = False):
 		'''Send a post to the group'''
 		#0 is white, 1 is red, 2 is blue, 3 is both
 		#make that into 0 is white, 1 is red, 8 is blue, 9 is both
@@ -233,9 +265,13 @@ class Group(object):
 		channel %= 16
 		channel = self.channel+((((channel&30)<<2)|(channel&17))<<8)
 		if not html:
-			post = post.replace("<", "&lt;").replace(">", "&gt;")
+			#replace HTML equivalents
+			for i in reversed(HTML_CODES):
+				post = post.replace(i[1],i[0])
+			post = post.replace("\n","<br/>")
 		if len(post) < 2700 and self.limited == 0:
-			self.sendCmd("bm","meme",str(channel),"<n"+self.nColor+"/><f x"+self.fSize+self.fColor+"=\""+self.fFace+"\">"+post)
+			self.sendCmd("bm","meme",str(channel),"<n{}/><f x{}{}=\"{}\">{}".format(self.nColor,
+				self.fSize, self.fColor, self.fFace, post))
 
 	def sendCmd(self, *args, firstcmd = False):
 		'''Send data to socket'''
@@ -260,8 +296,8 @@ class Group(object):
 	def login(self, user, password = None):
 		'''Login to an account or as a temporary user or anon'''
 		if user and password:
-			self.sendCmd("blogin", user, password) #user
 			self.user = user
+			self.sendCmd("blogin", user, password) #user
 		elif user:
 			self.user = "#" + user
 			self.sendCmd("blogin", user) #temporary user
@@ -290,6 +326,8 @@ class Group(object):
 
 	def setNameColor(self, nColor):
 		'''Set's a user's name color'''
+		#anons can't do this because of chatango
+		if self.user[0] == '!': return
 		self.nColor = nColor
 
 	def setFontColor(self, fColor):
@@ -483,20 +521,32 @@ class Digest(object):
 		group.limited = int(bites[2])
 
 	def b(self, group, bites):
-		tag = re.search("(<n([a-fA-F0-9]{1}|[a-fA-F0-9]{3}|[a-fA-F0-9]{4}|[a-fA-F0-9]{6})\/>)?(<f x([\d]{0}|[\d]{2})([0-9a-fA-F]{1}|[0-9a-fA-F]{3}|[0-9a-fA-F]{6})=\"([0-9a-zA-Z]*)\">)?", bites[10])
+		tag = POST_TAG_RE.search(bites[10])
 		if tag:
-			nColor = tag.group(1) if tag.group(1) else ""
-			fSize = tag.group(2) if tag.group(2) else ""
-			fColor = tag.group(3) if tag.group(3) else ""
-			fFace = tag.group(4) if tag.group(4) else "0"
+			nColor = tag.group(2) if tag.group(2) else ""
+			fSize = tag.group(4) if tag.group(1) else ""
+			fColor = tag.group(5) if tag.group(4) else ""
+			fFace = tag.group(6) if tag.group(3) else "0"
 		else:
 			nColor = ""
 			fSize = ""
 			fColor = ""
 			fFace = "0"
 		chval = (int(bites[8]) >> 8) % 16
-		group.pArray[bites[6]] = type("Post", (object,), {"group": group, "time": bites[1], "user": bites[2].lower() if bites[2] != '' else "#" + bites[3] if bites[3] != '' else "!anon" + Generate.aid(nColor, bites[4]) if nColor else "!anon" , "uid": bites[4], "unid": bites[5], "pnum": bites[6], "ip": bites[7], "channel":((chval>=8)<<1|chval%2), "post": re.sub("<(.*?)>", "", ":".join(bites[10:])).replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&#39;", "'").replace("&amp;", "&"), "raw": ":".join(bites[10:]),"nColor": nColor, "fSize": fSize, "fFace": fFace, "fColor": fColor})
-		
+		group.pArray[bites[6]] = type("Post", (object,),
+			{"group": group
+			,"time": bites[1]
+			,"user": bites[2].lower() if bites[2] != '' else "#" + bites[3] if bites[3] != '' else "!anon" + Generate.aid(nColor, bites[4]) if nColor else "!anon"
+			,"uid": bites[4]
+			,"unid": bites[5]
+			,"pnum": bites[6]
+			,"ip": bites[7]
+			,"channel":(chval&1|(chval&8)>>2)
+			,"post": formatRaw(":".join(bites[10:]))
+			,"nColor": nColor
+			,"fSize": fSize
+			,"fFace": fFace
+			,"fColor": fColor})
 
 	def u(self, group, bites):
 		post = group.pArray[bites[1]] if group.pArray.get(bites[1]) else None
@@ -695,7 +745,11 @@ class ConnectionManager(object):
 	def sendPM(self, user, pm):
 		'''Send's a PM'''
 		group = self.getGroup(self.user)
-		self.sendCmd("msg", user, "<n"+group.nColor+"/><m v=\"1\"><g xs0=\"0\"><g x"+group.fSize+"s"+group.fColor+"=\""+group.fFace+"\">"+pm+"</g></g></m>")
+		self.sendCmd("msg", user, "<n{}""/><m v=\"1\"><g xs0=\"0\"><g x{}s{}=\"{}\">{}</g></g></m>".format(group.nColor
+			,group.fSize
+			,group.fColor
+			,group.fFace
+			,pm))
 
 	def sendCmd(self, *args):
 		'''Send data to socket'''
