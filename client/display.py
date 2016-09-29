@@ -417,54 +417,47 @@ class tabber:
 		return ""
 
 class promoteSet:
-	'''List class that allows promotion of elements to the front'''
+	'''Set with ordering like a list, whose elements can be promoted to the front'''
 	def __init__(self,iterable = None):
 		self._list = list()
-		self._indices = dict()
-		self._len = 0
 		if iterable is not None:
 			for i in iterable:
 				self.append(i)
 	def __repr__(self):
-		return "promoteList({})".format(repr(self._list))
+		return "promoteSet({})".format(repr(self._list))
 	def __iter__(self):
 		return iter(self._list)
 	def __len__(self):
-		return self._len
+		return len(self._list)
 	
-	def includes(self,index):
-		'''O(1) version of 'in' keyword (which uses iter and thus, O(n))'''
-		return self._indices.get(index) is not None
 	def append(self,new):
 		'''Add an item to the list'''
-		if self.includes(new):
-			raise IndexError("Index already in list")
+		if new in self._list: return
 		self._list.append(new)
-		self._indices[new] = self._len
-		self._len += 1
 	def extend(self,iterable):
+		'''Append each element in iterable'''
 		for i in iterable:
-			if not self.includes(i):
-				self.append(i)
+			self.append(i)
 	def remove(self,old):
 		'''Remove an item from the list'''
-		if not self.includes(index):
-			raise IndexError("Index to remove not in list")
+		if index not in self._list: raise KeyError(old)
 		self._list.remove(old)
-		prevIndex = self._indices.pop(old)
-		while prevIndex < self._len:
-			self._indices[self._list[prevIndex]] = prevIndex
-			prevIndex += 1
 	def promote(self,index):
 		'''Promote index to the front of the list'''
-		if not self.includes(index):
-			raise IndexError("Index to promote not in list")
-		#promotion, what for?
-		prevPos = self._indices[index]
-		#increment every index before its current position
-		for i in range(prevPos):
-			self._indices[self._list[i]] += 1
-		self._indices[index] = 0
-		#complete the transaction by modifying the list
-		self._list.remove(index)
-		self._list.insert(0,index)
+		if len(self._list) < 2: return
+		i = 1
+		found = False
+		#look for the value
+		while i <= len(self._list):
+			if self._list[-i] == index:
+				found = True
+				break
+			i += 1
+		if not found: raise KeyError(index)
+		if i == len(self._list): return
+		#swap successive values
+		while i < len(self._list):
+			temp = self._list[-i-1] 
+			self._list[-i-1] = self._list[-i]
+			self._list[-i] = temp
+			i += 1

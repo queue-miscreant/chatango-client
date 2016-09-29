@@ -3,7 +3,10 @@
 '''
 cube's chatango client
 Usage:
-	chatango [options]:	Start the chatango client. 
+	python chatango.py [options]:
+	chatango [options]:
+
+	Start the chatango client. 
 
 Options:
 	-c user pass:	Input credentials
@@ -13,14 +16,8 @@ Options:
 	--help:			Display this page
 '''
 #TODO	Something with checking premature group removes
-#TODO	read more into how cArray works
-
-#		create anonNames (which also contains tempnames)
-
-#		mess about members to make it sort itself based on last message
-#			this will resolve names by recency (@ab -> resolves to @abz over @abc if abz spoke more recently)
-
-#TODO	iterate over argv
+#TODO	merge commandline creds with file
+#		create some vector of creds indices that can't be written to?
 
 import sys
 import client
@@ -34,6 +31,14 @@ import os
 
 chatbot = None
 write_to_save = 1
+#writability of keys of creds
+#1 = read only, 2 = write only, 3 = both
+creds_readwrite = {
+	 "user":	3
+	,"passwd":	3
+	,"room":	3
+	,"formatting":	3
+}
 SAVE_PATH = os.path.expanduser('~/.chatango_creds')
 #constants for chatango
 FONT_FACES = \
@@ -85,6 +90,7 @@ class chat_bot(chlib.ConnectionManager):
 		self.creds = creds
 		self.channel = 0
 		self.isinited = 0
+		self.me = None
 		self.joinedGroup = None
 		self.mainOverlay = chatangoOverlay(parent,self)
 		self.mainOverlay.add()
@@ -137,6 +143,8 @@ class chat_bot(chlib.ConnectionManager):
 		self.mainOverlay.msgSystem("Connected to "+group.name)
 		self.joinedGroup = group
 		self.setFormatting()
+		self.me = group.user
+		if self.me in "!#": self.me = self.me[1:]
 		#I modified the library to pull history messages, and put them in the group's message array
 		#this organizes them by time and pushes the message
 		past = group.pArray.values()
@@ -155,20 +163,18 @@ class chat_bot(chlib.ConnectionManager):
 	#on message
 	def recvPost(self, group, user, post, ishistory = 0):
 		#double check for anons
-		if not ishistory:
-			if not self.members.includes(user):
-				self.members.append(user)
-			self.members.promote(user)
-		me = group.user
-		if me[0] in '!#': me = me[1:]
+		if user[0] in '#!': user = user[1:]
+		if user not in self.members:
+			self.members.append(user.lower())
+		self.members.promote(user.lower())
 		#and is short-circuited
-		isreply = me is not None and ("@"+me.lower() in post.post.lower())
+		isreply = self.me is not None and ("@"+self.me.lower() in post.post.lower())
 		#sound bell
 		if isreply and not ishistory: overlay.soundBell()
 		#format as ' user: message'
-		msg = '%s: %s'%(user,post.post)
+		msg = '%s: %s'%(post.user,post.post)
 		linkopen.parseLinks(msg)
-		self.mainOverlay.msgPost(msg, post.user, isreply, ishistory, post.channel)
+		self.mainOverlay.msgPost(msg, user.lower(), isreply, ishistory, post.channel)
 		#extra arguments. use in colorizers
 
 	def recvshow_fw(self, group):
@@ -192,7 +198,7 @@ class chat_bot(chlib.ConnectionManager):
 			user = "anon"
 		else:
 			if (bit == "1"):
-				if not self.members.includes(user):
+				if user not in self.members:
 					self.members.append(user)
 
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
@@ -497,8 +503,8 @@ REPLY_RE = re.compile(r"@\w+?\b")
 @overlay.colorize
 def names(msg,*args):
 	def check(group):
-		name = group[1:].lower()	#sans the @
-		if chatbot.members.includes(name):
+		name = group.lower()[1:]
+		if name in chatbot.members:
 			return getColor(name)
 		return ''
 	msg.colorByRegex(REPLY_RE,check)
@@ -533,7 +539,7 @@ def unignore(parent,arglist):
 	person = arglist[0]
 	if '@' == person[0]: person = person[1:]
 	if person not in ignores: return
-	ignores.pop(ignores.index(person))
+	ignores.remove(person)
 	chatbot.mainOverlay.redolines()
 
 @overlay.command('keys')
@@ -568,8 +574,7 @@ def runClient(main,creds):
 	#fill in credential holes
 	for num,i in enumerate(['user','passwd','room']):
 		#skip if supplied
-		if creds.get(i):
-			continue
+		if creds.get(i) is not None: continue
 		inp = overlay.inputOverlay(main,"Enter your " + ['username','password','room name'][num], num == 1,True)
 		inp.add()
 		creds[i] = inp.waitForInput()
@@ -577,9 +582,9 @@ def runClient(main,creds):
 	#fill in formatting hole
 	if creds.get('formatting') is None:
 		#letting the program write into the constant would be stupid
-		self.creds['formatting'] = []
+		creds['formatting'] = []
 		for i in DEFAULT_FORMATTING:
-			self.creds['formatting'].append(i)
+			creds['formatting'].append(i)
 	elif isinstance(creds['formatting'],dict):	#backward compatible
 		new = []
 		for i in ['fc','nc','ff','fz']:
@@ -592,42 +597,68 @@ def runClient(main,creds):
 	chatbot.main()
 
 if __name__ == '__main__':
-	if "--help" in sys.argv:
-		print(__doc__)
-		sys.exit()
-	
 	creds = {}
-	if '-r' not in sys.argv:
+
+	readCredsFlag = True
+	importCustom = True
+	credsArgFlag = 0
+	groupArgFlag = 0
+	
+	for arg in sys.argv:
+		#if it's an argument
+		if arg[0] in "-":
+			#stop creds parsing
+			if credsArgFlag == 1:
+				creds['user'] = ''
+			if credsArgFlag <= 2:
+				creds['passwd'] = ''
+			if groupArgFlag:
+				raise Exception("Improper argument formatting: -g without argument")
+			credsArgFlag = 0
+			groupArgFlag = 0
+
+			if arg == "-c":			#creds inline
+				creds_readwrite['user'] = 0
+				creds_readwrite['passwd'] = 0
+				credsArgFlag = 1
+				continue	#next argument
+			elif arg == '-g':		#group inline
+				groupArgFlag = 1
+				continue
+			#arguments without subarguments
+			elif arg == "-r":		#relog
+				creds_readwrite['user'] = 2
+				creds_readwrite['passwd'] = 2
+				creds_readwrite['room'] = 2
+			elif arg == '-nc':		#no custom
+				importCustom = False
+			elif arg == '--help':	#help
+				print(__doc__)
+				sys.exit()
+			
+		if credsArgFlag:			#parse -c
+			creds[ ['user','passwd'][credsArgFlag-1] ] = arg
+			credsArgFlag = (credsArgFlag + 1) % 3
+
+		if groupArgFlag:			#parse -g
+			creds['room'] = arg
+			groupArgFlag = 0
+
+	if credsArgFlag >= 1:	#null name means anon
+		creds['user'] = ''
+	elif credsArgFlag == 2:	#null password means temporary name
+		creds['passwd'] = ''
+	if groupArgFlag:
+		raise Exception("Improper argument formatting: -g without argument")
+
+	if readCredsFlag:
 		creds = readFromFile()
-	else:
-		write_to_save = False
 
-	formatting = creds.get('formatting')
-	formatting = formatting == {} and None or formatting
-
-	#0th arg is the program, -c is at minimum the first arg, followed by the second and third args username and password
-	if len(sys.argv) >= 4 and '-c' in sys.argv:
-		write_to_save = False
-		try:
-			credpos = sys.argv.index('-c')
-			creds['user'] = sys.argv[credpos+1]
-			creds['passwd'] = sys.argv[credpos+2]
-			if '-' in creds['user'] or '-' in creds['passwd']: raise Exception()
-		except:
-			raise Exception("Improper argument formatting")
-	#same deal for group
-	if len(sys.argv) >= 3 and '-g' in sys.argv:
-		try:
-			grouppos = sys.argv.index('-g')
-			creds['room'] = sys.argv[grouppos+1]
-			if '-' in creds['room']: raise Exception()
-		except:
-			raise Exception("Improper argument formatting")
-
-	if '-nc' not in sys.argv:
+	if importCustom:
 		try:
 			import custom #custom plugins
 		except ImportError as exc: pass
+
 	#start
 	try:
 		client.start(runClient,creds)
