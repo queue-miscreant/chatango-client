@@ -16,8 +16,6 @@ Options:
 	--help:			Display this page
 '''
 #TODO	Something with checking premature group removes
-#TODO	merge commandline creds with file
-#		create some vector of creds indices that can't be written to?
 
 import sys
 import client
@@ -67,20 +65,28 @@ filtered_channels = [0, #white
 			0] #both
 
 #read credentials from file
-def readFromFile(filePath = SAVE_PATH):
+def readFromFile(readInto, filePath = SAVE_PATH):
 	try:
 		jsonInput = open(filePath)
 		jsonData = json.loads(jsonInput.read())
 		jsonInput.close()
-		return jsonData
-	except Exception as exc:
-		return {} 
-def sendToFile(jsonData,filePath = SAVE_PATH):
-	if filePath == '': return
-	if not write_to_save: return
-	encoder = json.JSONEncoder(ensure_ascii=False)
-	out = open(filePath,'w')
-	out.write(encoder.encode(jsonData)) 
+		for i,bit in creds_readwrite.items():
+			if bit&1:
+				readInto[i] = jsonData[i]
+	except Exception:
+		raise IOError("Error reading creds! Aborting...")
+def sendToFile(writeFrom,filePath = SAVE_PATH):
+	try:
+		if filePath == '': return
+		jsonData = {}
+		for i,bit in creds_readwrite.items():
+			if bit&2:
+				jsonData[i] = writeFrom[i]
+		encoder = json.JSONEncoder(ensure_ascii=False)
+		out = open(filePath,'w')
+		out.write(encoder.encode(jsonData)) 
+	except Exception:
+		raise IOError("Error writing creds! Aborting...")
 
 #bot for interacting with chat
 class chat_bot(chlib.ConnectionManager):
@@ -618,16 +624,17 @@ if __name__ == '__main__':
 			groupArgFlag = 0
 
 			if arg == "-c":			#creds inline
-				creds_readwrite['user'] = 0
+				creds_readwrite['user'] = 0		#no readwrite to user and pass
 				creds_readwrite['passwd'] = 0
 				credsArgFlag = 1
 				continue	#next argument
 			elif arg == '-g':		#group inline
+				creds_readwrite['group'] = 2	#no read from creds
 				groupArgFlag = 1
 				continue
 			#arguments without subarguments
 			elif arg == "-r":		#relog
-				creds_readwrite['user'] = 2
+				creds_readwrite['user'] = 2		#only write to creds
 				creds_readwrite['passwd'] = 2
 				creds_readwrite['room'] = 2
 			elif arg == '-nc':		#no custom
@@ -651,8 +658,7 @@ if __name__ == '__main__':
 	if groupArgFlag:
 		raise Exception("Improper argument formatting: -g without argument")
 
-	if readCredsFlag:
-		creds = readFromFile()
+	readFromFile(creds)
 
 	if importCustom:
 		try:

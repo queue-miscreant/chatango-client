@@ -183,7 +183,8 @@ def staticize(func,*args):
 class overlayBase:
 	'''An overlay is a class that redirects input and modifies a list of (output) strings'''
 	def __init__(self,parent):
-		self.parent = parent
+		self.parent = parent		#parent
+		self.index = None			#index in the stack
 		self._keys =	{27:	self._callalt
 				,curses.KEY_RESIZE:	staticize(parent.resize)}
 		self._altkeys =	 {None:	lambda: -1}
@@ -191,7 +192,8 @@ class overlayBase:
 		'''Get a list of keynames and their documentation'''
 		ret = []
 		for i,j in _VALID_KEYNAMES.items():
-			if i in ('^[','^i','^j',chr(127)): continue	#ignore named characters and escape
+			#ignore named characters and escape, they're not verbose
+			if i in ('^[','^i','^j',chr(127)): continue	
 			if j in self._keys:
 				ret.append('%s: %s' % (i,self._keys[j].__doc__))
 			if j in self._altkeys:
@@ -210,7 +212,7 @@ class overlayBase:
 		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
 			return self._keys[-1](chars[:-1]) or self._post()
 	def _callalt(self,chars):
-		'''Call a key from _altkeys.'''
+		'''Call a method from _altkeys.'''
 		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
 	def _post(self):
 		'''Run after a keypress if the associated function returns boolean false\n'''+\
@@ -226,10 +228,10 @@ class overlayBase:
 	#frontend methods----------------------------
 	def remove(self):
 		'''Safe method to run when the overlay needs to be removed'''
-		self.parent.popOverlay()
+		self.parent.popOverlay(self.index)
 	def add(self):
 		'''Safe method to run when the overlay needs to be added. '''
-		self.parent.addOverlay(self)
+		self.index = self.parent.addOverlay(self)
 	def swap(self,new):
 		'''Safe method to pop overlay and add new one in succession.'''
 		self.remove()
