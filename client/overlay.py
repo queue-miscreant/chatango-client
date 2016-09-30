@@ -95,7 +95,7 @@ def command(commandname):
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_RETURN_CURSOR = '\x1b[u\n\x1b[A'
 CHAR_COMMAND = "/"
-tabber(CHAR_COMMAND,commands)
+tabber(CHAR_COMMAND,_commands)
 		
 def centered(string,width,isselected=False):
 	'''Center (and select) some text'''
