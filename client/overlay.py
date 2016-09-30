@@ -4,21 +4,12 @@
 system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different stdout printing calls.'''
-#TODO invoke promises to add overlays?
-#		it really needs rectifying
-#TODO:	On overlay add, it needs to be assigned an ID. this ID is
-#		its position in the list (the length of _ins when it was added)
-#		
-#		popOverlay needs to pop (run remove, not pop) the exact overlay from the list
-#		after the pop, the list needs to be "rebalanced" (the id needs to be reset)
-#		a similar resolution needs to be made for scrollables (?)
-#		
-
+#TODO	invoke promises on inputOverlay
+#TODO	rewrite docstrings
 try:
 	import curses
 except ImportError:
-	raise ImportError("ERROR WHILE IMPORTING CURSES"+
-			", is this running on Windows cmd?")
+	raise ImportError("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 import sys
 from os import environ
 if not (sys.stdin.isatty() and sys.stdout.isatty()): #check if terminal
@@ -68,6 +59,7 @@ for i in range(32):
 	_VALID_KEYNAMES['^%s'%chr(i+64).lower()] = i
 for i in range(32,256):
 	_VALID_KEYNAMES[chr(i)] = i
+del i
 
 class KeyException(Exception):
 	'''Exception for keys-related errors in client.display'''
@@ -83,26 +75,27 @@ def cloneKey(fro,to):
 	_KEY_LUT[fro] = to
 
 #EXTENDABLE CONTAINERS----------------------------------------------------------
-colorizers = []
-commands = {}
-filters = []
+_colorizers = []
+_filters = []
+_commands = {}
 
 #decorators for containers
 def colorize(func):
 	'''Add function as a colorizer.'''
-	colorizers.append(func)
+	_colorizers.append(func)
 def filter(func):
 	'''Add function as a filter.'''
-	filters.append(func)
+	_filters.append(func)
 def command(commandname):
 	'''Add function as a command `commandname`'''
 	def wrapper(func):
-		commands[commandname] = func
+		_commands[commandname] = func
 	return wrapper
 
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_RETURN_CURSOR = '\x1b[u\n\x1b[A'
 CHAR_COMMAND = "/"
+tabber(CHAR_COMMAND,commands)
 		
 def centered(string,width,isselected=False):
 	'''Center (and select) some text'''
@@ -200,7 +193,18 @@ class overlayBase:
 				ret.append('a-%s: %s' % (i,self._altkeys[j].__doc__))
 		ret.sort()
 		return ret
-	def __call__(self,chars):
+	def __call__(self,lines):
+		'''Overridable function. Modify lines by address (i.e lines[value]) to display from main'''
+		pass
+	def _callalt(self,chars):
+		'''Call a method from _altkeys.'''
+		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
+	def _post(self):
+		'''Run after a keypress if the associated function returns boolean false\n'''+\
+		'''If either the keypress or this return boolean true, the overlay's '''+\
+		'''parent redraws'''
+		return 1
+	def runkey(self,chars):
 		'''Call the overlay. This expects a single argument: a list of numbers '''+\
 		'''terminated by -1'''
 		ret = 0
@@ -211,27 +215,16 @@ class overlayBase:
 			return self._keys[char](chars[1:-1] or [None]) or self._post()
 		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
 			return self._keys[-1](chars[:-1]) or self._post()
-	def _callalt(self,chars):
-		'''Call a method from _altkeys.'''
-		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
-	def _post(self):
-		'''Run after a keypress if the associated function returns boolean false\n'''+\
-		'''If either the keypress or this return boolean true, the overlay's '''+\
-		'''parent redraws'''
-		return 1
-	def display(self,lines):
-		'''Overridable function. Modify lines by address (i.e lines[value]) to display from main'''
-		pass
 	def resize(self,newx,newy):
 		'''Overridable function. On resize event, all added overlays have this called'''
 		pass
 	#frontend methods----------------------------
-	def remove(self):
-		'''Safe method to run when the overlay needs to be removed'''
-		self.parent.popOverlay(self.index)
 	def add(self):
 		'''Safe method to run when the overlay needs to be added. '''
-		self.index = self.parent.addOverlay(self)
+		self.parent.addOverlay(self)
+	def remove(self):
+		'''Safe method to run when the overlay needs to be removed'''
+		self.parent.popOverlay(self)
 	def swap(self,new):
 		'''Safe method to pop overlay and add new one in succession.'''
 		self.remove()
@@ -279,16 +272,16 @@ class textOverlay(overlayBase):
 		self._altkeys.update({
 			127:			self.text.delword
 		})
-	def resize(self,newx,newy):
-		'''Adjust scrollable on resize'''
-		self.text.setwidth(newx)
 	def _input(self,chars):
 		'''Safer version that takes out invalid ASCII (chars above 256) that might get pushed by curses'''
 		return self.text.append(bytes([i for i in chars if i<256]).decode())
+	def resize(self,newx,newy):
+		'''Adjust scrollable on resize'''
+		self.text.setwidth(newx)
 	def remove(self):
 		'''Don't forget to pop scrollable'''
-		overlayBase.remove(self)
-		self.parent.popScrollable()
+		super().remove()
+		self.parent.popScrollable(self.text)
 	def controlhistory(self,history,scroll):
 		'''Add key definitions for standard controls for history `history` '''+\
 		'''and scrollable `scroll`'''
@@ -330,16 +323,7 @@ class listOverlay(overlayBase):
 			,curses.KEY_RIGHT:	staticize(self.chmode,1)
 			,curses.KEY_LEFT:	staticize(self.chmode,-1)
 		})
-	#predefined list iteration methods
-	def increment(self,amt):
-		'''Move self.it by amt'''
-		if not self._numentries: return
-		self.it += amt
-		self.it %= self._numentries
-	def chmode(self,amt):
-		'''Move to mode amt over, with looparound'''
-		self.mode = (self.mode + amt) % self._nummodes
-	def display(self,lines):
+	def __call__(self,lines):
 		'''Display a list in a box, basically. If too long, it gets shortened with an ellipsis in the middle'''
 		lines[0] = box.top()
 		size = self.parent.y-2
@@ -366,6 +350,15 @@ class listOverlay(overlayBase):
 			lines[i+1] = box.noform(row)
 		lines[-1] = box.bottom(self._modes[self.mode])
 		return lines
+	#predefined list iteration methods
+	def increment(self,amt):
+		'''Move self.it by amt'''
+		if not self._numentries: return
+		self.it += amt
+		self.it %= self._numentries
+	def chmode(self,amt):
+		'''Move to mode amt over, with looparound'''
+		self.mode = (self.mode + amt) % self._nummodes
 
 class colorOverlay(overlayBase):
 	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
@@ -397,20 +390,7 @@ class colorOverlay(overlayBase):
 			,curses.KEY_LEFT:	staticize(self.chmode,-1)
 			,curses.KEY_RIGHT:	staticize(self.chmode,1)
 		})
-	#predefined self-traversal methods
-	def increment(self,amt):
-		'''Increase the selected color by amt'''
-		self.color[self._rgb] = max(0,min(255, self.color[self._rgb] + amt))
-	def chmode(self,amt):
-		'''Go to the color amt to the right'''
-		self._rgb = (self._rgb + amt) % 3
-	def getHex(self):
-		'''Get self.color in hex form'''
-		return ''.join([hex(i)[2:].rjust(2,'0') for i in self.color])
-	def setHex(self,hexstr):
-		'''Set self.color from hex'''
-		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
-	def display(self,lines):
+	def __call__(self,lines):
 		'''Display 3 bars, their names, values, and string in hex'''
 		wide = (self.parent.x-2)//3 - 1
 		space = self.parent.y-7
@@ -424,7 +404,6 @@ class colorOverlay(overlayBase):
 				string += " " * wide + CLEAR_FORMATTING + " "
 			#justify (including escape sequence length)
 			lines[i+1] = box.noform(box.just(string))
-		
 		sep = box.part("")
 		lines[-6] = sep
 		names,vals = "",""
@@ -436,7 +415,19 @@ class colorOverlay(overlayBase):
 		lines[-3] = sep #2 lines
 		lines[-2] = box.part(self.getHex().rjust(int(wide*1.5)+3)) #1 line
 		lines[-1] = box.bottom() #last line
-		return lines
+	#predefined self-traversal methods
+	def increment(self,amt):
+		'''Increase the selected color by amt'''
+		self.color[self._rgb] = max(0,min(255, self.color[self._rgb] + amt))
+	def chmode(self,amt):
+		'''Go to the color amt to the right'''
+		self._rgb = (self._rgb + amt) % 3
+	def getHex(self):
+		'''Get self.color in hex form'''
+		return ''.join([hex(i)[2:].rjust(2,'0') for i in self.color])
+	def setHex(self,hexstr):
+		'''Set self.color from hex'''
+		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
 
 class inputOverlay(textOverlay):
 	'''Replacement? for input()'''
@@ -449,31 +440,13 @@ class inputOverlay(textOverlay):
 		self.text.password = password
 		self._end = end
 		self._keys.update({
-			10:	staticize(self._finish)
+			10:		staticize(self._finish)
 			,127:	staticize(self._backspacewrap)
 		})
 		self._altkeys.update({
 			None:	self._stop
 		})
-	def _backspacewrap(self):
-		'''Backspace a char, or quit out if there are no chars left'''
-		if not str(self.text): return -1
-		self.text.backspace()
-	def remove(self):
-		self.parent.popScrollable()
-		if not self.parent.popOverlay() and not self._done:
-			self.parent.active = False
-	def resize(self,newx,newy):
-		textOverlay.resize(self,newx,newy)
-		self._prompts,self._numprompts = breaklines(self._prompt,newx-2)
-	def _stop(self):
-		'''Premature stop. _done is not set'''
-		return -1
-	def _finish(self):
-		'''Regular stop (i.e, with enter)'''
-		self._done = True
-		return -1
-	def display(self,lines):
+	def __call__(self,lines):
 		'''Display the text in roughly the middle, in a box'''
 		start = self.parent.y//2 - self._numprompts//2
 		end = self.parent.y//2 + self._numprompts
@@ -482,6 +455,24 @@ class inputOverlay(textOverlay):
 			lines[start+i+1] = box.part(j)
 		#preserve the cursor position save
 		lines[end+1] = box.bottom()
+	def _backspacewrap(self):
+		'''Backspace a char, or quit out if there are no chars left'''
+		if not str(self.text): return -1
+		self.text.backspace()
+	def _stop(self):
+		'''Premature stop. _done is not set'''
+		return -1
+	def _finish(self):
+		'''Regular stop (i.e, with enter)'''
+		self._done = True
+		return -1
+	def remove(self):
+		if not self.index and not self._done: self.parent.active = False
+		super().remove()
+	def resize(self,newx,newy):
+		super().resize(newx,newy)
+		self._prompts,self._numprompts = breaklines(self._prompt,newx-2)
+
 	def waitForInput(self):
 		'''All input is non-blocking, so we have to poll from another thread'''
 		while not self._done:
@@ -510,6 +501,8 @@ class commandOverlay(textOverlay):
 		self._altkeys.update({
 			127:	lambda: -1
 		})
+	def __call__(self,lines):
+		lines[-1] = 'COMMAND'
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
@@ -520,10 +513,10 @@ class commandOverlay(textOverlay):
 		if text == CHAR_COMMAND: self.history.append(text)
 		space = text.find(' ')
 		commandname = space == -1 and text or text[:space]
-		if commandname not in commands:
+		if commandname not in _commands:
 			self.parent.newBlurb("Command \"{}\" not found".format(commandname))
 			return -1
-		command = commands[commandname]
+		command = _commands[commandname]
 		try:
 			add = command(self.parent,text[space+1:].split(' '))
 			if isinstance(add,overlayBase):
@@ -534,8 +527,6 @@ class commandOverlay(textOverlay):
 				(type(exc).__name__,commandname, exc))
 		except KeyboardInterrupt: pass
 		return -1
-	def display(self,lines):
-		lines[-1] = 'COMMAND'
 
 class escapeOverlay(overlayBase):
 	'''Overlay for redirecting input after \ is pressed'''
@@ -571,7 +562,7 @@ class mainOverlay(textOverlay):
 		textOverlay.__init__(self,parent)
 		self._pushtimes = pushtimes
 		self.history = history()
-		self.clearlines()
+		self.clear()
 		self.controlhistory(self.history,self.text)
 		self._keys.update({
 			ord('\\'):		staticize(self._replaceback)
@@ -580,169 +571,7 @@ class mainOverlay(textOverlay):
 			ord('k'):		self.selectup		#muh vim t. me
 			,ord('j'):		self.selectdown
 		})
-	#method overloading---------------------------------------------------------
-	def _input(self,chars):
-		'''Input some text'''
-		if not str(self.text) and len(chars) == 1 and \
-		chars[0] == ord(CHAR_COMMAND):
-			commandOverlay(self.parent).add()
-			return
-		#allow unicode input
-		return textOverlay._input(self,chars)
-	def remove(self):
-		'''Quit timeloop (if it hasn't already exited)'''
-		self._pushtimes = False
-		self.parent.popScrollable()
-		if not self.parent.popOverlay():
-			self.parent.active = False
-	def resize(self,newx,newy):
-		'''Resize scrollable and maybe draw lines again'''
-		textOverlay.resize(self,newx,newy)
-		if newx != self.parent.x:
-			self.redolines(newx,newy)
-	def _post(self):
-		'''Stop selecting'''
-		if self._selector:
-			self._selector = 0
-			self._linesup = 0
-			self._unfiltup = 0
-			self.parent.updateinput()	#put the cursor back
-			return 1
-	def add(self):
-		'''Start timeloop and add overlay'''
-		if self._pushtimes:
-			times = Thread(target=self._timeloop)
-			times.daemon = True
-			times.start()
-		textOverlay.add(self)
-	def _timeloop(self):
-		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
-		i = 0
-		parent = self.parent
-		while self._pushtimes:
-			time.sleep(2)
-			i+=1
-			if time.time() - parent.last > 4:	#erase blurbs
-				parent.newBlurb()
-			#every 600 seconds
-			if not i % 300:
-				self.msgTime(time.time())
-				i=0
-	#---------------------------------------------------------------------------
-	def _replaceback(self):
-		'''Add a newline if the next character is n, or a tab if the next character is t'''
-		escapeOverlay(self.parent,self.text).add()
-	def selectup(self):
-		'''Select message up'''
-		#go up the number of lines of the "next" selected message
-		upmsg = self._getnextmessage(1)
-		#but only if there is a next message
-		if not upmsg: soundBell()
-		else:
-			self._linesup += upmsg+1
-			if self._linesup > len(self._lines):	#don't forget the new lines
-				cur = self.getselect()
-				a,b = breaklines(cur[0],self.parent.x)
-				a.append(self._msgSplit)
-				self._lines = a + self._lines
-				cur[2] = b
-		return 1
-	def selectdown(self):
-		'''Select message down'''
-		#go down the number of lines of the currently selected message
-		self._linesup = max(0,self._linesup-self.getselect()[2]-1)
-		self._getnextmessage(-1)
-		if not self._selector:
-			self.parent.updateinput()	#move the cursor back
-		return 1
-	def _getnextmessage(self,step):
-		'''Backend for selecting message'''
-		select = self._selector+step
-		addlines = 0
-		while not addlines and select <= len(self._allMessages):
-			addlines = self._allMessages[-select][2]
-			select += step
-		#if we're even "going" anywhere
-		if select-step-self._selector:
-			self._selector = max(0,select-step)
-			self._unfiltup = max(0,self._unfiltup+step)
-		return addlines
-		
-	#FRONTENDS--------------------------------------------------
-	def isselecting(self):
-		'''Whether a message is selected or not'''
-		return bool(self._selector)
-	def getselect(self):
-		'''Frontend for getting the selected message'''
-		return self._allMessages[-self._selector]
-	def redolines(self,width = None,height = None):
-		'''Redo lines, if current lines does not represent the unfiltered messages ''' + \
-		'''or if the width has changed'''
-		if width is None: width = self.parent.x
-		if height is None: height = self.parent.y
-		newlines = []
-		numup,nummsg = 0,1
-		while numup < (height) and nummsg <= len(self._allMessages):
-			i = self._allMessages[-nummsg]
-			try:
-				if any(j(*i[1]) for j in filters):
-					i[2] = 0
-					nummsg += 1
-					continue
-			except: pass
-			a,b = breaklines(i[0],width)
-			a.append(self._msgSplit)
-			newlines = a + newlines
-			i[2] = b
-			numup += b
-			nummsg += 1
-		self._lines = newlines
-	def clearlines(self):
-		'''Clear all lines, messages'''
-		#these two REALLY should be private
-		self._allMessages = []
-		self._lines = []
-		#these too because they select the previous two
-		self._selector = 0
-		self._unfiltup = 0
-		self._linesup = 0
-	def msgSystem(self, base):
-		'''System message'''
-		self._append(getColor(rawNum(1))+base+CLEAR_FORMATTING)
-		self.parent.display()
-	def msgTime(self, numtime = None, predicate=""):
-		'''Push a system message of the time'''
-		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
-		self.msgSystem(predicate+dtime)
-	def msgPost(self,post,*args):
-		'''Parse a message and apply all colorizers'''
-		post = coloring(post)
-		for i in colorizers:
-			i(post,*args)
-		self._append(str(post),list(args))
-		self.parent.display()
-
-	#BACKENDS--------------------------------------------------
-	def _append(self,newline,args = None):
-		'''Add new message. Use msgPost instead'''
-		#undisplayed messages have length zero
-		msg = [newline,args,0]
-		self._selector += (self._selector>0)
-		try:
-			if any(i(*args) for i in filters):
-				self._allMessages.append(msg)
-				return
-		except: pass
-		a,b = breaklines(newline,self.parent.x)
-		self._lines += a
-		msg[2] = b
-		self._allMessages.append(msg)
-		self._lines.append(self._msgSplit)
-		if self._selector:
-			self._linesup += b+1
-			self._unfiltup += 1
-
-	def display(self,lines):
+	def __call__(self,lines):
 		'''Display messages'''
 		select = SELECT_AND_MOVE
 		#seperate traversals
@@ -768,13 +597,174 @@ class mainOverlay(textOverlay):
 			selftraverse += direction
 			linetraverse += direction
 		lines[-1] = box.CHAR_HSPACE*self.parent.x
+	#method overloading---------------------------------------------------------
+	def _input(self,chars):
+		'''Input some text'''
+		if not str(self.text) and len(chars) == 1 and \
+		chars[0] == ord(CHAR_COMMAND):
+			commandOverlay(self.parent).add()
+			return
+		#allow unicode input
+		return textOverlay._input(self,chars)
+	def _post(self):
+		'''Stop selecting'''
+		if self._selector:
+			self._selector = 0
+			self._linesup = 0
+			self._unfiltup = 0
+			self.parent.updateinput()	#put the cursor back
+			return 1
+	def add(self):
+		'''Start timeloop and add overlay'''
+		super().add()
+		if self._pushtimes:
+			times = Thread(target=self._timeloop)
+			times.daemon = True
+			times.start()
+	def remove(self):
+		'''Quit timeloop (if it hasn't already exited)'''
+		super().remove()
+		self._pushtimes = False
+		if not self.index:
+			self.parent.active = False
+	def resize(self,newx,newy):
+		'''Resize scrollable and maybe draw lines again'''
+		super().resize(newx,newy)
+		if newx != self.parent.x:
+			self.redolines(newx,newy)
+	def _timeloop(self):
+		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
+		i = 0
+		parent = self.parent
+		while self._pushtimes:
+			time.sleep(2)
+			i+=1
+			if time.time() - parent.last > 4:	#erase blurbs
+				parent.newBlurb()
+			#every 600 seconds
+			if not i % 300:
+				self.msgTime(time.time())
+				i=0
+	def _replaceback(self):
+		'''Add a newline if the next character is n, or a tab if the next character is t'''
+		escapeOverlay(self.parent,self.text).add()
+	#MESSAGE SELECTION----------------------------------------------------------
+	def _getnextmessage(self,step):
+		'''Backend for selecting message'''
+		select = self._selector+step
+		addlines = 0
+		while not addlines and select <= len(self._allMessages):
+			addlines = self._allMessages[-select][2]
+			select += step
+		#if we're even "going" anywhere
+		if select-step-self._selector:
+			self._selector = max(0,select-step)
+			self._unfiltup = max(0,self._unfiltup+step)
+		return addlines
+	def selectup(self):
+		'''Select message up'''
+		#go up the number of lines of the "next" selected message
+		upmsg = self._getnextmessage(1)
+		#but only if there is a next message
+		if not upmsg: soundBell()
+		else:
+			self._linesup += upmsg+1
+			if self._linesup > len(self._lines):	#don't forget the new lines
+				cur = self.getselected()
+				a,b = breaklines(cur[0],self.parent.x)
+				a.append(self._msgSplit)
+				self._lines = a + self._lines
+				cur[2] = b
+		return 1
+	def selectdown(self):
+		'''Select message down'''
+		#go down the number of lines of the currently selected message
+		self._linesup = max(0,self._linesup-self.getselected()[2]-1)
+		self._getnextmessage(-1)
+		if not self._selector:
+			self.parent.updateinput()	#move the cursor back
+		return 1
+	#FRONTENDS--------------------------------------------------
+	def isselecting(self):
+		'''Whether a message is selected or not'''
+		return bool(self._selector)
+	def getselected(self):
+		'''Frontend for getting the selected message. Returns a list of ''' + \
+		'''length three: the message, an argument tuple, and how many lines'''
+		return self._allMessages[-self._selector]
+	def redolines(self,width = None,height = None):
+		'''Redo lines, if current lines does not represent the unfiltered messages ''' + \
+		'''or if the width has changed'''
+		if width is None: width = self.parent.x
+		if height is None: height = self.parent.y
+		newlines = []
+		numup,nummsg = 0,1
+		while numup < (height) and nummsg <= len(self._allMessages):
+			i = self._allMessages[-nummsg]
+			try:
+				if any(j(*i[1]) for j in _filters):
+					i[2] = 0
+					nummsg += 1
+					continue
+			except: pass
+			a,b = breaklines(i[0],width)
+			a.append(self._msgSplit)
+			newlines = a + newlines
+			i[2] = b
+			numup += b
+			nummsg += 1
+		self._lines = newlines
+	def clear(self):
+		'''Clear all lines, messages'''
+		#these two REALLY should be private
+		self._allMessages = []
+		self._lines = []
+		#these too because they select the previous two
+		self._selector = 0
+		self._unfiltup = 0
+		self._linesup = 0
+	def msgSystem(self, base):
+		'''System message'''
+		self._append(getColor(rawNum(1))+base+CLEAR_FORMATTING)
+		self.parent.display()
+	def msgTime(self, numtime = None, predicate=""):
+		'''Push a system message of the time'''
+		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
+		self.msgSystem(predicate+dtime)
+	def msgPost(self,post,*args):
+		'''Parse a message and apply all colorizers'''
+		post = coloring(post)
+		for i in _colorizers:
+			i(post,*args)
+		self._append(str(post),list(args))
+		self.parent.display()
+	#MESSAGE PUSHING BACKEND-----------------------------------
+	def _append(self,newline,args = None):
+		'''Add new message. Use msgPost instead'''
+		#undisplayed messages have length zero
+		msg = [newline,args,0]
+		self._selector += (self._selector>0)
+		try:
+			if any(i(*args) for i in _filters):
+				self._allMessages.append(msg)
+				return
+		except: pass
+		a,b = breaklines(newline,self.parent.x)
+		self._lines += a
+		msg[2] = b
+		self._allMessages.append(msg)
+		self._lines.append(self._msgSplit)
+		if self._selector:
+			self._linesup += b+1
+			self._unfiltup += 1
 
 class nscrollable(scrollable):
 	'''A scrollable that expects a main object as parent so that it '''+\
 	'''can updateinput()'''
-	def __init__(self,width,parent):
+	def __init__(self,width,parent,index):
 		scrollable.__init__(self,width)
 		self.parent = parent
+		self.index = index
 	def _onchanged(self):
 		self.parent.updateinput()
 
@@ -785,7 +775,6 @@ class _schedule:
 		self._scheduler = []
 		self._taskno = 0
 		self._debounce = False
-	
 	def __call__(self,func,*args):
 		'''Run a function. If debounce is True, schedule it'''
 		if self._debounce:
@@ -794,7 +783,6 @@ class _schedule:
 		self._bounce(True)
 		func(*args)
 		self._bounce(False)
-	
 	def _bounce(self,newbounce):
 		'''Change the value of debounce. If bounce is on a falling edge, run queued functions'''
 		prev = self._debounce
@@ -819,15 +807,17 @@ class main:
 		self._screen.nodelay(1)	#don't wait for enter to get input
 
 		self._schedule = _schedule()
-		self._bottom_edges = [" "," "]
 		self.active = True
-		self.candisplay = 1
+		self.candisplay = True
 		#guessed terminal dimensions
 		self.x = 40
 		self.y = 70
 		#input/display stack
 		self._ins = []
 		self._scrolls = []
+		self._lastReplace = 0
+		self._blurbQueue = []
+		self._bottom_edges = [" "," "]
 	#Display Backends----------------------------------------------------------
 	def _display(self):
 		'''Display backend'''
@@ -836,63 +826,58 @@ class main:
 		lines = ["" for i in range(self.y)]
 		#justify number of lines
 		#start with the last "replacing" overlay, then draw all overlays afterward
-		start = 1
-		lastscroll = 0
-		while (start < len(self._ins)) and not self._ins[-start].replace:
-			start += 1
-		while start > 0 and len(self._ins):
-			self._ins[-start].display(lines)
-			start -= 1
+		for start in range(self._lastReplace,len(self._ins)):
+			self._ins[start](lines)
 		#main display method: move to top of screen
 		_moveCursor()
 		curses.curs_set(0)
 		#draw each line in lines
 		for i in lines:
 			#delete the rest of the garbage on the line, newline
-			print(i,end="\x1b[K\n\r") 
+			print(i,end='\x1b[K\n\r') 
 		curses.curs_set(1)
 		print(CHAR_RETURN_CURSOR,end='')
 	def _updateinput(self):
 		'''Input display backend'''
-		if not self.active: return
-		if not self.candisplay: return
+		if not (self.active and self.candisplay): return
 		if not self._scrolls: return	#no textoverlays added, but how are you firing this
 		string = format(self._scrolls[-1])
 		_moveCursor(self.y+1)
-		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
-	def _printblurb(self,string):
+		print('{}\x1b[K'.format(string),end=CHAR_RETURN_CURSOR)
+	def _printblurb(self,string,time):
 		'''Blurb display backend'''
-		if not self.active: return
+		if not (self.active and self.candisplay): return
 		if self.last < 0: return
-		self.last = time.time()
-		if not self.candisplay: return
+		if self._blurbQueue:
+			if string:
+				vector,_ = breaklines(string,self.x,False)
+				self._blurbQueue.extend(vector)
+			string = self._blurbQueue.pop(0)
+		if string == "":	#advance queue
+			if self._blurbQueue:
+				string = self._blurbQueue.pop(0)
+			else:
+				string = ""
+		self.last = time
 		_moveCursor(self.y+2)
 		if strlen(string) > self.x:
-			string = string[:columnslice(string,self.x-3)]+'...'
-		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
-	def _holdblurb(self,string):
-		'''Hold blurb backend'''
-		if not self.active: return
-		if self.last < 0: return
-		self.last = -1
-		_moveCursor(self.y+2)
-		if strlen(string) > self.x:
-			string = string[:columnslice(string,self.x-3)]+'...'
-		print(string+'\x1b[K',end=CHAR_RETURN_CURSOR)
+			vector,_ = breaklines(string,self.x,False)
+			string = vector[0]
+			self._blurbQueue.extend(vector[1:])
+		print('{}\x1b[K'.format(string),end=CHAR_RETURN_CURSOR)
 	def _releaseblurb(self):
 		'''Release blurb backend'''
 		self.last = time.time()
 	def _updateinfo(self,right,left):
 		'''Info window backend'''
-		if not self.active: return
-		if not self.candisplay: return
+		if not (self.active and self.candisplay): return
 		_moveCursor(self.y+3)
 		self._bottom_edges[0] = left or self._bottom_edges[0]
 		self._bottom_edges[1] = right or self._bottom_edges[1]
 		room = self.x - len(self._bottom_edges[0]) - len(self._bottom_edges[1])
 		if room < 1: return
 		#selected, then turn off
-		print("\x1b[7m{}{}{}\x1b[0m".format(self._bottom_edges[0],
+		print('\x1b[7m{}{}{}\x1b[0m'.format(self._bottom_edges[0],
 			" "*room,self._bottom_edges[1]),end=CHAR_RETURN_CURSOR)
 	#Display Frontends----------------------------------------------------------
 	def display(self):
@@ -902,37 +887,45 @@ class main:
 		self._schedule(self._updateinput)
 	def newBlurb(self,message = ""):
 		'''Add blurb. Use in conjunction with mainOverlay to erase'''
-		self._schedule(self._printblurb,message)
+		self._schedule(self._printblurb	,message,time.time())
 	def holdBlurb(self,string):
 		'''Hold blurb. Sets self.last to -1, making newBlurb not draw'''
-		self._holdblurb(string)
+		self._schedule(self._holdblurb	,string	,-1)
 	def releaseBlurb(self):
 		'''Release blurb. Sets self.last to a valid time, making newBlurb start drawing again'''
-		self._releaseblurb()
-		self._printblurb("")
+		self._schedule(self._releaseblurb)
+		self._schedule(self._printblurb,'')
 	def updateinfo(self,right = None,left = None):
 		'''Update screen bottom'''
 		self._schedule(self._updateinfo,right,left)
-
 	#Overlay Frontends---------------------------------------------------------
 	def addOverlay(self,new):
 		'''Add overlay'''
 		if not isinstance(new,overlayBase): return
+		new.index = len(self._ins)
 		self._ins.append(new)
+		if new.replace: self._lastReplace = new.index
 		#display is not strictly called beforehand, so better safe than sorry
 		self.display()
-		return len(self._ins)
-	def popOverlay(self):
-		'''Pop the top overlay'''
-		self._ins.pop()
-		return len(self._ins)
+	def popOverlay(self,overlay):
+		"""Pop the overlay 'overlay'"""
+		self._ins.pop(overlay.index)
+		#look for the last replace
+		if overlay.index == self._lastReplace: 
+			newReplace = 0
+			for start in range(len(self._ins)):
+				if self._ins[-start-1].replace:
+					newReplace = start
+					break
+			self._lastReplace = newReplace
+		self.display()
 	def addScrollable(self):
-		newScroll = nscrollable(self.x,self)
+		newScroll = nscrollable(self.x,self,len(self._scrolls))
 		self._scrolls.append(newScroll)
 		self.updateinput()
 		return newScroll
-	def popScrollable(self):
-		self._scrolls.pop()
+	def popScrollable(self,which):
+		self._scrolls.pop(which.index)
 		self.updateinput()
 	#Loop Backend--------------------------------------------------------------
 	def _input(self):
@@ -950,7 +943,7 @@ class main:
 			self.active = False
 			return
 		if not len(self._ins): return
-		return self._ins[-1](chars)
+		return self._ins[-1].runkey(chars)
 	def loop(self):
 		'''Main client loop'''
 		try:
@@ -961,17 +954,20 @@ class main:
 						self._ins[-1].remove()
 					self.display()
 		finally:
-			#return the terminal to cooked, echo-y mode. undo what's in init
+			#return the terminal sane mode. undo what's in init
 			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
 			curses.endwin()
 			self.active = False
+			#let overlays do cleanup
+			for i in self._ins:
+				i.remove()
 	#Frontends------------------------------------------------------------------
 	def resize(self):
 		'''Resize the GUI'''
 		newy, newx = self._screen.getmaxyx()
 		newy -= RESERVE_LINES
 		box.width = newx
-		try:
+		try:	#TODO formattingexception's name seems vauge here
 			if newy < _MIN_Y or newx < _MIN_X:
 				raise FormattingException()
 			for i in self._ins:
@@ -1017,10 +1013,8 @@ def listcommands(parent,args):
 		new.text.append(self.list[self.it])
 		self.swap(new)
 
-	commandsList = listOverlay(parent,list(commands))
+	commandsList = listOverlay(parent,list(_commands))
 	commandsList.addKeys({
 		'enter':select
 	})
 	return commandsList
-
-tabber(CHAR_COMMAND,commands)

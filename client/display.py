@@ -199,7 +199,7 @@ def preserve(line):
 		return ret + ''.join(_LAST_EFFECT_RE.findall(line))
 	except IndexError: return ret
 
-def breaklines(string,length):
+def breaklines(string,length,indent=True):
 	'''Break string (courteous of spaces) into a list of column-length length substrings'''
 	string = string.expandtabs(_INDENT_LEN)
 	THRESHOLD = length/2
@@ -210,8 +210,8 @@ def breaklines(string,length):
 	for i,line in enumerate(string.split("\n")):
 		line += " " #ensurance that the last word will capture
 		#tab the next lines
-		space = (i and TABSPACE) or length
-		newline = ((i and _INDENT_STR) or "") + form
+		space = (i and indent and TABSPACE) or length
+		newline = ((i and indent and _INDENT_STR) or "") + form
 		while line != "":
 			match = _WORD_RE.match(line)
 			word = match.group(0)
@@ -229,8 +229,8 @@ def breaklines(string,length):
 				newline += word[:fitsize]
 			if newspace <= 0:
 				broken.append(newline+CLEAR_FORMATTING)
-				newline = _INDENT_STR+preserve(newline)
-				space = TABSPACE
+				newline = (indent and _INDENT_STR or "")+preserve(newline)
+				space = (indent and TABSPACE) or length
 		if newline != "":
 			broken.append(newline+CLEAR_FORMATTING)
 			form = preserve(newline)

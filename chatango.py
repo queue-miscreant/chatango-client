@@ -72,7 +72,7 @@ def readFromFile(readInto, filePath = SAVE_PATH):
 		jsonInput.close()
 		for i,bit in creds_readwrite.items():
 			if bit&1:
-				readInto[i] = jsonData[i]
+				readInto[i] = jsonData.get(i)
 	except Exception:
 		raise IOError("Error reading creds! Aborting...")
 def sendToFile(writeFrom,filePath = SAVE_PATH):
@@ -234,7 +234,7 @@ class chatangoOverlay(overlay.mainOverlay):
 		'''Open selected message's links or send message'''
 		if self.isselecting():
 			try:
-				message = self.getselect()
+				message = self.getselected()
 				msg = client.decolor(message[0])+' '
 				alllinks = linkopen.LINK_RE.findall(msg)
 				def openall():
@@ -260,7 +260,7 @@ class chatangoOverlay(overlay.mainOverlay):
 		'''Open link and don't stop selecting'''
 		if self.isselecting():
 			try:
-				message = self.getselect()
+				message = self.getselected()
 				msg = client.decolor(message[0])+' '
 				alllinks = linkopen.LINK_RE.findall(msg)
 				def openall():
@@ -280,7 +280,7 @@ class chatangoOverlay(overlay.mainOverlay):
 		if self.isselecting():
 			try:
 				#allmessages contain the colored message and arguments
-				message = self.getselect()
+				message = self.getselected()
 				msg = client.decolor(message[0])
 				#first colon is separating the name from the message
 				colon = msg.find(':')
@@ -310,6 +310,7 @@ class chatangoOverlay(overlay.mainOverlay):
 
 	def F3(self):
 		'''List members of current group'''
+		if self.bot.joinedGroup is None: return
 		def select(me):
 			current = me.list[me.it]
 			current = current.split(' ')[0]
@@ -328,7 +329,6 @@ class chatangoOverlay(overlay.mainOverlay):
 				ignores.remove(current)
 			self.redolines()
 
-		if self.bot.joinedGroup is None: return
 		dispList = [i for i in self.bot.joinedGroup.uArray.values()]
 		dispList = {i:dispList.count(i) for i in dispList}
 		dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
@@ -398,7 +398,6 @@ class chatangoOverlay(overlay.mainOverlay):
 		box.addKeys({
 			'enter':select,
 		})
-		
 		box.add()
 
 	def F5(self):
@@ -406,13 +405,11 @@ class chatangoOverlay(overlay.mainOverlay):
 		def select(me):
 			self.bot.channel = me.it
 			return -1
-		
 		def ontab(me):
 			global filtered_channels
 			#space only
 			filtered_channels[me.it] = not filtered_channels[me.it]
 			self.redolines()
-		
 		def drawActive(string,i):
 			if filtered_channels[i]: return
 			col = i and i+12 or 16
@@ -424,7 +421,6 @@ class chatangoOverlay(overlay.mainOverlay):
 			,'tab':	ontab
 		})
 		box.it = self.bot.channel
-		
 		box.add()
 
 	def addignore(self):
@@ -432,7 +428,7 @@ class chatangoOverlay(overlay.mainOverlay):
 			global ignores
 			try:
 				#allmessages contain the colored message and arguments
-				message = self.getselect()
+				message = self.getselected()
 				msg = client.decolor(message[0])
 				#first colon is separating the name from the message
 				colon = msg.find(':')
@@ -447,7 +443,7 @@ class chatangoOverlay(overlay.mainOverlay):
 
 	def reloadclient(self):
 		'''Reload current group'''
-		self.clearlines()
+		self.clear()
 		self.bot.reconnect()
 
 	def openlastlink(self):
@@ -459,16 +455,16 @@ class chatangoOverlay(overlay.mainOverlay):
 		'''Join a new group'''
 		inp = overlay.inputOverlay(self.parent,"Enter group name")
 		inp.add()
-		inp.runOnDone(lambda x: self.clearlines() or self.bot.changeGroup(x))
+		inp.runOnDone(lambda x: self.clear() or self.bot.changeGroup(x))
 
 #COLORIZERS---------------------------------------------------------------------
 #initialize colors
-ordering =	('blue'
-			,'cyan'
-			,'magenta'
-			,'red'
-			,'yellow'
-			)
+ordering = \
+	('blue'
+	,'cyan'
+	,'magenta'
+	,'red'
+	,'yellow')
 for i in range(10):
 	client.defColor(ordering[i%5],i//5) #0-10: user text
 client.defColor('green',True)
