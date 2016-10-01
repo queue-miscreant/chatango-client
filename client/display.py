@@ -3,6 +3,8 @@
 '''Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.'''
+#TODO	breaklines less string based, more mathematical
+#TODO	dbmsg that turns off cbreak mode and back on
 
 import re
 from .wcwidth import wcwidth
@@ -23,7 +25,7 @@ _ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")		#general ANSI escape
 _LAST_COLOR_RE =	re.compile("\x1b"+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _LAST_EFFECT_RE =	re.compile("\x1b"+r"\[2?[47]m")			#all effects that are on
 _WORD_RE = re.compile("[^\\s-]*[\\s-]")				#split words by this regex
-_UP_TO_WORD_RE = re.compile('(.*[{0}])*[^{0}]+[{0}]*'.format(_SANE_TEXTBOX))	#sane textbox word-backspace
+_UP_TO_WORD_RE = re.compile('([^{0}]*[{0}])*[^{0}]+[{0}]*'.format(_SANE_TEXTBOX))	#sane textbox word-backspace
 #valid color names to add
 _COLOR_NAMES =	['black'
 				,'red'
@@ -240,14 +242,16 @@ class scrollable:
 	'''Scrollable text input'''
 	def __init__(self,width,string=''):
 		self._str = string
-		self._pos = 0
-		self._disp = 0
+		self._width = width
+		self._pos = len(string)
+		self._disp = max(0,len(string)-width)
 		#nonscrolling characters
 		self._nonscroll = ''
 		self._nonscroll_width = 0
-		self._width = width
 		self.password = False;
 	def __repr__(self):
+		return repr(self._str)
+	def __str__(self):
 		'''Return the raw text contained'''
 		return self._str
 	def __getitem__(self,sliced):
@@ -386,7 +390,6 @@ class scrollable:
 		self._pos = 0
 		self._disp = 0
 		self.movepos(len(self._str))
-
 
 class tabber:
 	'''Class for holding new tab-completers'''
