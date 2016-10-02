@@ -3,8 +3,7 @@
 '''Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.'''
-#TODO	breaklines less string based, more mathematical
-#TODO	dbmsg that turns off cbreak mode and back on
+#TODO	coloring keeps a dictionary for speed (i.e. not having to use regexes to track the string)
 
 import re
 from .wcwidth import wcwidth
@@ -24,8 +23,8 @@ _SANE_TEXTBOX = r'\s\-/`~,;'			#sane textbox splitting characters
 _ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")		#general ANSI escape
 _LAST_COLOR_RE =	re.compile("\x1b"+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _LAST_EFFECT_RE =	re.compile("\x1b"+r"\[2?[47]m")			#all effects that are on
-_WORD_RE = re.compile("[^\\s-]*[\\s-]")				#split words by this regex
 _UP_TO_WORD_RE = re.compile('([^{0}]*[{0}])*[^{0}]+[{0}]*'.format(_SANE_TEXTBOX))	#sane textbox word-backspace
+_LINE_BREAKING = " 　"
 #valid color names to add
 _COLOR_NAMES =	['black'
 				,'red'
@@ -53,8 +52,7 @@ _NUM_PREDEFINED = len(_COLORS)
 CLEAR_FORMATTING = '\x1b[m'
 SELECTED = lambda x: _EFFECTS['reverse'][0] + x + CLEAR_FORMATTING
 CHAR_CURSOR = '\x1b[s'
-_INDENT_LEN = 4
-_INDENT_STR = "    " 
+_TABLEN = 4
 #arbitrary number of characters a scrollable can have and not scroll
 MAX_NONSCROLL_WIDTH = 5
 
@@ -192,50 +190,54 @@ def columnslice(string,length):
 		escape = temp
 	return lentr + 1
 
-def preserve(line):
-	'''Preserve formatting between lines (i.e in breaklines)'''
-	ret = ''
-	#only fetch after the last clear
-	try: #return the last (assumed to be color) ANSI escape used
-		ret += _LAST_COLOR_RE.findall(line)[-1]
-		return ret + ''.join(_LAST_EFFECT_RE.findall(line))
-	except IndexError: return ret
-
-def breaklines(string,length,indent=True):
-	'''Break string (courteous of spaces) into a list of column-length length substrings'''
-	string = string.expandtabs(_INDENT_LEN)
+def breaklines(string,length,outdent=''):
+	'''Break string (courteous of spaces) into a list of column-length 'length' substrings'''
+	string = string.expandtabs(_TABLEN)
+	outdentLen = strlen(outdent)
+	TABSPACE = length - outdentLen
 	THRESHOLD = length/2
-	TABSPACE = length - _INDENT_LEN
 
 	broken = []
 	form = ''
 	for i,line in enumerate(string.split("\n")):
-		line += " " #ensurance that the last word will capture
-		#tab the next lines
-		space = (i and indent and TABSPACE) or length
-		newline = ((i and indent and _INDENT_STR) or "") + form
-		while line != "":
-			match = _WORD_RE.match(line)
-			word = match.group(0)
-			wordlen = strlen(word)
-			newspace = space - wordlen
-			#just add the word
-			if wordlen < space:
-				space = newspace
-				newline += word
-				line = line[match.end(0):]
-			#if there's room for some of the word, and we're not past a threshold
-			elif space >= THRESHOLD:
-				fitsize = columnslice(word, space)
-				line = line[fitsize:]
-				newline += word[:fitsize]
-			if newspace <= 0:
-				broken.append(newline+CLEAR_FORMATTING)
-				newline = (indent and _INDENT_STR or "")+preserve(newline)
-				space = (indent and TABSPACE) or length
-		if newline != "":
-			broken.append(newline+CLEAR_FORMATTING)
-			form = preserve(newline)
+		start = 0
+		lastbreaking,lastcol = 0,0
+		color,effect = '',''
+		space = (i and TABSPACE) or length
+		escapestart = 0
+		for pos,j in enumerate(line):	#character by character, the old fashioned way
+			if escapestart:
+				if j.isalpha():
+					sequence = line[escapestart-1:pos+1]
+					if _LAST_COLOR_RE.match(sequence):
+						color = sequence
+					elif j == 'm':			#sequence ending in m that isn't a color is an effect
+						effect += sequence
+					escapestart = 0
+				continue
+			elif j == "\x1b":
+				escapestart = pos+1			#sequences at 0 are okay
+				continue
+
+			lenj = wcwidth(j)
+			space -= lenj
+			if j in _LINE_BREAKING:
+				lastbreaking = pos
+				lastcol = space
+			if space < 0:			#time to break
+				if lastcol < THRESHOLD and lastbreaking > start:
+					broken.append("{}{}{}".format(form,line[start:lastbreaking],CLEAR_FORMATTING))
+					start = lastbreaking+1	#ignore whitespace
+					lenj += lastcol
+				else:
+					broken.append("{}{}{}".format(form,line[start:pos],CLEAR_FORMATTING))
+					start = pos
+				space = TABSPACE - lenj
+				form = outdent + color + effect
+
+		broken.append("{}{}{}".format(form,line[start:],CLEAR_FORMATTING))
+		form = outdent + color + effect
+
 	return broken,len(broken)
 
 class scrollable:
@@ -270,7 +272,7 @@ class scrollable:
 			text = self._str[:self._pos] + CHAR_CURSOR + self._str[self._pos:]
 	
 		text = text[self._disp:self._disp+self._width+len(CHAR_CURSOR)] #worst case
-		text = text.replace("\n",r"\n").expandtabs(_INDENT_LEN)
+		text = text.replace("\n",r"\n").expandtabs(_TABLEN)
 		#TIME TO ITERATE
 		escape,canbreak= 0,0
 		#initial position, column num, position in string

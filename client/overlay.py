@@ -6,6 +6,7 @@ one. Output is done not with curses display, but various
 different stdout printing calls.'''
 #TODO	invoke promises on inputOverlay
 #TODO	rewrite docstrings
+#TODO	dbmsg that turns off cbreak mode and back on
 try:
 	import curses
 except ImportError:
@@ -557,6 +558,7 @@ class mainOverlay(textOverlay):
 	'''and can refresh blurbs every few seconds'''
 	replace = True
 	#sequence between messages to draw reversed
+	INDENT = "    "
 	_msgSplit = "\x1b" 
 	def __init__(self,parent,pushtimes = True):
 		textOverlay.__init__(self,parent)
@@ -671,7 +673,7 @@ class mainOverlay(textOverlay):
 			self._linesup += upmsg+1
 			if self._linesup > len(self._lines):	#don't forget the new lines
 				cur = self.getselected()
-				a,b = breaklines(cur[0],self.parent.x)
+				a,b = breaklines(cur[0],self.parent.x,self.INDENT)
 				a.append(self._msgSplit)
 				self._lines = a + self._lines
 				cur[2] = b
@@ -707,7 +709,7 @@ class mainOverlay(textOverlay):
 					nummsg += 1
 					continue
 			except: pass
-			a,b = breaklines(i[0],width)
+			a,b = breaklines(i[0],width,self.INDENT)
 			a.append(self._msgSplit)
 			newlines = a + newlines
 			i[2] = b
@@ -749,7 +751,7 @@ class mainOverlay(textOverlay):
 				self._allMessages.append(msg)
 				return
 		except: pass
-		a,b = breaklines(newline,self.parent.x)
+		a,b = breaklines(newline,self.parent.x,self.INDENT)
 		self._lines += a
 		msg[2] = b
 		self._allMessages.append(msg)
@@ -850,7 +852,7 @@ class main:
 		if self.last < 0: return
 		if self._blurbQueue:
 			if string:
-				vector,_ = breaklines(string,self.x,False)
+				vector,_ = breaklines(string,self.x)
 				self._blurbQueue.extend(vector)
 			string = self._blurbQueue.pop(0)
 		if string == "":	#advance queue
@@ -861,7 +863,7 @@ class main:
 		self.last = time
 		_moveCursor(self.y+2)
 		if strlen(string) > self.x:
-			vector,_ = breaklines(string,self.x,False)
+			vector,_ = breaklines(string,self.x)
 			string = vector[0]
 			self._blurbQueue.extend(vector[1:])
 		print('{}\x1b[K'.format(string),end=CHAR_RETURN_CURSOR)
@@ -987,6 +989,7 @@ class main:
 			try:
 				func(*args)
 			except Exception as e:
+				dbmsg("ERROR OCCURRED, ABORTING")
 				global lasterr
 				lasterr = e
 				self.active = False

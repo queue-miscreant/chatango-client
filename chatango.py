@@ -77,6 +77,7 @@ def readFromFile(readInto, filePath = SAVE_PATH):
 		raise IOError("Error reading creds! Aborting...")
 def sendToFile(writeFrom,filePath = SAVE_PATH):
 	try:
+		client.dbmsg(writeFrom,creds_readwrite)
 		if filePath == '': return
 		jsonData = {}
 		for i,bit in creds_readwrite.items():
@@ -625,7 +626,7 @@ if __name__ == '__main__':
 				credsArgFlag = 1
 				continue	#next argument
 			elif arg == '-g':		#group inline
-				creds_readwrite['group'] = 2	#no read from creds
+				creds_readwrite['room'] = 2	#no read from creds
 				groupArgFlag = 1
 				continue
 			#arguments without subarguments
