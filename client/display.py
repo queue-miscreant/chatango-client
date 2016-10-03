@@ -97,8 +97,8 @@ class coloring:
 	def __init__(self,string,default=None):
 		self._str = string
 		self.default = default
-	def __repr__(self):
-		'''Get the string contained'''
+	def __str__(self):
+		'''Colorize the string'''
 		return self._str
 	def __getitem__(self,sliced):
 		'''Set the string to a slice of itself'''
@@ -151,6 +151,99 @@ class coloring:
 			end = tracker+find.end(group)
 			#insert the end color and adjust the tracker (if we're conserving color)
 			tracker += (post is None) and self.insertColor(end,last) or self.insertColor(end,post)
+	def effectByRegex(self, regex, effect, group = 0):
+		effect = getEffect(effect)
+		self.colorByRegex(regex,lambda x: effect[0],group,effect[1])
+
+class coloring2:
+	'''Container for a string and default color'''
+	def __init__(self,string,default=None):
+		self._str = string
+		self.default = default
+		self.positions = []
+		self.formatting = []
+		self.maxpos = -1
+	def __repr__(self):
+		'''Get the string contained'''
+		return "{}{}{}{}{}{}".format("formatting(",self._str,", positions = ",self.positions,", formats = ",self.formatting)
+	def __str__(self):
+		'''Colorize the string'''
+		ret = self._str
+		tracker = 0
+		for i,pos in enumerate(self.positions):
+			ret = ret[:pos+tracker] + self.formatting[i] + ret[pos+tracker:]
+			tracker += len(self.formatting[i])
+		return ret
+	def __getitem__(self,sliced):
+		'''Set the string to a slice of itself'''
+		self._str = self._str[sliced]
+		return self
+	def __add__(self,other):
+		'''Set string to concatenation'''
+		self._str = self._str + other
+		return self
+	def __radd__(self,other):
+		'''__add__ but from the other side'''
+		self._str = other + self._str
+		return self
+	def _newcolor(self,position,formatting):
+		'''Insert positions/formatting into color dictionary'''
+		#TODO condense into dictionary, concatenate formattings when indeex already exists
+		if position < self.maxpos:
+			i = 0
+			while position > self.positions[i]:
+				i += 1
+			if self.positions[i] == position:		#position already used
+				self.formatting[i] += formatting
+			else:
+				self.positions.insert(i,position)
+				self.formatting.insert(i,formatting)
+		else:
+			self.positions.append(position)
+			self.formatting.append(formatting)
+			self.maxpos = position
+
+	def insertColor(self,p,c=None):
+		'''Add a color at position p with color c'''
+		c = self.default if c is None else c
+		if type(c) is int: c = getColor(c)
+		self._newcolor(p,c)
+
+	def addGlobalEffect(self, effect):
+		'''Add effect to string'''
+		effect = getEffect(effect)
+		self._newcolor(0,effect)
+		#take all effect offs out
+		for pos,i in enumerate(self.formatting):
+			self.formatting[pos] = i.replace(effect[1],'')
+	def findColor(self,end):
+		'''Most recent color before end. Safe when no matches are found'''
+		if end == 0:
+			return ''
+		if end > self.positions[-1]:
+			return self.formatting[-1]
+		for i,pos in enumerate(self.positions):
+			if end < pos:
+				return self.formatting[i-1]
+	def colorByRegex(self, regex, groupFunction, group = 0, post = None):
+		'''Color from a compiled regex, generating the respective color number from captured group. '''+\
+		'''groupFunction should be an int (or string) or callable that returns int (or string)'''
+		if not callable(groupFunction):
+			ret = groupFunction	#get another header
+			groupFunction = lambda x: ret
+		for find in regex.finditer(self._str+' '):
+			begin = find.start(group)
+			end = find.end(group)
+			#insert the color
+			self.insertColor(begin,groupFunction(find.group(group)))
+			#if there's no post-effect, conserve the last color
+			if post is None:
+				#find the most recent color
+				last = self.findColor(begin)
+				self.insertColor(end,last)
+			else:
+				#useful for turning effects off
+				self.insertColor(end,post)
 	def effectByRegex(self, regex, effect, group = 0):
 		effect = getEffect(effect)
 		self.colorByRegex(regex,lambda x: effect[0],group,effect[1])
