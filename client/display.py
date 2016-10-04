@@ -92,7 +92,7 @@ def decolor(string):
 	new = _ANSI_ESC_RE.subn('',string)
 	return new[0]
 
-class coloring:
+class coloringold:
 	'''Container for a string and default color'''
 	def __init__(self,string,default=None):
 		self._str = string
@@ -155,7 +155,7 @@ class coloring:
 		effect = getEffect(effect)
 		self.colorByRegex(regex,lambda x: effect[0],group,effect[1])
 
-class coloring2:
+class coloring:
 	'''Container for a string and default color'''
 	def __init__(self,string,default=None):
 		self._str = string
@@ -165,7 +165,7 @@ class coloring2:
 		self.maxpos = -1
 	def __repr__(self):
 		'''Get the string contained'''
-		return "{}{}{}{}{}{}".format("formatting(",self._str,", positions = ",self.positions,", formats = ",self.formatting)
+		return "{}{}{}{}{}{}".format("formatting(",repr(self._str),", positions = ",self.positions,", formats = ",self.formatting)
 	def __str__(self):
 		'''Colorize the string'''
 		ret = self._str
@@ -185,9 +185,13 @@ class coloring2:
 	def __radd__(self,other):
 		'''__add__ but from the other side'''
 		self._str = other + self._str
+		for pos,i in enumerate(self.positions):
+			self.positions[pos] = i + len(other)
 		return self
 	def _newcolor(self,position,formatting):
 		'''Insert positions/formatting into color dictionary'''
+		formatting = self.default if formatting is None else formatting
+		if type(formatting) is int: formatting = getColor(formatting)
 		#TODO condense into dictionary, concatenate formattings when indeex already exists
 		if position < self.maxpos:
 			i = 0
@@ -204,15 +208,12 @@ class coloring2:
 			self.maxpos = position
 
 	def insertColor(self,p,c=None):
-		'''Add a color at position p with color c'''
-		c = self.default if c is None else c
-		if type(c) is int: c = getColor(c)
 		self._newcolor(p,c)
 
 	def addGlobalEffect(self, effect):
 		'''Add effect to string'''
 		effect = getEffect(effect)
-		self._newcolor(0,effect)
+		self._newcolor(0,effect[0])
 		#take all effect offs out
 		for pos,i in enumerate(self.formatting):
 			self.formatting[pos] = i.replace(effect[1],'')
@@ -239,7 +240,7 @@ class coloring2:
 			#if there's no post-effect, conserve the last color
 			if post is None:
 				#find the most recent color
-				last = self.findColor(begin)
+				last = self.findColor(begin-1)
 				self.insertColor(end,last)
 			else:
 				#useful for turning effects off
