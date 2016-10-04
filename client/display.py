@@ -3,7 +3,7 @@
 '''Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.'''
-#TODO	coloring keeps a dictionary for speed (i.e. not having to use regexes to track the string)
+#TODO breaklines built into coloring
 
 import re
 from .wcwidth import wcwidth
@@ -188,11 +188,12 @@ class coloring:
 		for pos,i in enumerate(self.positions):
 			self.positions[pos] = i + len(other)
 		return self
-	def _newcolor(self,position,formatting):
+	def insertColor(self,position,formatting=None):
 		'''Insert positions/formatting into color dictionary'''
 		formatting = self.default if formatting is None else formatting
 		if type(formatting) is int: formatting = getColor(formatting)
 		#TODO condense into dictionary, concatenate formattings when indeex already exists
+		#TODO add type of tuple (color,effects)
 		if position < self.maxpos:
 			i = 0
 			while position > self.positions[i]:
@@ -207,19 +208,16 @@ class coloring:
 			self.formatting.append(formatting)
 			self.maxpos = position
 
-	def insertColor(self,p,c=None):
-		self._newcolor(p,c)
-
 	def addGlobalEffect(self, effect):
 		'''Add effect to string'''
 		effect = getEffect(effect)
-		self._newcolor(0,effect[0])
+		self.insertColor(0,effect[0])
 		#take all effect offs out
 		for pos,i in enumerate(self.formatting):
 			self.formatting[pos] = i.replace(effect[1],'')
 	def findColor(self,end):
 		'''Most recent color before end. Safe when no matches are found'''
-		if end == 0:
+		if end == -1:
 			return ''
 		if end > self.positions[-1]:
 			return self.formatting[-1]
@@ -236,13 +234,14 @@ class coloring:
 			begin = find.start(group)
 			end = find.end(group)
 			#insert the color
-			self.insertColor(begin,groupFunction(find.group(group)))
 			#if there's no post-effect, conserve the last color
 			if post is None:
 				#find the most recent color
-				last = self.findColor(begin-1)
+				last = self.findColor(begin)
+				self.insertColor(begin,groupFunction(find.group(group)))
 				self.insertColor(end,last)
 			else:
+				self.insertColor(begin,groupFunction(find.group(group)))
 				#useful for turning effects off
 				self.insertColor(end,post)
 	def effectByRegex(self, regex, effect, group = 0):
