@@ -70,6 +70,7 @@ def defColor(fore, bold = None, back = 'none'):
 
 def getColor(c):
 	'''insertColor without position or coloring object'''
+	if c == None: return ''
 	try:
 		return _COLORS[c + _NUM_PREDEFINED]
 	except IndexError:
@@ -165,14 +166,14 @@ class coloring:
 		self.maxpos = -1
 	def __repr__(self):
 		'''Get the string contained'''
-		return "{}{}{}{}{}{}".format("formatting(",repr(self._str),", positions = ",self.positions,", formats = ",self.formatting)
+		return "coloring({}, positions = {}, formats = {})".format(repr(self._str),self.positions,self.formatting)
 	def __str__(self):
 		'''Colorize the string'''
 		ret = self._str
 		tracker = 0
-		for i,pos in enumerate(self.positions):
-			ret = ret[:pos+tracker] + self.formatting[i] + ret[pos+tracker:]
-			tracker += len(self.formatting[i])
+		for pos,form in zip(self.positions,self.formatting):
+			ret = ret[:pos+tracker] + form + ret[pos+tracker:]
+			tracker += len(form)
 		return ret
 	def __getitem__(self,sliced):
 		'''Set the string to a slice of itself'''
@@ -192,21 +193,19 @@ class coloring:
 		'''Insert positions/formatting into color dictionary'''
 		formatting = self.default if formatting is None else formatting
 		if type(formatting) is int: formatting = getColor(formatting)
-		#TODO condense into dictionary, concatenate formattings when indeex already exists
-		#TODO add type of tuple (color,effects)
-		if position < self.maxpos:
-			i = 0
-			while position > self.positions[i]:
-				i += 1
-			if self.positions[i] == position:		#position already used
-				self.formatting[i] += formatting
-			else:
-				self.positions.insert(i,position)
-				self.formatting.insert(i,formatting)
-		else:
+		if position > self.maxpos:
 			self.positions.append(position)
 			self.formatting.append(formatting)
 			self.maxpos = position
+			return
+		i = 0
+		while position > self.positions[i]:
+			i += 1
+		if self.positions[i] == position:		#position already used
+			self.formatting[i] += formatting
+		else:
+			self.positions.insert(i,position)
+			self.formatting.insert(i,formatting)
 
 	def addGlobalEffect(self, effect):
 		'''Add effect to string'''
@@ -215,15 +214,16 @@ class coloring:
 		#take all effect offs out
 		for pos,i in enumerate(self.formatting):
 			self.formatting[pos] = i.replace(effect[1],'')
+
 	def findColor(self,end):
 		'''Most recent color before end. Safe when no matches are found'''
-		if end == -1:
-			return ''
 		if end > self.positions[-1]:
 			return self.formatting[-1]
-		for i,pos in enumerate(self.positions):
+		last = ''
+		for pos,form in zip(self.positions,self.formatting):
 			if end < pos:
-				return self.formatting[i-1]
+				return last
+			last = form
 	def colorByRegex(self, regex, groupFunction, group = 0, post = None):
 		'''Color from a compiled regex, generating the respective color number from captured group. '''+\
 		'''groupFunction should be an int (or string) or callable that returns int (or string)'''

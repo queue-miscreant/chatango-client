@@ -15,6 +15,7 @@
 #MODIFIED 2016/8/8:		New protocol appears to be bauth as anon, then blogin. Changed Group.login during Digest.ok accordingly
 #MODIFIED 2016/9/22:	Anons can't change name color because chatango, compiled regexes, changed inline concats to formats, and
 #						improved some readability
+#TODO add buffer on sendPost
 ################################
 
 ################################
@@ -108,6 +109,7 @@ def formatRaw(raw):
 	#otherwise, remove html
 	for i in XML_TAG_RE.findall(raw):
 		raw = raw.replace(i,i == "<br/>" and "\n" or "")
+	raw.replace("&nbsp;",' ')
 	for i in HTML_CODES:
 		raw = raw.replace(i[0],i[1])
 	#remove trailing \n's
@@ -116,7 +118,7 @@ def formatRaw(raw):
 	#thumbnail fix in chatango
 	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2",raw)[0]
 
-	return raw.replace("&nbsp;"," ")
+	return raw
 
 ################################
 #Represents event objects
