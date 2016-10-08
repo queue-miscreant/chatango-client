@@ -95,7 +95,7 @@ def command(commandname):
 
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_RETURN_CURSOR = '\x1b[u\n\x1b[A'
-CHAR_COMMAND = "/"
+CHAR_COMMAND = "`"
 tabber(CHAR_COMMAND,_commands)
 		
 def centered(string,width,isselected=False):
@@ -141,12 +141,14 @@ class history:
 		if self.history:
 			self._selhis += (self._selhis < (len(self.history)))
 			return self.history[-self._selhis]
+		return ''
 	def prevhist(self):
 		'''Back in history (more recent)'''
 		if self.history:
 			self._selhis -= (self._selhis > 0)
 			#the next element or an empty string
 			return self._selhis and self.history[-self._selhis] or ""
+		return ''
 	def append(self,new):
 		'''Add new entry in history'''
 		self.history.append(new)
@@ -892,11 +894,11 @@ class main:
 		self._schedule(self._printblurb	,message,time.time())
 	def holdBlurb(self,string):
 		'''Hold blurb. Sets self.last to -1, making newBlurb not draw'''
-		self._schedule(self._holdblurb	,string	,-1)
+		self._schedule(self._printblurb	,string	,-1)
 	def releaseBlurb(self):
 		'''Release blurb. Sets self.last to a valid time, making newBlurb start drawing again'''
 		self._schedule(self._releaseblurb)
-		self._schedule(self._printblurb,'')
+		self._schedule(self._printblurb,'',time.time())
 	def updateinfo(self,right = None,left = None):
 		'''Update screen bottom'''
 		self._schedule(self._updateinfo,right,left)
@@ -1021,3 +1023,7 @@ def listcommands(parent,args):
 		'enter':select
 	})
 	return commandsList
+
+@command('q')
+def quit(parent,args):
+	parent.active = False

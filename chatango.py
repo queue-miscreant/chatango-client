@@ -16,6 +16,10 @@ Options:
 	--help:			Display this page
 '''
 #TODO	Something with checking premature group removes
+#TODO	Messages dropping when ping coincides with message?
+#TODO	Modifiable options like the threshold to ask to open links
+#TODO	Checkem command (spawn an anon and send message "check em")
+#TODO	Callback for when maximum message is reached (call whatever method gets more messages from chatango)
 
 import sys
 import client
@@ -77,7 +81,6 @@ def readFromFile(readInto, filePath = SAVE_PATH):
 		raise IOError("Error reading creds! Aborting...")
 def sendToFile(writeFrom,filePath = SAVE_PATH):
 	try:
-		client.dbmsg(writeFrom,creds_readwrite)
 		if filePath == '': return
 		jsonData = {}
 		for i,bit in creds_readwrite.items():
@@ -195,8 +198,6 @@ class chat_bot(chlib.ConnectionManager):
 	
 	#pull members when any of these are invoked
 	def recvg_participants(self,group):
-		#self.members.append(
-#		self.members.clear()		#preserve the current list reference for tabber
 		self.members.extend(group.uArray.values())
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 
@@ -205,15 +206,16 @@ class chat_bot(chlib.ConnectionManager):
 			user = "anon"
 		else:
 			if (bit == "1"):
-				if user not in self.members:
-					self.members.append(user)
+				self.members.append(user)
+			else:
+				if user in self.members:
+					self.members.remove(user)
 
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 		#notifications
 		self.mainOverlay.parent.newBlurb("%s has %s" % (user,(bit=="1") and "joined" or "left"))
 
-#-------------------------------------------------------------------------------------------------------
-#KEYS
+#OVERLAY EXTENSION--------------------------------------------------------------------------------------
 class chatangoOverlay(overlay.mainOverlay):
 	def __init__(self,parent,bot):
 		overlay.mainOverlay.__init__(self,parent)
@@ -268,9 +270,8 @@ class chatangoOverlay(overlay.mainOverlay):
 					for i in alllinks:
 						linkopen.open_link(self.parent,i)
 				if len(alllinks) > 1:
-					self.parent.msgSystem('Really open %d links? (y/n)'%\
-						len(alllinks))
-					overlay.confirmOverlay(self.parent,openall).add()
+					overlay.confirmOverlay(self.parent,'Really open %d links? (y/n)'%\
+						len(alllinks),openall).add()
 				else:
 					openall()
 			except Exception as exc: client.dbmsg(exc)
@@ -554,9 +555,7 @@ def listkeys(parent,args):
 	})
 	return keysList
 
-#-------------------------------------------------------------------------------------------------------
-#FILTERS
-
+#FILTERS------------------------------------------------------------------------------------------------
 #filter filtered channels
 @overlay.filter
 def channelfilter(*args):

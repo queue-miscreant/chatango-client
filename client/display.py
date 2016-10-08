@@ -191,6 +191,7 @@ class coloring:
 		return self
 	def insertColor(self,position,formatting=None):
 		'''Insert positions/formatting into color dictionary'''
+		if position < 0: position += len(self._str);
 		formatting = self.default if formatting is None else formatting
 		if type(formatting) is int: formatting = getColor(formatting)
 		if position > self.maxpos:
