@@ -7,6 +7,8 @@ different stdout printing calls.'''
 #TODO	invoke promises on inputOverlay
 #TODO	rewrite docstrings
 #TODO	dbmsg that turns off cbreak mode and back on
+#TODO	write object names in right case (ObjectName)
+#TODO	use docstrings for what each command does (e.g. in listoverlay spawned by `help)
 try:
 	import curses
 except ImportError:

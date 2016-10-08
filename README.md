@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.28
+Version 6.283
 --------------------------
 
 A CLI application written in python with curses input and ANSI escape-colored output.   
@@ -9,13 +9,16 @@ Run `python chatango.py` or `./chatango.py` in the directory you extracted it to
 I recommend making a symlink in /usr/local/bin/ so you don't have to navigate to the folder,
 or especially have a million files in ~/
 
-This client is based on chlib.py <https://github.com/cellsheet/chlib>, and uses wcwidth from <https://github.com/jquast/wcwidth>.
+This client is based on [chlib.py](https://github.com/cellsheet/chlib), and uses [python wcwidth](https://github.com/jquast/wcwidth).
 
-My custom script: https://puu.sh/qu6w1/84c4e26f77.py
+My custom script: https://puu.sh/rC0SB/ed4dc84146.py
+
 Requires livestreamer, youtube-dl, and xclip, but if you don't already have
 these, seriously consider installing them  
 
 If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
+
+If you run windows, check out [this fork](https://gitgud.io/JJXB/chatango-client/tree/master)
 
 FEATURES:
 --------------------------
@@ -29,26 +32,40 @@ FEATURES:
 * Colorized output
 	* Color text matching a regex or so
 * Client commands
-	* Type /help while the input box is empty to display a list of commands implemented
+	* Type \`help while the input box is empty to display a list of commands implemented
 * Chat filters based on message attributes
 
 DEPENDENCIES
 --------------------------
 * Python 3
-* Curses (You probably already have this)  
+* Python ncurses (included on most distros)
 ### Technically these are optional since you can change how they open  
 * Feh image viewer
 * MPV
 
-TODO
--------------------------
-### Chatango client-side  
-Checking login success better
-Better (global) tabbing interface
-In-client relogging
-
 CHANGELOG
 =========================
+## v6.283	*2016/10/16*
+* Preference for tabbing based on who talked more recently
+* Fixed resize callbacks in overlay objects
+* Changed calling an overlay to be the display; consequently runkey defines key behavior
+	* Changed command character to \` (haven't I done that before once) because : and / are too troublesome
+* Moved some functionality from chatango.py to chlib.py
+	* Some groups from regexes were selected wrong
+	* Made it more readable, compiled regexes
+* New experimental coloring object
+	* Experimentally faster and less variance than old version
+	* Still needs effect range cascading (WIP)
+* New character-by-character breaklines
+	* Experimentally faster (and lack of regexes feels less cheaty)
+* More commandline specs
+	* Argument reading done in one iteration over argv
+	* Credential read/write-ability is set by arguments passed in
+* Reworked program flow
+	* A single function argument (and its arguments afterword) is passed into client.(overlay.)start
+	* This becomes its own thread, so be sure to use inputOverlay.waitForInput and not runOnDone
+	* DO NOT CONFUSE WITH OVERLAY THREAD; any overlay should use runOnDone
+
 ## v6.28	*2016/8/11*
 * Lods of ebug fixes (Prob'ly)
 * Merged client.coloring and client.formatting into client.termform

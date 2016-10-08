@@ -3,8 +3,8 @@
 '''Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.'''
-#TODO breaklines built into coloring
-
+#TODO	breaklines built into coloring
+#TODO	256-bit mode to define colors in 256 bits
 import re
 from .wcwidth import wcwidth
 
@@ -539,7 +539,7 @@ class promoteSet:
 			self.append(i)
 	def remove(self,old):
 		'''Remove an item from the list'''
-		if index not in self._list: raise KeyError(old)
+		if old not in self._list: raise KeyError(old)
 		self._list.remove(old)
 	def promote(self,index):
 		'''Promote index to the front of the list'''
