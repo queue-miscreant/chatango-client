@@ -209,7 +209,8 @@ class chat_bot(chlib.ConnectionManager):
 				self.members.append(user)
 			else:
 				if user in self.members:
-					self.members.remove(user)
+					pass
+#					self.members.remove(user)
 
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 		#notifications
@@ -510,7 +511,7 @@ def names(msg,*args):
 		name = group.lower()[1:]
 		if name in chatbot.members:
 			return getColor(name)
-		return ''
+		return None
 	msg.colorByRegex(REPLY_RE,check)
 
 #underline quotes
