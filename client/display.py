@@ -40,12 +40,16 @@ _COLOR_NAMES =	['black'
 _EFFECTS =	{'reverse':		('\x1b[7m','\x1b[27m')
 			,'underline':	('\x1b[4m','\x1b[24m')
 			}
+_EFFECTS_N =[('\x1b[7m','\x1b[27m')
+			,('\x1b[4m','\x1b[24m')
+			]
+_NUM_EFFECTS = 2
 #storage for defined pairs
-_COLORS =	['\x1b[39;49m'	#Normal/Normal
-			,'\x1b[31;47m'	#Red/White
-			,'\x1b[31;41m'	#red
-			,'\x1b[32;42m'	#green
-			,'\x1b[34;44m'	#blue
+_COLORS =	['\x1b[39;22;49m'	#Normal/Normal
+			,'\x1b[31;22;47m'	#Red/White
+			,'\x1b[31;22;41m'	#red
+			,'\x1b[32;22;42m'	#green
+			,'\x1b[34;22;44m'	#blue
 			]
 _NUM_PREDEFINED = len(_COLORS)
 #clear formatting
@@ -92,6 +96,19 @@ def decolor(string):
 	'''Replace all ANSI escapes with null string'''
 	new = _ANSI_ESC_RE.subn('',string)
 	return new[0]
+
+def parseFormatting(form)
+	color = form >> (_NUM_EFFECTS << 1)
+	effect = form & colorstart
+	form = color > 0 and _COLORS[color-1] or ''
+	if effect:
+		for i in range(_NUM_EFFECTS):
+			if effect & (1 << i):
+				if effect & ((1 << _NUM_EFFECTS) << i):
+					form += _EFFECTS_N[i][1]
+				else:
+					form += _EFFECTS_N[i][0]
+	return form
 
 class coloringold:
 	'''Container for a string and default color'''
@@ -171,7 +188,9 @@ class coloring:
 		'''Colorize the string'''
 		ret = self._str
 		tracker = 0
+		colorstart = ((1 << (_NUM_EFFECTS << 1)) - 1)
 		for pos,form in zip(self.positions,self.formatting):
+			form = parseFormatting(form)
 			ret = ret[:pos+tracker] + form + ret[pos+tracker:]
 			tracker += len(form)
 		return ret
@@ -189,11 +208,9 @@ class coloring:
 		for pos,i in enumerate(self.positions):
 			self.positions[pos] = i + len(other)
 		return self
-	def insertColor(self,position,formatting=None):
-		'''Insert positions/formatting into color dictionary'''
-		if position < 0: position += len(self._str);
-		formatting = self.default if formatting is None else formatting
-		if type(formatting) is int: formatting = getColor(formatting)
+	
+	def _insertColor(self,position,formatting):
+		'''Backend for insertColor that doesn't do checking on formatting'''
 		if position > self.maxpos:
 			self.positions.append(position)
 			self.formatting.append(formatting)
@@ -203,29 +220,77 @@ class coloring:
 		while position > self.positions[i]:
 			i += 1
 		if self.positions[i] == position:		#position already used
-			self.formatting[i] += formatting
+			effect = self.formatting[i] & ((1 << (_NUM_EFFECTS << 1)) - 1)
+			self.formatting[i] = formatting | effect
 		else:
 			self.positions.insert(i,position)
 			self.formatting.insert(i,formatting)
 
-	def addGlobalEffect(self, effect):
+	def insertColor(self,position,formatting=None):
+		'''Insert positions/formatting into color dictionary. Formatting must '''+\
+		'''be the proper color (in _COLORS, added with defColor)'''
+		if position < 0: position += len(self._str)
+		formatting = self.default + _NUM_PREDEFINED if formatting is None else formatting + _NUM_PREDEFINED
+		formatting += 1;
+		formatting <<= _NUM_EFFECTS << 1;
+		self._insertColor(position,formatting)
+
+	def effectRange(self,start,end,formatting):
+		'''Insert an effect at _str[start:end]. Formatting must be a number'''+\
+		''' corresponding to an effect. As default, 0 is reverse and 1 is underline'''
+		effectOn = 1 << formatting
+		effectOff = effectOn << _NUM_EFFECTS
+		i = 0
+		if start > self.maxpos:
+			self.positions.append(start)
+			self.formatting.append(effectOn)
+			self.maxpos = start
+		else:
+			while start > self.positions[i]:
+				i += 1
+			if self.positions[i] == start:	#if we're writing into a number
+				self.formatting[i] |= effectOn
+			else:
+				self.positions.insert(i,start)
+				self.formatting.insert(i,effectOn)
+				i += 1
+
+		while i+1 < len(self.positions) and end > self.positions[i]:
+			if self.formatting[i] & effectOff: #if this effect turns off here
+				dbmsg(bin(self.formatting[i] & effectOff))
+
+				self.formatting[i] ^= effectOn | effectOff
+				if not self.formatting[i]:
+					self.formatting.pop(i)
+					i -= 1
+			i += 1
+		if i+1 == len(self.positions):
+			self.positions.append(end)
+			self.formatting.append(effectOn | effectOff)
+			self.maxpos = end
+		elif  self.positions[i] == end:		#position exists
+			self.formatting[i] |= effectOn | effectOff
+		else:
+			self.positions.insert(i,end)
+			self.formatting.insert(i,effectOn | effectOff)
+
+	def addGlobalEffect(self, effectNumber):
 		'''Add effect to string'''
-		effect = getEffect(effect)
-		self.insertColor(0,effect[0])
-		#take all effect offs out
-		for pos,i in enumerate(self.formatting):
-			self.formatting[pos] = i.replace(effect[1],'')
+		self.effectRange(0,len(self._str),effectNumber)
 
 	def findColor(self,end):
 		'''Most recent color before end. Safe when no matches are found'''
-		if end > self.positions[-1]:
+		if self.maxpos == -1:
+			return self.default and self.default + _NUM_PREDEFINED + 1 or 1
+		if end > self.maxpos:
 			return self.formatting[-1]
-		last = ''
+		last = self.formatting[0]
 		for pos,form in zip(self.positions,self.formatting):
 			if end < pos:
 				return last
 			last = form
-	def colorByRegex(self, regex, groupFunction, group = 0, post = None):
+		return last
+	def colorByRegex(self, regex, groupFunction, group = 0, getLast = True):
 		'''Color from a compiled regex, generating the respective color number from captured group. '''+\
 		'''groupFunction should be an int (or string) or callable that returns int (or string)'''
 		if not callable(groupFunction):
@@ -236,18 +301,65 @@ class coloring:
 			end = find.end(group)
 			#insert the color
 			#if there's no post-effect, conserve the last color
-			if post is None:
+			if getLast:
 				#find the most recent color
 				last = self.findColor(begin)
 				self.insertColor(begin,groupFunction(find.group(group)))
-				self.insertColor(end,last)
+				self._insertColor(end,last) #backend because last is already valid
 			else:
 				self.insertColor(begin,groupFunction(find.group(group)))
-				#useful for turning effects off
-				self.insertColor(end,post)
 	def effectByRegex(self, regex, effect, group = 0):
-		effect = getEffect(effect)
-		self.colorByRegex(regex,lambda x: effect[0],group,effect[1])
+		for find in regex.finditer(self._str+' '):
+			self.effectRange(find.start(group),find.end(group),effect)
+
+	def breaklines(self,length,outdent=''):
+		'''Break string (courteous of spaces) into a list of column-length 'length' substrings'''
+		outdentLen = strlen(outdent)
+		TABSPACE = length - outdentLen
+		THRESHOLD = length >> 1
+
+		broken = []
+		start = 0
+		space = (i and TABSPACE) or length
+		escapestart = 0
+
+		lastFormat = 0
+		nextFormatting = 0
+		doSearch = True;
+
+		stringbuffer = ''
+		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
+			if doSearch and pos == self.positions[nextFormatting]:
+				stringbuffer += parseFormatting(self.positions[nextFormatting])
+				lastFormat = self.positions[nextFormatting]
+				nextFormatting += 1
+				if nextFormatting > len(self.positions):
+					doSearch = False
+			if j == "\n":
+				broken.append("{}{}{}".format(parseFormatting(self.formatting[nextFormatting-1]),stringbuffer,CLEAR_FORMATTING))
+				continue
+
+			lenj = wcwidth(j)
+			space -= lenj
+			if j in _LINE_BREAKING:
+				lastbreaking = pos
+				lastcol = space
+			if space < 0:			#time to break
+				if lastcol < THRESHOLD and lastbreaking > start:
+					broken.append("{}{}{}".format(lastFormat,self._str[start:lastbreaking],CLEAR_FORMATTING))
+					start = lastbreaking+1	#ignore whitespace
+					lenj += lastcol
+				else:
+					broken.append("{}{}{}".format(lastFormat,self._str[start:pos],CLEAR_FORMATTING))
+					start = pos
+				space = TABSPACE - lenj
+				form = outdent + color + effect
+
+		broken.append("{}{}{}".format(lastFormat,line[start:],CLEAR_FORMATTING))
+		form = outdent + color + effect
+
+		return broken,len(broken)
+
 
 def strlen(string):
 	'''Column width of a string'''

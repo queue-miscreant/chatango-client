@@ -518,13 +518,13 @@ def names(msg,*args):
 QUOTE_RE = re.compile(r"`[^`]+`")
 @overlay.colorize
 def quotes(msg,*args):
-	msg.effectByRegex(QUOTE_RE,'underline')
+	msg.effectByRegex(QUOTE_RE,1)
 		
 #draw replies, history, and channel
 @overlay.colorize
 def chatcolors(msg,*args):
-	args[1] and msg.addGlobalEffect('reverse')	#reply
-	args[2] and msg.addGlobalEffect('underline')	#history
+	args[1] and msg.addGlobalEffect(0)	#reply
+	args[2] and msg.addGlobalEffect(1)	#history
 	msg.insertColor(0)		#make sure we color the name right
 	(' ' + msg).insertColor(0,args[3]+12)	#channel
 

@@ -37,6 +37,7 @@ _COLORS =	['\x1b[39;49m'	#Normal/Normal
 			,'\x1b[32;42m'	#green
 			,'\x1b[34;44m'	#blue
 			]
+_NUM_PREDEFINED = 5
 
 class newcoloring:
 	'''Container for a string and default color'''
@@ -175,15 +176,9 @@ class coloring:
 		for pos,i in enumerate(self.positions):
 			self.positions[pos] = i + len(other)
 		return self
-
-	def insertColor(self,position,formatting=None):
-		'''Insert positions/formatting into color dictionary. Formatting must '''+\
-		'''be the proper color (in _COLORS, added with defColor)'''
-		if position < 0: position += len(self._str)
-		formatting = self.default if formatting is None else formatting
-		#if type(formatting) is int: formatting = getColor_NEW(formatting)
-		formatting += 1;
-		formatting <<= _NUM_EFFECTS << 1;
+	
+	def _insertColor(self,position,formatting):
+		'''Backend for insertColor that doesn't do checking on formatting'''
 		if position > self.maxpos:
 			self.positions.append(position)
 			self.formatting.append(formatting)
@@ -198,6 +193,15 @@ class coloring:
 		else:
 			self.positions.insert(i,position)
 			self.formatting.insert(i,formatting)
+
+	def insertColor(self,position,formatting=None):
+		'''Insert positions/formatting into color dictionary. Formatting must '''+\
+		'''be the proper color (in _COLORS, added with defColor)'''
+		if position < 0: position += len(self._str)
+		formatting = self.default + _NUM_PREDEFINED if formatting is None else formatting + _NUM_PREDEFINED
+		formatting += 1;
+		formatting <<= _NUM_EFFECTS << 1;
+		self._insertColor(position,formatting)
 
 	def effectRange(self,start,end,formatting):
 		'''Insert an effect at _str[start:end]. Formatting must be a number'''+\
@@ -243,15 +247,15 @@ class coloring:
 	def findColor(self,end):
 		'''Most recent color before end. Safe when no matches are found'''
 		if self.maxpos == -1:
-			return self.default or 0
+			return self.default and self.default + _NUM_PREDEFINED + 1 or 1
 		if end > self.maxpos:
-			return self.formatting[-1] >> (_NUM_EFFECTS << 1)
-		last = -1
+			return self.formatting[-1]
+		last = self.formatting[0]
 		for pos,form in zip(self.positions,self.formatting):
 			if end < pos:
-				return last >> (_NUM_EFFECTS << 1)
+				return last
 			last = form
-		return last >> (_NUM_EFFECTS << 1)
+		return last
 	def colorByRegex(self, regex, groupFunction, group = 0, getLast = True):
 		'''Color from a compiled regex, generating the respective color number from captured group. '''+\
 		'''groupFunction should be an int (or string) or callable that returns int (or string)'''
@@ -267,7 +271,7 @@ class coloring:
 				#find the most recent color
 				last = self.findColor(begin)
 				self.insertColor(begin,groupFunction(find.group(group)))
-				self.insertColor(end,last)
+				self._insertColor(end,last) #backend because last is already valid
 			else:
 				self.insertColor(begin,groupFunction(find.group(group)))
 	def effectByRegex(self, regex, effect, group = 0):
