@@ -97,7 +97,8 @@ def decolor(string):
 	new = _ANSI_ESC_RE.subn('',string)
 	return new[0]
 
-def parseFormatting(form)
+def parseFormatting(form):
+	colorstart = ((1 << (_NUM_EFFECTS << 1)) - 1)
 	color = form >> (_NUM_EFFECTS << 1)
 	effect = form & colorstart
 	form = color > 0 and _COLORS[color-1] or ''
@@ -188,7 +189,6 @@ class coloring:
 		'''Colorize the string'''
 		ret = self._str
 		tracker = 0
-		colorstart = ((1 << (_NUM_EFFECTS << 1)) - 1)
 		for pos,form in zip(self.positions,self.formatting):
 			form = parseFormatting(form)
 			ret = ret[:pos+tracker] + form + ret[pos+tracker:]
@@ -356,6 +356,62 @@ class coloring:
 				form = outdent + color + effect
 
 		broken.append("{}{}{}".format(lastFormat,line[start:],CLEAR_FORMATTING))
+		form = outdent + color + effect
+
+		return broken,len(broken)
+
+	def breaklines(self,length,outdent=''):
+		'''Break string (courteous of spaces) into a list of column-length 'length' substrings'''
+		outdentLen = strlen(outdent)
+		TABSPACE = length - outdentLen
+		THRESHOLD = length/2
+
+		broken = []
+		form = ''
+		start = 0
+		lastbreaking = 0
+		color,effect = '',''
+		space = length
+
+		formatPos = 0
+		getFormat = True
+		lastFormat = ''
+		lineBuffer = ''
+		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
+			if j == "\n":
+				broken.append(lineBuffer + CLEAR_FORMATTING)
+				lineBuffer = outdent + lastFormat
+				space = TABSPACE
+				continue
+
+			lenj = wcwidth(j)
+			space -= lenj
+			if getFormat and pos == self.positions[formatPos]:
+				lastFormat = parseFormatting(self.formatting[formatPos])
+				lineBuffer += lastFormat
+				formatPos += 1
+				getFormat = formatPos != len(self.positions)
+			if j in _LINE_BREAKING:
+				lineBuffer += self._str[lastbreaking+1:pos+1]
+				lastbreaking = pos
+				lastcol = space
+			if space < 0:			#time to break
+				if space < THRESHOLD:
+					broken.append(lineBuffer + CLEAR_FORMATTING)
+					lineBuffer = outdent + lastFormat
+					lenj += lastcol
+				else:
+					print(lineBuffer,self._str[lastbreaking:pos])
+					input()
+					broken.append("{}{}{}".format(lineBuffer,self._str[lastbreaking:pos],CLEAR_FORMATTING))
+					lastbreaking = pos
+					lastcol = 0
+					lineBuffer = outdent + lastFormat + j
+				space = TABSPACE - lenj
+		if lastbreaking != pos:
+			lineBuffer += self._str[lastbreaking+1:]
+
+		broken.append(lineBuffer+CLEAR_FORMATTING)
 		form = outdent + color + effect
 
 		return broken,len(broken)
