@@ -37,13 +37,14 @@ _COLOR_NAMES =	['black'
 				,''
 				,'none']
 #names of effects, and a tuple containing 'on' and 'off'
-_EFFECTS =	{'reverse':		('\x1b[7m','\x1b[27m')
+_EFFECTS_O ={'reverse':		('\x1b[7m','\x1b[27m')
 			,'underline':	('\x1b[4m','\x1b[24m')
 			}
-_EFFECTS_N =[('\x1b[7m','\x1b[27m')
+_EFFECTS =	[('\x1b[7m','\x1b[27m')
 			,('\x1b[4m','\x1b[24m')
 			]
-_NUM_EFFECTS = 2
+_NUM_EFFECTS = len(_EFFECTS)
+_EFFECTS_BITS = (1 << (_NUM_EFFECTS << 1))-1
 #storage for defined pairs
 _COLORS =	['\x1b[39;22;49m'	#Normal/Normal
 			,'\x1b[31;22;47m'	#Red/White
@@ -71,6 +72,11 @@ def defColor(fore, bold = None, back = 'none'):
 	pair += bold and ";1" or ";22"
 	pair += ';4%d' % _COLOR_NAMES.index(back)
 	_COLORS.append(pair+'m')
+def defEffect(on,off):
+	global _EFFECTS,_NUM_EFFECTS,_EFFECTS_BITS
+	_EFFECTS.append((on,off))
+	_NUM_EFFECTS += 1
+	_EFFECTS_BITS = (_EFFECTS_BITS << 1) | 1
 
 def getColor(c):
 	'''insertColor without position or coloring object'''
@@ -88,7 +94,7 @@ def rawNum(c):
 def getEffect(effect):
 	'''Get effect. Raise exception when undefined'''
 	try:
-		return _EFFECTS[effect]
+		return _EFFECTS_O[effect]
 	except KeyError:
 		raise FormattingException("Effect name %s not defined"%effect)
 
@@ -98,17 +104,16 @@ def decolor(string):
 	return new[0]
 
 def parseFormatting(form):
-	colorstart = ((1 << (_NUM_EFFECTS << 1)) - 1)
 	color = form >> (_NUM_EFFECTS << 1)
-	effect = form & colorstart
+	effect = form & _EFFECTS_BITS
 	form = color > 0 and _COLORS[color-1] or ''
 	if effect:
 		for i in range(_NUM_EFFECTS):
 			if effect & (1 << i):
 				if effect & ((1 << _NUM_EFFECTS) << i):
-					form += _EFFECTS_N[i][1]
+					form += _EFFECTS[i][1]
 				else:
-					form += _EFFECTS_N[i][0]
+					form += _EFFECTS[i][0]
 	return form
 
 class coloringold:
@@ -176,7 +181,7 @@ class coloringold:
 
 class coloring:
 	'''Container for a string and default color'''
-	def __init__(self,string,default=None):
+	def __init__(self,string,default=0):
 		self._str = string
 		self.default = default
 		self.positions = []
@@ -184,7 +189,7 @@ class coloring:
 		self.maxpos = -1
 	def __repr__(self):
 		'''Get the string contained'''
-		return "coloring({}, positions = {}, formats = {})".format(repr(self._str),self.positions,self.formatting)
+		return "coloring({}, positions = {}, formatting = {})".format(repr(self._str),self.positions,self.formatting)
 	def __str__(self):
 		'''Colorize the string'''
 		ret = self._str
@@ -208,6 +213,8 @@ class coloring:
 		for pos,i in enumerate(self.positions):
 			self.positions[pos] = i + len(other)
 		return self
+	def get(self):
+		return self._str
 	
 	def _insertColor(self,position,formatting):
 		'''Backend for insertColor that doesn't do checking on formatting'''
@@ -220,7 +227,7 @@ class coloring:
 		while position > self.positions[i]:
 			i += 1
 		if self.positions[i] == position:		#position already used
-			effect = self.formatting[i] & ((1 << (_NUM_EFFECTS << 1)) - 1)
+			effect = self.formatting[i] & _EFFECTS_BITS
 			self.formatting[i] = formatting | effect
 		else:
 			self.positions.insert(i,position)
@@ -230,9 +237,9 @@ class coloring:
 		'''Insert positions/formatting into color dictionary. Formatting must '''+\
 		'''be the proper color (in _COLORS, added with defColor)'''
 		if position < 0: position += len(self._str)
-		formatting = self.default + _NUM_PREDEFINED if formatting is None else formatting + _NUM_PREDEFINED
-		formatting += 1;
-		formatting <<= _NUM_EFFECTS << 1;
+		formatting = self.default if formatting is None else formatting
+		formatting += _NUM_PREDEFINED + 1
+		formatting <<= _NUM_EFFECTS << 1
 		self._insertColor(position,formatting)
 
 	def effectRange(self,start,end,formatting):
@@ -242,9 +249,12 @@ class coloring:
 		effectOff = effectOn << _NUM_EFFECTS
 		i = 0
 		if start > self.maxpos:
+			lastColor = self.formatting[-1]&(~_EFFECTS_BITS)
 			self.positions.append(start)
-			self.formatting.append(effectOn)
-			self.maxpos = start
+			self.formatting.append(lastColor | effectOn)
+			self.formatting.append(lastColor | effectOn | effectOff)
+			self.maxpos = end
+			return
 		else:
 			while start > self.positions[i]:
 				i += 1
@@ -252,27 +262,23 @@ class coloring:
 				self.formatting[i] |= effectOn
 			else:
 				self.positions.insert(i,start)
-				self.formatting.insert(i,effectOn)
+				self.formatting.insert(i,self.formatting[i-1]&(~_EFFECTS_BITS) | effectOn)
 				i += 1
 
-		while i+1 < len(self.positions) and end > self.positions[i]:
+		while i < len(self.positions) and end > self.positions[i]:
+			self.formatting[i] |= effectOn
 			if self.formatting[i] & effectOff: #if this effect turns off here
-				dbmsg(bin(self.formatting[i] & effectOff))
-
-				self.formatting[i] ^= effectOn | effectOff
-				if not self.formatting[i]:
-					self.formatting.pop(i)
-					i -= 1
+				self.formatting[i] ^= effectOff
 			i += 1
-		if i+1 == len(self.positions):
+		if i == len(self.positions):
 			self.positions.append(end)
-			self.formatting.append(effectOn | effectOff)
+			self.formatting.append(self.formatting[i-1]&(~_EFFECTS_BITS) | effectOn | effectOff)
 			self.maxpos = end
-		elif  self.positions[i] == end:		#position exists
+		elif self.positions[i] == end:		#position exists
 			self.formatting[i] |= effectOn | effectOff
 		else:
 			self.positions.insert(i,end)
-			self.formatting.insert(i,effectOn | effectOff)
+			self.formatting.insert(i,self.formatting[i-1]&(~_EFFECTS_BITS) | effectOn | effectOff)
 
 	def addGlobalEffect(self, effectNumber):
 		'''Add effect to string'''
@@ -317,105 +323,59 @@ class coloring:
 		outdentLen = strlen(outdent)
 		TABSPACE = length - outdentLen
 		THRESHOLD = length >> 1
-
 		broken = []
+
 		start = 0
-		space = (i and TABSPACE) or length
-		escapestart = 0
-
-		lastFormat = 0
-		nextFormatting = 0
-		doSearch = True;
-
-		stringbuffer = ''
-		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
-			if doSearch and pos == self.positions[nextFormatting]:
-				stringbuffer += parseFormatting(self.positions[nextFormatting])
-				lastFormat = self.positions[nextFormatting]
-				nextFormatting += 1
-				if nextFormatting > len(self.positions):
-					doSearch = False
-			if j == "\n":
-				broken.append("{}{}{}".format(parseFormatting(self.formatting[nextFormatting-1]),stringbuffer,CLEAR_FORMATTING))
-				continue
-
-			lenj = wcwidth(j)
-			space -= lenj
-			if j in _LINE_BREAKING:
-				lastbreaking = pos
-				lastcol = space
-			if space < 0:			#time to break
-				if lastcol < THRESHOLD and lastbreaking > start:
-					broken.append("{}{}{}".format(lastFormat,self._str[start:lastbreaking],CLEAR_FORMATTING))
-					start = lastbreaking+1	#ignore whitespace
-					lenj += lastcol
-				else:
-					broken.append("{}{}{}".format(lastFormat,self._str[start:pos],CLEAR_FORMATTING))
-					start = pos
-				space = TABSPACE - lenj
-				form = outdent + color + effect
-
-		broken.append("{}{}{}".format(lastFormat,line[start:],CLEAR_FORMATTING))
-		form = outdent + color + effect
-
-		return broken,len(broken)
-
-	def breaklines(self,length,outdent=''):
-		'''Break string (courteous of spaces) into a list of column-length 'length' substrings'''
-		outdentLen = strlen(outdent)
-		TABSPACE = length - outdentLen
-		THRESHOLD = length/2
-
-		broken = []
-		form = ''
-		start = 0
-		lastbreaking = 0
-		color,effect = '',''
 		space = length
+		lineBuffer = ''
 
 		formatPos = 0
 		getFormat = True
 		lastFormat = ''
-		lineBuffer = ''
 		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
-			if j == "\n":
-				broken.append(lineBuffer + CLEAR_FORMATTING)
-				lineBuffer = outdent + lastFormat
-				space = TABSPACE
-				continue
-
 			lenj = wcwidth(j)
-			space -= lenj
 			if getFormat and pos == self.positions[formatPos]:
+				lineBuffer += self._str[start:pos]
+				start = pos
 				lastFormat = parseFormatting(self.formatting[formatPos])
 				lineBuffer += lastFormat
 				formatPos += 1
 				getFormat = formatPos != len(self.positions)
-			if j in _LINE_BREAKING:
-				lineBuffer += self._str[lastbreaking+1:pos+1]
-				lastbreaking = pos
+			if j == '\t':			#tabs are the length of outdents
+				lenj = outdentLen
+				lineBuffer += self._str[start:pos]
+				start = pos
+				lineBuffer += ' '*min(lenj,space)
+			elif j == '\n':
+				lineBuffer += self._str[start:pos]
+				broken.append(lineBuffer + CLEAR_FORMATTING)
+				lineBuffer = outdent + lastFormat
+				start = pos+1
+				lastcol = 0
+				space = TABSPACE
+				continue
+
+			space -= lenj
+			if j in _LINE_BREAKING and space > 0: #add the last word
+				lineBuffer += self._str[start:pos+1]
+				start = pos+1
 				lastcol = space
 			if space < 0:			#time to break
-				if space < THRESHOLD:
+				if lastcol < THRESHOLD and lastcol > 0:
 					broken.append(lineBuffer + CLEAR_FORMATTING)
 					lineBuffer = outdent + lastFormat
 					lenj += lastcol
 				else:
-					print(lineBuffer,self._str[lastbreaking:pos])
-					input()
-					broken.append("{}{}{}".format(lineBuffer,self._str[lastbreaking:pos],CLEAR_FORMATTING))
-					lastbreaking = pos
-					lastcol = 0
-					lineBuffer = outdent + lastFormat + j
+					broken.append("{}{}{}".format(lineBuffer,self._str[start:pos],CLEAR_FORMATTING))
+					lineBuffer = outdent + lastFormat
+					start = pos
+				lastcol = 0
 				space = TABSPACE - lenj
-		if lastbreaking != pos:
-			lineBuffer += self._str[lastbreaking+1:]
 
+		lineBuffer += self._str[start:]
 		broken.append(lineBuffer+CLEAR_FORMATTING)
-		form = outdent + color + effect
 
 		return broken,len(broken)
-
 
 def strlen(string):
 	'''Column width of a string'''

@@ -675,7 +675,7 @@ class mainOverlay(textOverlay):
 			self._linesup += upmsg+1
 			if self._linesup > len(self._lines):	#don't forget the new lines
 				cur = self.getselected()
-				a,b = breaklines(cur[0],self.parent.x,self.INDENT)
+				a,b = cur[0].breaklines(self.parent.x,self.INDENT)
 				a.append(self._msgSplit)
 				self._lines = a + self._lines
 				cur[2] = b
@@ -711,7 +711,7 @@ class mainOverlay(textOverlay):
 					nummsg += 1
 					continue
 			except: pass
-			a,b = breaklines(i[0],width,self.INDENT)
+			a,b = i[0].breaklines(width,self.INDENT)
 			a.append(self._msgSplit)
 			newlines = a + newlines
 			i[2] = b
@@ -729,7 +729,9 @@ class mainOverlay(textOverlay):
 		self._linesup = 0
 	def msgSystem(self, base):
 		'''System message'''
-		self._append(getColor(rawNum(1))+base+CLEAR_FORMATTING)
+		base = coloring(base)
+		base.insertColor(0,rawNum(1))
+		self._append(base)
 		self.parent.display()
 	def msgTime(self, numtime = None, predicate=""):
 		'''Push a system message of the time'''
@@ -740,7 +742,7 @@ class mainOverlay(textOverlay):
 		post = coloring(post)
 		for i in _colorizers:
 			i(post,*args)
-		self._append(str(post),list(args))
+		self._append(post,list(args))
 		self.parent.display()
 	#MESSAGE PUSHING BACKEND-----------------------------------
 	def _append(self,newline,args = None):
@@ -753,7 +755,7 @@ class mainOverlay(textOverlay):
 				self._allMessages.append(msg)
 				return
 		except: pass
-		a,b = breaklines(newline,self.parent.x,self.INDENT)
+		a,b = newline.breaklines(self.parent.x,self.INDENT)
 		self._lines += a
 		msg[2] = b
 		self._allMessages.append(msg)
