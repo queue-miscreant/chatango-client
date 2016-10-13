@@ -44,7 +44,7 @@ _EFFECTS =	[('\x1b[7m','\x1b[27m')
 			,('\x1b[4m','\x1b[24m')
 			]
 _NUM_EFFECTS = len(_EFFECTS)
-_EFFECTS_BITS = (1 << (_NUM_EFFECTS << 1))-1
+_EFFECTS_BITS = (1 << _NUM_EFFECTS)-1
 #storage for defined pairs
 _COLORS =	['\x1b[39;22;49m'	#Normal/Normal
 			,'\x1b[31;22;47m'	#Red/White
@@ -55,7 +55,7 @@ _COLORS =	['\x1b[39;22;49m'	#Normal/Normal
 _NUM_PREDEFINED = len(_COLORS)
 #clear formatting
 CLEAR_FORMATTING = '\x1b[m'
-SELECTED = lambda x: _EFFECTS['reverse'][0] + x + CLEAR_FORMATTING
+SELECTED = lambda x: _EFFECTS_O['reverse'][0] + x + CLEAR_FORMATTING
 CHAR_CURSOR = '\x1b[s'
 _TABLEN = 4
 #arbitrary number of characters a scrollable can have and not scroll
@@ -103,17 +103,12 @@ def decolor(string):
 	new = _ANSI_ESC_RE.subn('',string)
 	return new[0]
 
-def parseFormatting(form):
-	color = form >> (_NUM_EFFECTS << 1)
-	effect = form & _EFFECTS_BITS
+def parseFormatting(color,effect = None):
 	form = color > 0 and _COLORS[color-1] or ''
-	if effect:
+	if effect:	#nonzero
 		for i in range(_NUM_EFFECTS):
 			if effect & (1 << i):
-				if effect & ((1 << _NUM_EFFECTS) << i):
-					form += _EFFECTS[i][1]
-				else:
-					form += _EFFECTS[i][0]
+				form += _EFFECTS[i][0]
 	return form
 
 class coloringold:
@@ -198,7 +193,7 @@ class coloring:
 			form = parseFormatting(form)
 			ret = ret[:pos+tracker] + form + ret[pos+tracker:]
 			tracker += len(form)
-		return ret
+		return ret + CLEAR_FORMATTING
 	def __getitem__(self,sliced):
 		'''Set the string to a slice of itself'''
 		self._str = self._str[sliced]
@@ -239,46 +234,45 @@ class coloring:
 		if position < 0: position += len(self._str)
 		formatting = self.default if formatting is None else formatting
 		formatting += _NUM_PREDEFINED + 1
-		formatting <<= _NUM_EFFECTS << 1
+		formatting <<= _NUM_EFFECTS
 		self._insertColor(position,formatting)
 
 	def effectRange(self,start,end,formatting):
 		'''Insert an effect at _str[start:end]. Formatting must be a number'''+\
 		''' corresponding to an effect. As default, 0 is reverse and 1 is underline'''
-		effectOn = 1 << formatting
-		effectOff = effectOn << _NUM_EFFECTS
-		i = 0
+		effect = 1 << formatting
 		if start > self.maxpos:
-			lastColor = self.formatting[-1]&(~_EFFECTS_BITS)
 			self.positions.append(start)
-			self.formatting.append(lastColor | effectOn)
-			self.formatting.append(lastColor | effectOn | effectOff)
+			self.formatting.append(effect)
+			self.formatting.append(effect)
 			self.maxpos = end
 			return
-		else:
-			while start > self.positions[i]:
-				i += 1
-			if self.positions[i] == start:	#if we're writing into a number
-				self.formatting[i] |= effectOn
-			else:
-				self.positions.insert(i,start)
-				self.formatting.insert(i,self.formatting[i-1]&(~_EFFECTS_BITS) | effectOn)
-				i += 1
 
+		i = 0
+		while start > self.positions[i]:
+			i += 1
+		if self.positions[i] == start:	#if we're writing into a number
+			self.formatting[i] |= effect
+		else:
+			lastcolor = i < 1 and 0 or (self.formatting[i-1]&(~_EFFECTS_BITS))
+			self.positions.insert(i,start)
+			self.formatting.insert(i,lastcolor | effect)
+			i += 1
+		
+		i += 1
 		while i < len(self.positions) and end > self.positions[i]:
-			self.formatting[i] |= effectOn
-			if self.formatting[i] & effectOff: #if this effect turns off here
-				self.formatting[i] ^= effectOff
+			if self.formatting[i] & effect: #if this effect turns off here
+				self.formatting[i] ^= effect
 			i += 1
 		if i == len(self.positions):
 			self.positions.append(end)
-			self.formatting.append(self.formatting[i-1]&(~_EFFECTS_BITS) | effectOn | effectOff)
+			self.formatting.append(self.formatting[i-1]&(~_EFFECTS_BITS) | effect)
 			self.maxpos = end
 		elif self.positions[i] == end:		#position exists
-			self.formatting[i] |= effectOn | effectOff
+			self.formatting[i] |= effect
 		else:
 			self.positions.insert(i,end)
-			self.formatting.insert(i,self.formatting[i-1]&(~_EFFECTS_BITS) | effectOn | effectOff)
+			self.formatting.insert(i,self.formatting[i-1]&(~_EFFECTS_BITS) | effect)
 
 	def addGlobalEffect(self, effectNumber):
 		'''Add effect to string'''
@@ -331,16 +325,27 @@ class coloring:
 
 		formatPos = 0
 		getFormat = True
-		lastFormat = ''
+		lastColor = 0
+		lastEffect = 0
 		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
 			lenj = wcwidth(j)
 			if getFormat and pos == self.positions[formatPos]:
 				lineBuffer += self._str[start:pos]
 				start = pos
-				lastFormat = parseFormatting(self.formatting[formatPos])
-				lineBuffer += lastFormat
+				lastColor = (self.formatting[formatPos] >> _NUM_EFFECTS) or lastColor
+				nextEffect = self.formatting[formatPos] & _EFFECTS_BITS
 				formatPos += 1
 				getFormat = formatPos != len(self.positions)
+				if space > 0:
+					formatting = parseFormatting(lastColor)
+					for i in range(_NUM_EFFECTS):
+						if ((1 << i) & nextEffect):
+							if ((1 << i) & lastEffect):
+								formatting += _EFFECTS[i][1]
+							else:
+								formatting += _EFFECTS[i][0]
+					lineBuffer += formatting
+				lastEffect ^= nextEffect
 			if j == '\t':			#tabs are the length of outdents
 				lenj = outdentLen
 				lineBuffer += self._str[start:pos]
@@ -349,7 +354,7 @@ class coloring:
 			elif j == '\n':
 				lineBuffer += self._str[start:pos]
 				broken.append(lineBuffer + CLEAR_FORMATTING)
-				lineBuffer = outdent + lastFormat
+				lineBuffer = outdent + parseFormatting(lastColor,lastEffect)
 				start = pos+1
 				lastcol = 0
 				space = TABSPACE
@@ -363,11 +368,11 @@ class coloring:
 			if space < 0:			#time to break
 				if lastcol < THRESHOLD and lastcol > 0:
 					broken.append(lineBuffer + CLEAR_FORMATTING)
-					lineBuffer = outdent + lastFormat
+					lineBuffer = outdent + parseFormatting(lastColor,lastEffect)
 					lenj += lastcol
 				else:
 					broken.append("{}{}{}".format(lineBuffer,self._str[start:pos],CLEAR_FORMATTING))
-					lineBuffer = outdent + lastFormat
+					lineBuffer = outdent + parseFormatting(lastColor,lastEffect)
 					start = pos
 				lastcol = 0
 				space = TABSPACE - lenj

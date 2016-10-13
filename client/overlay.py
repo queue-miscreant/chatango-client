@@ -341,16 +341,12 @@ class listOverlay(overlayBase):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
 			row = (len(value) > maxx) and value[:max(half,1)] + "..." + value[min(-half+3,-1):] or value
-			row = box.just(row)
+			row = coloring(box.just(row))
 			if value and self._drawOther is not None:
-				rowcol = coloring(row)
-				self._drawOther(rowcol,i+partition)
-				row = str(rowcol)
+				self._drawOther(row,i+partition)
 			if i+partition == self.it:
-				row = SELECTED(row)
-			else:
-				row += CLEAR_FORMATTING
-			lines[i+1] = box.noform(row)
+				row.addGlobalEffect(0)
+			lines[i+1] = box.noform(str(row))
 		lines[-1] = box.bottom(self._modes[self.mode])
 		return lines
 	#predefined list iteration methods

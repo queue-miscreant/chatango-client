@@ -336,9 +336,9 @@ class chatangoOverlay(overlay.mainOverlay):
 		dispList = {i:dispList.count(i) for i in dispList}
 		dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
 		def drawIgnored(string,i):
-			if dispList[i].split(' ')[0] not in ignores: return
-			string.insertColor(-1,3)
+			if dispList[i][:dispList[i].find(' ')] not in ignores: return
 			string[:-1]+'i'
+			string.insertColor(-1,3)
 		
 		box = overlay.listOverlay(self.parent,sorted(dispList),drawIgnored)
 		box.addKeys({
