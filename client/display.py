@@ -3,7 +3,6 @@
 '''Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.'''
-#TODO breaklines built into coloring
 
 import re
 from .wcwidth import wcwidth
@@ -55,7 +54,7 @@ _COLORS =	['\x1b[39;22;49m'	#Normal/Normal
 _NUM_PREDEFINED = len(_COLORS)
 #clear formatting
 CLEAR_FORMATTING = '\x1b[m'
-SELECTED = lambda x: _EFFECTS_O['reverse'][0] + x + CLEAR_FORMATTING
+SELECTED = lambda x: _EFFECTS[0][0] + x + CLEAR_FORMATTING
 CHAR_CURSOR = '\x1b[s'
 _TABLEN = 4
 #arbitrary number of characters a scrollable can have and not scroll
@@ -102,14 +101,6 @@ def decolor(string):
 	'''Replace all ANSI escapes with null string'''
 	new = _ANSI_ESC_RE.subn('',string)
 	return new[0]
-
-def parseFormatting(color,effect = None):
-	form = color > 0 and _COLORS[color-1] or ''
-	if effect:	#nonzero
-		for i in range(_NUM_EFFECTS):
-			if effect & (1 << i):
-				form += _EFFECTS[i][0]
-	return form
 
 class coloringold:
 	'''Container for a string and default color'''
@@ -189,10 +180,20 @@ class coloring:
 		'''Colorize the string'''
 		ret = self._str
 		tracker = 0
+		formatting = ''
+		lastEffect = 0
 		for pos,form in zip(self.positions,self.formatting):
-			form = parseFormatting(form)
-			ret = ret[:pos+tracker] + form + ret[pos+tracker:]
-			tracker += len(form)
+			color = form >> _NUM_EFFECTS
+			nextEffect = form & _EFFECTS_BITS
+			formatting = color > 0 and _COLORS[color-1] or ''
+			for i in range(_NUM_EFFECTS):
+				if ((1 << i) & nextEffect):
+					if ((1 << i) & lastEffect):
+						formatting += _EFFECTS[i][1]
+					else:
+						formatting += _EFFECTS[i][0]
+			ret = ret[:pos+tracker] + formatting + ret[pos+tracker:]
+			tracker += len(formatting)
 		return ret + CLEAR_FORMATTING
 	def __getitem__(self,sliced):
 		'''Set the string to a slice of itself'''
@@ -231,7 +232,7 @@ class coloring:
 	def insertColor(self,position,formatting=None):
 		'''Insert positions/formatting into color dictionary. Formatting must '''+\
 		'''be the proper color (in _COLORS, added with defColor)'''
-		if position < 0: position += len(self._str)
+		if position < 0: position = max(position+len(self._str),0)
 		formatting = self.default if formatting is None else formatting
 		formatting += _NUM_PREDEFINED + 1
 		formatting <<= _NUM_EFFECTS
@@ -247,32 +248,30 @@ class coloring:
 			self.formatting.append(effect)
 			self.maxpos = end
 			return
-
 		i = 0
 		while start > self.positions[i]:
 			i += 1
 		if self.positions[i] == start:	#if we're writing into a number
 			self.formatting[i] |= effect
-		else:
-			lastcolor = i < 1 and 0 or (self.formatting[i-1]&(~_EFFECTS_BITS))
-			self.positions.insert(i,start)
-			self.formatting.insert(i,lastcolor | effect)
 			i += 1
-		
-		i += 1
+		else:
+			self.positions.insert(i,start)
+			self.formatting.insert(i,effect)
+			i += 2
+
 		while i < len(self.positions) and end > self.positions[i]:
 			if self.formatting[i] & effect: #if this effect turns off here
 				self.formatting[i] ^= effect
 			i += 1
 		if i == len(self.positions):
 			self.positions.append(end)
-			self.formatting.append(self.formatting[i-1]&(~_EFFECTS_BITS) | effect)
+			self.formatting.append(effect)
 			self.maxpos = end
 		elif self.positions[i] == end:		#position exists
 			self.formatting[i] |= effect
 		else:
 			self.positions.insert(i,end)
-			self.formatting.insert(i,self.formatting[i-1]&(~_EFFECTS_BITS) | effect)
+			self.formatting.insert(i,effect)
 
 	def addGlobalEffect(self, effectNumber):
 		'''Add effect to string'''
@@ -337,14 +336,13 @@ class coloring:
 				formatPos += 1
 				getFormat = formatPos != len(self.positions)
 				if space > 0:
-					formatting = parseFormatting(lastColor)
+					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
 					for i in range(_NUM_EFFECTS):
 						if ((1 << i) & nextEffect):
 							if ((1 << i) & lastEffect):
-								formatting += _EFFECTS[i][1]
+								lineBuffer += _EFFECTS[i][1]
 							else:
-								formatting += _EFFECTS[i][0]
-					lineBuffer += formatting
+								lineBuffer += _EFFECTS[i][0]
 				lastEffect ^= nextEffect
 			if j == '\t':			#tabs are the length of outdents
 				lenj = outdentLen
@@ -354,7 +352,11 @@ class coloring:
 			elif j == '\n':
 				lineBuffer += self._str[start:pos]
 				broken.append(lineBuffer + CLEAR_FORMATTING)
-				lineBuffer = outdent + parseFormatting(lastColor,lastEffect)
+				lineBuffer = outdent
+				lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
+				for i in range(_NUM_EFFECTS):
+					if lastEffect & (1 << i):
+						lineBuffer += _EFFECTS[i][0]
 				start = pos+1
 				lastcol = 0
 				space = TABSPACE
@@ -368,11 +370,19 @@ class coloring:
 			if space < 0:			#time to break
 				if lastcol < THRESHOLD and lastcol > 0:
 					broken.append(lineBuffer + CLEAR_FORMATTING)
-					lineBuffer = outdent + parseFormatting(lastColor,lastEffect)
+					lineBuffer = outdent
+					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
+					for i in range(_NUM_EFFECTS):
+						if lastEffect & (1 << i):
+							lineBuffer += _EFFECTS[i][0]
 					lenj += lastcol
 				else:
 					broken.append("{}{}{}".format(lineBuffer,self._str[start:pos],CLEAR_FORMATTING))
-					lineBuffer = outdent + parseFormatting(lastColor,lastEffect)
+					lineBuffer = outdent
+					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
+					for i in range(_NUM_EFFECTS):
+						if lastEffect & (1 << i):
+							lineBuffer += _EFFECTS[i][0]
 					start = pos
 				lastcol = 0
 				space = TABSPACE - lenj
