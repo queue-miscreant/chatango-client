@@ -4,7 +4,6 @@
 system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different stdout printing calls.'''
-#TODO	invoke promises on inputOverlay
 #TODO	rewrite docstrings
 #TODO	dbmsg that turns off cbreak mode and back on
 try:
@@ -21,6 +20,9 @@ environ.setdefault('ESCDELAY', '25')
 import time
 from threading import Thread
 from .display import *
+
+__all__ =	["start","soundBell","Box","filter","colorize","command",
+			"OverlayBase","TextOverlay","ListOverlay","ColorOverlay","InputOverlay","CommandOverlay","ConfirmOverlay","MainOverlay"]
 
 lasterr = None
 #break if smaller than these
@@ -96,7 +98,7 @@ def command(commandname):
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_RETURN_CURSOR = '\x1b[u\n\x1b[A'
 CHAR_COMMAND = "`"
-tabber(CHAR_COMMAND,_commands)
+Tabber(CHAR_COMMAND,_commands)
 		
 def centered(string,width,isselected=False):
 	'''Center (and select) some text'''
@@ -104,7 +106,7 @@ def centered(string,width,isselected=False):
 	if isselected: pre = SELECTED(pre)
 	return pre
 
-class box:
+class Box:
 	'''Namespace-esque thing for drawing boxes line by line'''
 	CHAR_HSPACE = "─"
 	CHAR_VSPACE = "│"
@@ -113,24 +115,24 @@ class box:
 	CHAR_BTML = "└"
 	CHAR_BTMR = "┘"
 	width = 0
-	noform = lambda x: box.CHAR_VSPACE + x + box.CHAR_VSPACE
+	noform = lambda x: Box.CHAR_VSPACE + x + Box.CHAR_VSPACE
 	def format(left,string,right,justchar = ' '):
 		'''Format and justify part of box'''
-		return '%s%s%s' % (left,box.just(string,justchar),right)
+		return '%s%s%s' % (left,Box.just(string,justchar),right)
 	def just(string,justchar = ' '):
 		'''Justify string by column width'''
-		return '%s%s' % (string,justchar*(box.width-2-strlen(string)))
+		return '%s%s' % (string,justchar*(Box.width-2-strlen(string)))
 	def part(fmt = '') :
 		'''Format with vertical spaces'''
-		return box.format(box.CHAR_VSPACE,fmt,box.CHAR_VSPACE)
+		return Box.format(Box.CHAR_VSPACE,fmt,Box.CHAR_VSPACE)
 	def top(fmt = ''):
 		'''Format with box tops'''
-		return box.format(box.CHAR_TOPL,fmt,box.CHAR_TOPR,box.CHAR_HSPACE)
+		return Box.format(Box.CHAR_TOPL,fmt,Box.CHAR_TOPR,Box.CHAR_HSPACE)
 	def bottom(fmt = ''):
 		'''Format with box bottoms'''
-		return box.format(box.CHAR_BTML,fmt,box.CHAR_BTMR,box.CHAR_HSPACE)
+		return Box.format(Box.CHAR_BTML,fmt,Box.CHAR_BTMR,Box.CHAR_HSPACE)
 
-class history:
+class History:
 	'''Container class for historical entries, a la an actual shell'''
 	def __init__(self):
 		self.history = []
@@ -176,13 +178,13 @@ def staticize(func,*args):
 	ret.__doc__ = func.__doc__	#preserve documentation text
 	return ret
 
-class overlayBase:
+class OverlayBase:
 	'''An overlay is a class that redirects input and modifies a list of (output) strings'''
 	def __init__(self,parent):
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
 		self._keys =	{27:	self._callalt
-				,curses.KEY_RESIZE:	staticize(parent.resize)}
+				,curses.KEY_RESIZE:	lambda x: parent.resize() or 1}
 		self._altkeys =	 {None:	lambda: -1}
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
@@ -256,10 +258,10 @@ class overlayBase:
 			else:
 				self._keys[i] = staticize(j,self)
 
-class textOverlay(overlayBase):
+class TextOverlay(OverlayBase):
 	'''Virtual overlay with text input (at bottom of screen)'''
 	def __init__(self,parent = None):
-		overlayBase.__init__(self,parent)
+		OverlayBase.__init__(self,parent)
 		self.text = parent.addScrollable()
 		self._keys.update({
 			-1:				self._input
@@ -285,8 +287,8 @@ class textOverlay(overlayBase):
 		'''Don't forget to pop scrollable'''
 		super().remove()
 		self.parent.popScrollable(self.text)
-	def controlhistory(self,history,scroll):
-		'''Add key definitions for standard controls for history `history` '''+\
+	def controlHistory(self,history,scroll):
+		'''Add key definitions for standard controls for History `history` '''+\
 		'''and scrollable `scroll`'''
 		nexthist = lambda x: scroll.setstr(history.nexthist())
 		prevhist = lambda x: scroll.setstr(history.prevhist())
@@ -298,7 +300,7 @@ class textOverlay(overlayBase):
 			,curses.KEY_DOWN:	prevhist
 		})
 
-class listOverlay(overlayBase):
+class ListOverlay(OverlayBase):
 	'''Display a list of objects, optionally drawing something at the end of each line'''
 	replace = True
 	#worst case column: |(value[0])...(value[1])|
@@ -307,7 +309,7 @@ class listOverlay(overlayBase):
 	#				  1	2			3
 	setmins(7,3)
 	def __init__(self,parent,outList,drawOther = None,modes = [""]):
-		overlayBase.__init__(self,parent)
+		OverlayBase.__init__(self,parent)
 		self.it = 0
 		self.mode = 0
 		self.list = outList
@@ -328,7 +330,7 @@ class listOverlay(overlayBase):
 		})
 	def __call__(self,lines):
 		'''Display a list in a box, basically. If too long, it gets shortened with an ellipsis in the middle'''
-		lines[0] = box.top()
+		lines[0] = Box.top()
 		size = self.parent.y-2
 		maxx = self.parent.x-2
 		#which portion of the lmaxyist is currently displaced
@@ -341,13 +343,13 @@ class listOverlay(overlayBase):
 			half = maxx//2
 			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
 			row = (len(value) > maxx) and value[:max(half,1)] + "..." + value[min(-half+3,-1):] or value
-			row = coloring(box.just(row))
+			row = Coloring(Box.just(row))
 			if value and self._drawOther is not None:
 				self._drawOther(row,i+partition)
 			if i+partition == self.it:
 				row.addGlobalEffect(0)
-			lines[i+1] = box.noform(str(row))
-		lines[-1] = box.bottom(self._modes[self.mode])
+			lines[i+1] = Box.noform(format(row))
+		lines[-1] = Box.bottom(self._modes[self.mode])
 		return lines
 	#predefined list iteration methods
 	def increment(self,amt):
@@ -359,7 +361,7 @@ class listOverlay(overlayBase):
 		'''Move to mode amt over, with looparound'''
 		self.mode = (self.mode + amt) % self._nummodes
 
-class colorOverlay(overlayBase):
+class ColorOverlay(OverlayBase):
 	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
 	replace = True
 	NAMES = ["Red","Green","Blue"]
@@ -369,7 +371,7 @@ class colorOverlay(overlayBase):
 	#		  1	2     3	 4	5 6  7  8
 	setmins(17,8)
 	def __init__(self,parent,initcolor = [127,127,127]):
-		overlayBase.__init__(self,parent)
+		OverlayBase.__init__(self,parent)
 		#allow setting from hex value
 		if isinstance(initcolor,str):
 			self.setHex(initcolor)
@@ -393,7 +395,7 @@ class colorOverlay(overlayBase):
 		'''Display 3 bars, their names, values, and string in hex'''
 		wide = (self.parent.x-2)//3 - 1
 		space = self.parent.y-7
-		lines[0] = box.top()
+		lines[0] = Box.top()
 		for i in range(space):
 			string = ""
 			#draw on this line (ratio of space alotted to line number = ratio of number to 255)
@@ -402,18 +404,18 @@ class colorOverlay(overlayBase):
 					string += getColor(rawNum(j+2))
 				string += " " * wide + CLEAR_FORMATTING + " "
 			#justify (including escape sequence length)
-			lines[i+1] = box.noform(box.just(string))
-		sep = box.part("")
+			lines[i+1] = Box.noform(Box.just(string))
+		sep = Box.part("")
 		lines[-6] = sep
 		names,vals = "",""
 		for i in range(3):
 			names += centered(self.NAMES[i],wide,		i==self._rgb)
 			vals += centered(str(self.color[i]),wide,	i==self._rgb)
-		lines[-5] = box.part(names) #4 lines
-		lines[-4] = box.part(vals) #3 line
+		lines[-5] = Box.part(names) #4 lines
+		lines[-4] = Box.part(vals) #3 line
 		lines[-3] = sep #2 lines
-		lines[-2] = box.part(self.getHex().rjust(int(wide*1.5)+3)) #1 line
-		lines[-1] = box.bottom() #last line
+		lines[-2] = Box.part(self.getHex().rjust(int(wide*1.5)+3)) #1 line
+		lines[-1] = Box.bottom() #last line
 	#predefined self-traversal methods
 	def increment(self,amt):
 		'''Increase the selected color by amt'''
@@ -428,11 +430,11 @@ class colorOverlay(overlayBase):
 		'''Set self.color from hex'''
 		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
 
-class inputOverlay(textOverlay):
+class InputOverlay(TextOverlay):
 	'''Replacement? for input()'''
 	replace = False
 	def __init__(self,parent,prompt,password = False,end = False):
-		textOverlay.__init__(self,parent)
+		TextOverlay.__init__(self,parent)
 		self._done = False
 		self._prompt = prompt
 		self._prompts,self._numprompts = breaklines(self._prompt,parent.x-2)
@@ -449,11 +451,11 @@ class inputOverlay(textOverlay):
 		'''Display the text in roughly the middle, in a box'''
 		start = self.parent.y//2 - self._numprompts//2
 		end = self.parent.y//2 + self._numprompts
-		lines[start] = box.top()
+		lines[start] = Box.top()
 		for i,j in enumerate(self._prompts):
-			lines[start+i+1] = box.part(j)
+			lines[start+i+1] = Box.part(j)
 		#preserve the cursor position save
-		lines[end+1] = box.bottom()
+		lines[end+1] = Box.bottom()
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
@@ -486,13 +488,13 @@ class inputOverlay(textOverlay):
 		newThread.daemon = True
 		newThread.start()
 
-class commandOverlay(textOverlay):
+class CommandOverlay(TextOverlay):
 	replace = False
-	history = history()	#global command history
+	history = History()	#global command history
 	def __init__(self,parent = None):
-		textOverlay.__init__(self,parent)
+		TextOverlay.__init__(self,parent)
 		self.text.setnonscroll(CHAR_COMMAND)
-		self.controlhistory(self.history,self.text)
+		self.controlHistory(self.history,self.text)
 		self._keys.update({
 			10:		staticize(self._run)
 			,127:	staticize(self._backspacewrap)
@@ -518,7 +520,7 @@ class commandOverlay(textOverlay):
 		command = _commands[commandname]
 		try:
 			add = command(self.parent,text[space+1:].split(' '))
-			if isinstance(add,overlayBase):
+			if isinstance(add,OverlayBase):
 				self.swap(add)
 				return
 		except Exception as exc:
@@ -527,11 +529,11 @@ class commandOverlay(textOverlay):
 		except KeyboardInterrupt: pass
 		return -1
 
-class escapeOverlay(overlayBase):
+class EscapeOverlay(OverlayBase):
 	'''Overlay for redirecting input after \ is pressed'''
 	replace = False
 	def __init__(self,parent,scroll):
-		overlayBase.__init__(self,parent)
+		OverlayBase.__init__(self,parent)
 		self._keys.update({
 			-1:		quitlambda
 			,10:		quitlambda
@@ -540,18 +542,18 @@ class escapeOverlay(overlayBase):
 			,ord('t'):	lambda x: scroll.append('\t') or -1
 		})
 
-class confirmOverlay(overlayBase):
+class ConfirmOverlay(OverlayBase):
 	'''Overlay to confirm selection confirm y/n (no slash)'''
 	replace = False
 	def __init__(self,parent,prompt,confirmfunc):
-		overlayBase.__init__(self,parent)
+		OverlayBase.__init__(self,parent)
 		self.parent.holdBlurb(prompt)
 		self._keys.update({ #run these in order
 			ord('y'):	lambda x: confirmfunc() or self.parent.releaseBlurb() or -1
 			,ord('n'):	lambda x: self.parent.releaseBlurb() or -1
 		})
 
-class mainOverlay(textOverlay):
+class MainOverlay(TextOverlay):
 	'''The main overlay. Optionally pushes time messages every 10 minutes '''+\
 	'''and can refresh blurbs every few seconds'''
 	replace = True
@@ -559,11 +561,11 @@ class mainOverlay(textOverlay):
 	INDENT = "    "
 	_msgSplit = "\x1b" 
 	def __init__(self,parent,pushtimes = True):
-		textOverlay.__init__(self,parent)
+		TextOverlay.__init__(self,parent)
 		self._pushtimes = pushtimes
-		self.history = history()
+		self.history = History()
 		self.clear()
-		self.controlhistory(self.history,self.text)
+		self.controlHistory(self.history,self.text)
 		self._keys.update({
 			ord('\\'):		staticize(self._replaceback)
 		})
@@ -596,16 +598,16 @@ class mainOverlay(textOverlay):
 			lines[linetraverse] = reverse + self._lines[selftraverse]
 			selftraverse += direction
 			linetraverse += direction
-		lines[-1] = box.CHAR_HSPACE*self.parent.x
+		lines[-1] = Box.CHAR_HSPACE*self.parent.x
 	#method overloading---------------------------------------------------------
 	def _input(self,chars):
 		'''Input some text'''
 		if not str(self.text) and len(chars) == 1 and \
 		chars[0] == ord(CHAR_COMMAND):
-			commandOverlay(self.parent).add()
+			CommandOverlay(self.parent).add()
 			return
 		#allow unicode input
-		return textOverlay._input(self,chars)
+		return TextOverlay._input(self,chars)
 	def _post(self):
 		'''Stop selecting'''
 		if self._selector:
@@ -647,7 +649,7 @@ class mainOverlay(textOverlay):
 				i=0
 	def _replaceback(self):
 		'''Add a newline if the next character is n, or a tab if the next character is t'''
-		escapeOverlay(self.parent,self.text).add()
+		EscapeOverlay(self.parent,self.text).add()
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _getnextmessage(self,step):
 		'''Backend for selecting message'''
@@ -725,7 +727,7 @@ class mainOverlay(textOverlay):
 		self._linesup = 0
 	def msgSystem(self, base):
 		'''System message'''
-		base = coloring(base)
+		base = Coloring(base)
 		base.insertColor(0,rawNum(1))
 		self._append(base)
 		self.parent.display()
@@ -735,7 +737,7 @@ class mainOverlay(textOverlay):
 		self.msgSystem(predicate+dtime)
 	def msgPost(self,post,*args):
 		'''Parse a message and apply all colorizers'''
-		post = coloring(post)
+		post = Coloring(post)
 		for i in _colorizers:
 			i(post,*args)
 		self._append(post,list(args))
@@ -760,18 +762,18 @@ class mainOverlay(textOverlay):
 			self._linesup += b+1
 			self._unfiltup += 1
 
-class nscrollable(scrollable):
+class NScrollable(Scrollable):
 	'''A scrollable that expects a main object as parent so that it '''+\
 	'''can updateinput()'''
 	def __init__(self,width,parent,index):
-		scrollable.__init__(self,width)
+		Scrollable.__init__(self,width)
 		self.parent = parent
 		self.index = index
 	def _onchanged(self):
 		self.parent.updateinput()
 
 #MAIN CLIENT--------------------------------------------------------------------
-class _schedule:
+class _Schedule:
 	'''Simple class for scheduling displays'''
 	def __init__(self):
 		self._scheduler = []
@@ -799,7 +801,7 @@ class _schedule:
 		self._debounce = newbounce
 		return prev
 
-class main:
+class Main:
 	'''Main class; handles all IO and defers to overlays'''
 	last = 0
 	def __init__(self):
@@ -808,7 +810,7 @@ class main:
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
 
-		self._schedule = _schedule()
+		self._schedule = _Schedule()
 		self.active = True
 		self.candisplay = True
 		#guessed terminal dimensions
@@ -888,7 +890,7 @@ class main:
 		'''Update input'''
 		self._schedule(self._updateinput)
 	def newBlurb(self,message = ""):
-		'''Add blurb. Use in conjunction with mainOverlay to erase'''
+		'''Add blurb. Use in conjunction with MainOverlay to erase'''
 		self._schedule(self._printblurb	,message,time.time())
 	def holdBlurb(self,string):
 		'''Hold blurb. Sets self.last to -1, making newBlurb not draw'''
@@ -903,7 +905,7 @@ class main:
 	#Overlay Frontends---------------------------------------------------------
 	def addOverlay(self,new):
 		'''Add overlay'''
-		if not isinstance(new,overlayBase): return
+		if not isinstance(new,OverlayBase): return
 		new.index = len(self._ins)
 		self._ins.append(new)
 		if new.replace: self._lastReplace = new.index
@@ -922,7 +924,7 @@ class main:
 			self._lastReplace = newReplace
 		self.display()
 	def addScrollable(self):
-		newScroll = nscrollable(self.x,self,len(self._scrolls))
+		newScroll = NScrollable(self.x,self,len(self._scrolls))
 		self._scrolls.append(newScroll)
 		self.updateinput()
 		return newScroll
@@ -968,7 +970,7 @@ class main:
 		'''Resize the GUI'''
 		newy, newx = self._screen.getmaxyx()
 		newy -= RESERVE_LINES
-		box.width = newx
+		Box.width = newx
 		try:	#TODO formattingexception's name seems vauge here
 			if newy < _MIN_Y or newx < _MIN_X:
 				raise FormattingException()
@@ -998,7 +1000,7 @@ class main:
 
 def start(target,*args):
 	'''Start the client. Run this!'''
-	main_instance = main()
+	main_instance = Main()
 	main_instance.resize()
 	#daemonize functions bot_thread
 	bot_thread = Thread(target=main_instance.catcherr(target,main_instance,*args))
@@ -1012,11 +1014,11 @@ def start(target,*args):
 @command('help')
 def listcommands(parent,args):
 	def select(self):
-		new = commandOverlay(parent)
+		new = CommandOverlay(parent)
 		new.text.append(self.list[self.it])
 		self.swap(new)
 
-	commandsList = listOverlay(parent,list(_commands))
+	commandsList = ListOverlay(parent,list(_commands))
 	commandsList.addKeys({
 		'enter':select
 	})

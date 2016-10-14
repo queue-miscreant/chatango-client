@@ -102,7 +102,7 @@ def decolor(string):
 	new = _ANSI_ESC_RE.subn('',string)
 	return new[0]
 
-class coloringold:
+class Coloringold:
 	'''Container for a string and default color'''
 	def __init__(self,string,default=None):
 		self._str = string
@@ -165,7 +165,7 @@ class coloringold:
 		effect = getEffect(effect)
 		self.colorByRegex(regex,lambda x: effect[0],group,effect[1])
 
-class coloring:
+class Coloring:
 	'''Container for a string and default color'''
 	def __init__(self,string,default=0):
 		self._str = string
@@ -175,8 +175,10 @@ class coloring:
 		self.maxpos = -1
 	def __repr__(self):
 		'''Get the string contained'''
-		return "coloring({}, positions = {}, formatting = {})".format(repr(self._str),self.positions,self.formatting)
+		return "Coloring({}, positions = {}, formatting = {})".format(repr(self._str),self.positions,self.formatting)
 	def __str__(self):
+		return self._str
+	def __format__(self):
 		'''Colorize the string'''
 		ret = self._str
 		tracker = 0
@@ -209,9 +211,7 @@ class coloring:
 		for pos,i in enumerate(self.positions):
 			self.positions[pos] = i + len(other)
 		return self
-	def get(self):
-		return self._str
-	
+
 	def _insertColor(self,position,formatting):
 		'''Backend for insertColor that doesn't do checking on formatting'''
 		if position > self.maxpos:
@@ -245,6 +245,7 @@ class coloring:
 		if start > self.maxpos:
 			self.positions.append(start)
 			self.formatting.append(effect)
+			self.positions.append(end)
 			self.formatting.append(effect)
 			self.maxpos = end
 			return
@@ -477,7 +478,7 @@ def breaklines(string,length,outdent=''):
 
 	return broken,len(broken)
 
-class scrollable:
+class Scrollable:
 	'''Scrollable text input'''
 	def __init__(self,width,string=''):
 		self._str = string
@@ -549,7 +550,7 @@ class scrollable:
 		#if there is no lastspace, settle for 0
 		search = self._str[lastSpace+1:self._pos]
 		if lastSpace == -1: search = self._nonscroll + search
-		ret = tabber.complete(search)
+		ret = Tabber.complete(search)
 		if ret:
 			self.append(ret + " ")
 		
@@ -630,35 +631,31 @@ class scrollable:
 		self._disp = 0
 		self.movepos(len(self._str))
 
-class tabber:
+class Tabber:
 	'''Class for holding new tab-completers'''
 	prefixes = []			#list of prefixes to search for
-	fittinglambdas = []		#functions that take an incomplete argument and transform it to something in the list
 	suggestionlists = []	#list of (references to) lists for each prefix paradigm
 	def __init__(self,newPrefix,newList,ignore=None):
 		'''Add a new tabbing method'''
 		self.prefixes.append(newPrefix)
 		self.suggestionlists.append(newList)
-		self.fittinglambdas.append(ignore)
 	
 	def complete(incomplete):
 		'''Find rest of a name in a list'''
 		#O(|prefixes|*|suggestionlists|), so n**2
-		for pno,prefix in enumerate(tabber.prefixes):
+		for pno,prefix in enumerate(Tabber.prefixes):
 			preflen = len(prefix)
 			if (incomplete[:preflen] == prefix):
-				istransformed = bool(callable(tabber.fittinglambdas[pno]))
 				search = incomplete[preflen:]
 				#search for the transformed search
-				for complete in list(tabber.suggestionlists[pno]):
+				for complete in list(Tabber.suggestionlists[pno]):
 					#run the transforming lambda
-					if istransformed: complete = tabber.fittinglambdas[pno](complete)
 					if not complete.find(search):	#in is bad practice
 						return complete[len(incomplete)-1:]
 				return ""
 		return ""
 
-class promoteSet:
+class PromoteSet:
 	'''Set with ordering like a list, whose elements can be promoted to the front'''
 	def __init__(self,iterable = None):
 		self._list = list()

@@ -15,21 +15,21 @@ Options:
 	-nc:			No custom script import
 	--help:			Display this page
 '''
-#TODO	Something with checking premature group removes
-#TODO	Messages dropping when ping coincides with message?
 #TODO	Modifiable options like the threshold to ask to open links
-#TODO	Checkem command (spawn an anon and send message "check em")
 #TODO	Callback for when maximum message is reached (call whatever method gets more messages from chatango)
+#TODO	Messages dropping when ping coincides with message?
+#TODO	Something with checking premature group removes
 
-import sys
 import client
 #readablity
 from client import overlay
 from client import linkopen
+import sys
+import os
+import time
 import chlib
 import re
 import json
-import os
 
 chatbot = None
 write_to_save = 1
@@ -93,8 +93,8 @@ def sendToFile(writeFrom,filePath = SAVE_PATH):
 		raise IOError("Error writing creds! Aborting...")
 
 #bot for interacting with chat
-class chat_bot(chlib.ConnectionManager):
-	members = client.promoteSet()
+class ChatBot(chlib.ConnectionManager):
+	members = client.PromoteSet()
 
 	def __init__(self,creds,parent):
 		self.creds = creds
@@ -102,21 +102,19 @@ class chat_bot(chlib.ConnectionManager):
 		self.isinited = 0
 		self.me = None
 		self.joinedGroup = None
-		self.mainOverlay = chatangoOverlay(parent,self)
+		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
-		client.tabber("@",self.members)
+		client.Tabber("@",self.members)
 		
 	def main(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		chlib.ConnectionManager.__init__(self, self.creds['user'], self.creds['passwd'], False)
+		chatbot.mainOverlay.msgSystem('Connecting')
 		self.isinited = 1
+		chatbot.mainOverlay.parent.updateinfo(None,self.creds.get('user'))
+		chatbot.addGroup(self.creds.get('room'))
 		chlib.ConnectionManager.main(self)
-
-	def start(self,*args):
-		self.mainOverlay.msgSystem('Connecting')
-		self.mainOverlay.parent.updateinfo(None,self.creds.get('user'))
-		self.addGroup(self.creds.get('room'))
 	
 	def stop(self):
 		if not self.isinited: return
@@ -132,11 +130,9 @@ class chat_bot(chlib.ConnectionManager):
 		self.creds['room'] = newgroup
 		self.addGroup(newgroup)
 
-	def setFormatting(self, newFormat = None):
+	def setFormatting(self):
+		#TODO just modify creds directly
 		group = self.joinedGroup
-		
-		if newFormat is not None:
-			self.creds['formatting'] = newFormat
 		
 		group.setFontColor(self.creds['formatting'][0])
 		group.setNameColor(self.creds['formatting'][1])
@@ -180,7 +176,7 @@ class chat_bot(chlib.ConnectionManager):
 		#and is short-circuited
 		isreply = self.me is not None and ("@"+self.me.lower() in post.post.lower())
 		#sound bell
-		if isreply and not ishistory: overlay.soundBell()
+		if isreply and not ishistory: client.soundBell()
 		#format as ' user: message'
 		msg = '%s: %s'%(post.user,post.post)
 		linkopen.parseLinks(msg)
@@ -217,9 +213,9 @@ class chat_bot(chlib.ConnectionManager):
 		self.mainOverlay.parent.newBlurb("%s has %s" % (user,(bit=="1") and "joined" or "left"))
 
 #OVERLAY EXTENSION--------------------------------------------------------------------------------------
-class chatangoOverlay(overlay.mainOverlay):
+class ChatangoOverlay(client.MainOverlay):
 	def __init__(self,parent,bot):
-		overlay.mainOverlay.__init__(self,parent)
+		client.MainOverlay.__init__(self,parent)
 		self.bot = bot
 		self.addKeys({	'enter':	self.onenter
 						,'a-enter':	self.onaltenter
@@ -239,13 +235,13 @@ class chatangoOverlay(overlay.mainOverlay):
 		if self.isselecting():
 			try:
 				message = self.getselected()
-				msg = client.decolor(message[0])+' '
+				msg = str(message[0])+' '
 				alllinks = linkopen.LINK_RE.findall(msg)
 				def openall():
 					for i in alllinks:
 						linkopen.open_link(self.parent,i)
 				if len(alllinks) > 1:
-					overlay.confirmOverlay(self.parent,'Really open %d links? (y/n)'%\
+					client.ConfirmOverlay(self.parent,'Really open %d links? (y/n)'%\
 						len(alllinks),openall).add()
 				else:
 					openall()
@@ -265,13 +261,13 @@ class chatangoOverlay(overlay.mainOverlay):
 		if self.isselecting():
 			try:
 				message = self.getselected()
-				msg = client.decolor(message[0])+' '
+				msg = str(message[0])+' '
 				alllinks = linkopen.LINK_RE.findall(msg)
 				def openall():
 					for i in alllinks:
 						linkopen.open_link(self.parent,i)
 				if len(alllinks) > 1:
-					overlay.confirmOverlay(self.parent,'Really open %d links? (y/n)'%\
+					client.ConfirmOverlay(self.parent,'Really open %d links? (y/n)'%\
 						len(alllinks),openall).add()
 				else:
 					openall()
@@ -284,7 +280,7 @@ class chatangoOverlay(overlay.mainOverlay):
 			try:
 				#allmessages contain the colored message and arguments
 				message = self.getselected()
-				msg = client.decolor(message[0])
+				msg = str(message[0])+' '
 				#first colon is separating the name from the message
 				colon = msg.find(':')
 				name = msg[1:colon]
@@ -307,8 +303,9 @@ class chatangoOverlay(overlay.mainOverlay):
 			#exit
 			return -1
 
-		box = overlay.listOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
-		box.addKeys({'enter':select})
+		box = client.ListOverlay(self.parent,linkopen.reverselinks(),None,linkopen.getdefaults())
+		box.addKeys({'enter':select
+					,'tab':lambda x: select(x) and 0})
 		box.add()
 
 	def F3(self):
@@ -340,7 +337,7 @@ class chatangoOverlay(overlay.mainOverlay):
 			string[:-1]+'i'
 			string.insertColor(-1,3)
 		
-		box = overlay.listOverlay(self.parent,sorted(dispList),drawIgnored)
+		box = client.ListOverlay(self.parent,sorted(dispList),drawIgnored)
 		box.addKeys({
 			'enter':select,
 			'tab':tab,
@@ -356,39 +353,39 @@ class chatangoOverlay(overlay.mainOverlay):
 			#ask for font color
 			if me.it == 0:
 				def enter(me):
-					formatting[0] = me.getHex()
-					self.bot.setFormatting(formatting)
+					formatting[0] = me.getHex()	#this is still by reference
+					self.bot.setFormatting()
 					return -1
 
-				furtherInput = overlay.colorOverlay(self.parent,formatting[0])
+				furtherInput = client.ColorOverlay(self.parent,formatting[0])
 				furtherInput.addKeys({'enter':enter})
 			#ask for name color
 			elif me.it == 1:
 				def enter(me):
 					formatting[1] = me.getHex()
-					self.bot.setFormatting(formatting)
+					self.bot.setFormatting()
 					return -1
 			
-				furtherInput = overlay.colorOverlay(self.parent,formatting[1])
+				furtherInput = client.ColorOverlay(self.parent,formatting[1])
 				furtherInput.addKeys({'enter':enter})
 			#font face
 			elif me.it == 2:
 				def enter(me):
 					formatting[2] = str(me.it)
-					self.bot.setFormatting(formatting)
+					self.bot.setFormatting()
 					return -1
 				
-				furtherInput = overlay.listOverlay(self.parent,FONT_FACES)
+				furtherInput = client.ListOverlay(self.parent,FONT_FACES)
 				furtherInput.addKeys({'enter':enter})
 				furtherInput.it = int(formatting[2])
 			#ask for font size
 			elif me.it == 3:
 				def enter(me):
 					formatting[3] = FONT_SIZES[me.it]
-					self.bot.setFormatting(formatting)
+					self.bot.setFormatting()
 					return -1
 					
-				furtherInput = overlay.listOverlay(self.parent,list(map(str,FONT_SIZES)))
+				furtherInput = client.ListOverlay(self.parent,list(map(str,FONT_SIZES)))
 				furtherInput.addKeys({'enter':enter})
 				furtherInput.it = FONT_SIZES.index(formatting[3])
 			#insurance
@@ -397,7 +394,7 @@ class chatangoOverlay(overlay.mainOverlay):
 			furtherInput.add()
 			#set formatting, even if changes didn't occur
 			
-		box = overlay.listOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
+		box = client.ListOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
 		box.addKeys({
 			'enter':select,
 		})
@@ -418,7 +415,7 @@ class chatangoOverlay(overlay.mainOverlay):
 			col = i and i+12 or 16
 			string.insertColor(-1,col)
 						
-		box = overlay.listOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
+		box = client.ListOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
 		box.addKeys({
 			'enter':select
 			,'tab':	ontab
@@ -432,7 +429,7 @@ class chatangoOverlay(overlay.mainOverlay):
 			try:
 				#allmessages contain the colored message and arguments
 				message = self.getselected()
-				msg = client.decolor(message[0])
+				msg = str(message[0])
 				#first colon is separating the name from the message
 				colon = msg.find(':')
 				name = msg[1:colon]
@@ -456,7 +453,7 @@ class chatangoOverlay(overlay.mainOverlay):
 
 	def joingroup(self):
 		'''Join a new group'''
-		inp = overlay.inputOverlay(self.parent,"Enter group name")
+		inp = client.InputOverlay(self.parent,"Enter group name")
 		inp.add()
 		inp.runOnDone(lambda x: self.clear() or self.bot.changeGroup(x))
 
@@ -487,25 +484,25 @@ def getColor(name,init = 6,split = 109,rot = 6):
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-@overlay.colorize
+@client.colorize
 def defaultcolor(msg,*args):
 	msg.default = getColor(args[0])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
 LINE_RE = re.compile(r'^([!#]?\w+?: )?(@\w* )*(.+)$',re.MULTILINE)
-@overlay.colorize
+@client.colorize
 def greentext(msg,*args):
 	#match group 3 (the message sans leading replies)
 	msg.colorByRegex(LINE_RE,lambda x: x[0] == '>' and 11 or None,3,'')
 
 #color links white
-@overlay.colorize
+@client.colorize
 def link(msg,*args):
-	msg.colorByRegex(linkopen.LINK_RE,overlay.rawNum(0),1)
+	msg.colorByRegex(linkopen.LINK_RE,client.rawNum(0),1)
 
 #color replies by the color of the replier
 REPLY_RE = re.compile(r"@\w+?\b")
-@overlay.colorize
+@client.colorize
 def names(msg,*args):
 	def check(group):
 		name = group.lower()[1:]
@@ -516,12 +513,12 @@ def names(msg,*args):
 
 #underline quotes
 QUOTE_RE = re.compile(r"`[^`]+`")
-@overlay.colorize
+@client.colorize
 def quotes(msg,*args):
 	msg.effectByRegex(QUOTE_RE,1)
 		
 #draw replies, history, and channel
-@overlay.colorize
+@client.colorize
 def chatcolors(msg,*args):
 	msg.insertColor(0)		#make sure we color the name right
 	args[1] and msg.addGlobalEffect(0)	#reply
@@ -529,7 +526,7 @@ def chatcolors(msg,*args):
 	(' ' + msg).insertColor(0,args[3]+12)	#channel
 
 #COMMANDS-----------------------------------------------------------------------------------------------
-@overlay.command('ignore')
+@client.command('ignore')
 def ignore(parent,arglist):
 	global chatbot,ignores
 	person = arglist[0]
@@ -538,7 +535,7 @@ def ignore(parent,arglist):
 	ignores.append(person)
 	chatbot.mainOverlay.redolines()
 
-@overlay.command('unignore')
+@client.command('unignore')
 def unignore(parent,arglist):
 	global chatbot,ignores
 	person = arglist[0]
@@ -547,25 +544,44 @@ def unignore(parent,arglist):
 	ignores.remove(person)
 	chatbot.mainOverlay.redolines()
 
-@overlay.command('keys')
+@client.command('keys')
 def listkeys(parent,args):
 	'''Get list of the chatbot's keys'''
-	keysList = overlay.listOverlay(parent,dir(chatbot.mainOverlay))
+	keysList = client.ListOverlay(parent,dir(chatbot.mainOverlay))
 	keysList.addKeys({
 		'enter': lambda x: -1
 	})
 	return keysList
 
+class DubsBot(chlib.ConnectionManager):
+	def __init__(self):
+		chlib.ConnectionManager.__init__(self,'','',False)
+	def main(self,groupName):
+		self.addGroup(groupName)
+		chlib.ConnectionManager.start(self)
+		time.sleep(1)
+		chlib.ConnectionManager.stop(self)
+	def recvinited(self,group):
+		group.sendPost("Checkem",3)
+	def recvRemove(self,*args):
+		pass
+
+@client.command('checkem')
+def checkem(parent,arglist):
+	global chatbot
+	groupName = chatbot.creds['room']
+	DubsBot().main(groupName)
+
 #FILTERS------------------------------------------------------------------------------------------------
 #filter filtered channels
-@overlay.filter
+@client.filter
 def channelfilter(*args):
 	try:
 		return filtered_channels[args[3]]
 	except:
 		return True
 
-@overlay.filter
+@client.filter
 def ignorefilter(*args):
 	try:
 		return args[0] in ignores
@@ -578,7 +594,7 @@ def runClient(main,creds):
 	for num,i in enumerate(['user','passwd','room']):
 		#skip if supplied
 		if creds.get(i) is not None: continue
-		inp = overlay.inputOverlay(main,"Enter your " + ['username','password','room name'][num], num == 1,True)
+		inp = client.InputOverlay(main,"Enter your " + ['username','password','room name'][num], num == 1,True)
 		inp.add()
 		creds[i] = inp.waitForInput()
 		if not main.active: return
@@ -596,7 +612,7 @@ def runClient(main,creds):
 
 	global chatbot
 	#initialize chat bot
-	chatbot = chat_bot(creds,main)
+	chatbot = ChatBot(creds,main)
 	chatbot.main()
 
 if __name__ == '__main__':
@@ -626,7 +642,7 @@ if __name__ == '__main__':
 				credsArgFlag = 1
 				continue	#next argument
 			elif arg == '-g':		#group inline
-				creds_readwrite['room'] = 2	#no read from creds
+				creds_readwrite['room'] = 2		#write only to room
 				groupArgFlag = 1
 				continue
 			#arguments without subarguments

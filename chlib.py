@@ -764,7 +764,6 @@ class ConnectionManager(object):
 				self.acid.digest(group, raw)
 
 	def main(self):
-		self.start()
 		if self.pm:
 			self.addGroup(self.user)
 		while self.connected:
