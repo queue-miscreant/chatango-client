@@ -23,7 +23,7 @@ _ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")		#general ANSI escape
 _LAST_COLOR_RE =	re.compile("\x1b"+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _LAST_EFFECT_RE =	re.compile("\x1b"+r"\[2?[47]m")			#all effects that are on
 _UP_TO_WORD_RE = re.compile('([^{0}]*[{0}])*[^{0}]+[{0}]*'.format(_SANE_TEXTBOX))	#sane textbox word-backspace
-_LINE_BREAKING = " 　"
+_LINE_BREAKING = " 　-"	#line breaking characters
 #valid color names to add
 _COLOR_NAMES =	['black'
 				,'red'
@@ -170,21 +170,21 @@ class Coloring:
 	def __init__(self,string,default=0):
 		self._str = string
 		self.default = default
-		self.positions = []
-		self.formatting = []
-		self.maxpos = -1
+		self._positions = []
+		self._formatting = []
+		self._maxpos = -1
 	def __repr__(self):
 		'''Get the string contained'''
-		return "Coloring({}, positions = {}, formatting = {})".format(repr(self._str),self.positions,self.formatting)
+		return "Coloring({}, positions = {}, formatting = {})".format(repr(self._str),self._positions,self._formatting)
 	def __str__(self):
 		return self._str
-	def __format__(self):
+	def __format__(self,*args):
 		'''Colorize the string'''
 		ret = self._str
 		tracker = 0
 		formatting = ''
 		lastEffect = 0
-		for pos,form in zip(self.positions,self.formatting):
+		for pos,form in zip(self._positions,self._formatting):
 			color = form >> _NUM_EFFECTS
 			nextEffect = form & _EFFECTS_BITS
 			formatting = color > 0 and _COLORS[color-1] or ''
@@ -208,26 +208,26 @@ class Coloring:
 	def __radd__(self,other):
 		'''__add__ but from the other side'''
 		self._str = other + self._str
-		for pos,i in enumerate(self.positions):
-			self.positions[pos] = i + len(other)
+		for pos,i in enumerate(self._positions):
+			self._positions[pos] = i + len(other)
 		return self
 
 	def _insertColor(self,position,formatting):
 		'''Backend for insertColor that doesn't do checking on formatting'''
-		if position > self.maxpos:
-			self.positions.append(position)
-			self.formatting.append(formatting)
-			self.maxpos = position
+		if position > self._maxpos:
+			self._positions.append(position)
+			self._formatting.append(formatting)
+			self._maxpos = position
 			return
 		i = 0
-		while position > self.positions[i]:
+		while position > self._positions[i]:
 			i += 1
-		if self.positions[i] == position:		#position already used
-			effect = self.formatting[i] & _EFFECTS_BITS
-			self.formatting[i] = formatting | effect
+		if self._positions[i] == position:		#position already used
+			effect = self._formatting[i] & _EFFECTS_BITS
+			self._formatting[i] = formatting | effect
 		else:
-			self.positions.insert(i,position)
-			self.formatting.insert(i,formatting)
+			self._positions.insert(i,position)
+			self._formatting.insert(i,formatting)
 
 	def insertColor(self,position,formatting=None):
 		'''Insert positions/formatting into color dictionary. Formatting must '''+\
@@ -242,37 +242,37 @@ class Coloring:
 		'''Insert an effect at _str[start:end]. Formatting must be a number'''+\
 		''' corresponding to an effect. As default, 0 is reverse and 1 is underline'''
 		effect = 1 << formatting
-		if start > self.maxpos:
-			self.positions.append(start)
-			self.formatting.append(effect)
-			self.positions.append(end)
-			self.formatting.append(effect)
-			self.maxpos = end
+		if start > self._maxpos:
+			self._positions.append(start)
+			self._formatting.append(effect)
+			self._positions.append(end)
+			self._formatting.append(effect)
+			self._maxpos = end
 			return
 		i = 0
-		while start > self.positions[i]:
+		while start > self._positions[i]:
 			i += 1
-		if self.positions[i] == start:	#if we're writing into a number
-			self.formatting[i] |= effect
+		if self._positions[i] == start:	#if we're writing into a number
+			self._formatting[i] |= effect
 			i += 1
 		else:
-			self.positions.insert(i,start)
-			self.formatting.insert(i,effect)
+			self._positions.insert(i,start)
+			self._formatting.insert(i,effect)
 			i += 2
 
-		while i < len(self.positions) and end > self.positions[i]:
-			if self.formatting[i] & effect: #if this effect turns off here
-				self.formatting[i] ^= effect
+		while i < len(self._positions) and end > self._positions[i]:
+			if self._formatting[i] & effect: #if this effect turns off here
+				self._formatting[i] ^= effect
 			i += 1
-		if i == len(self.positions):
-			self.positions.append(end)
-			self.formatting.append(effect)
-			self.maxpos = end
-		elif self.positions[i] == end:		#position exists
-			self.formatting[i] |= effect
+		if i == len(self._positions):
+			self._positions.append(end)
+			self._formatting.append(effect)
+			self._maxpos = end
+		elif self._positions[i] == end:		#position exists
+			self._formatting[i] |= effect
 		else:
-			self.positions.insert(i,end)
-			self.formatting.insert(i,effect)
+			self._positions.insert(i,end)
+			self._formatting.insert(i,effect)
 
 	def addGlobalEffect(self, effectNumber):
 		'''Add effect to string'''
@@ -280,12 +280,12 @@ class Coloring:
 
 	def findColor(self,end):
 		'''Most recent color before end. Safe when no matches are found'''
-		if self.maxpos == -1:
+		if self._maxpos == -1:
 			return self.default and self.default + _NUM_PREDEFINED + 1 or 1
-		if end > self.maxpos:
-			return self.formatting[-1]
-		last = self.formatting[0]
-		for pos,form in zip(self.positions,self.formatting):
+		if end > self._maxpos:
+			return self._formatting[-1]
+		last = self._formatting[0]
+		for pos,form in zip(self._positions,self._formatting):
 			if end < pos:
 				return last
 			last = form
@@ -329,13 +329,13 @@ class Coloring:
 		lastEffect = 0
 		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
 			lenj = wcwidth(j)
-			if getFormat and pos == self.positions[formatPos]:
+			if getFormat and pos == self._positions[formatPos]:
 				lineBuffer += self._str[start:pos]
 				start = pos
-				lastColor = (self.formatting[formatPos] >> _NUM_EFFECTS) or lastColor
-				nextEffect = self.formatting[formatPos] & _EFFECTS_BITS
+				lastColor = (self._formatting[formatPos] >> _NUM_EFFECTS) or lastColor
+				nextEffect = self._formatting[formatPos] & _EFFECTS_BITS
 				formatPos += 1
-				getFormat = formatPos != len(self.positions)
+				getFormat = formatPos != len(self._positions)
 				if space > 0:
 					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
 					for i in range(_NUM_EFFECTS):
