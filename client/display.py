@@ -7,71 +7,79 @@ generic string containers.'''
 import re
 from .wcwidth import wcwidth
 
-#DEBUG STUFF--------------------------------------------------------------------
-def dbmsg(*args):
-	'''Since the client runs in a contained curses session, printing more '''+\
-	'''is out of the question. So just print to file 'debug' '''
-	with open("debug","a+") as a:
-		for i in args:
-			a.write(str(i)+"\t")
-		a.write("\n")
-		a.close()
+#all imports needed by overlay.py
+__all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
+			,"SELECT_AND_MOVE","dbmsg","rawNum","strlen"
+			,"Coloring","Scrollable","Tabber"]
 
 #REGEXES------------------------------------------------------------------------
-_SANE_TEXTBOX = r'\s\-/`~,;'			#sane textbox splitting characters
-_ANSI_ESC_RE = re.compile("\x1b"+r"\[[^A-z]*[A-z]")		#general ANSI escape
-_LAST_COLOR_RE =	re.compile("\x1b"+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
-_LAST_EFFECT_RE =	re.compile("\x1b"+r"\[2?[47]m")			#all effects that are on
-_UP_TO_WORD_RE = re.compile('([^{0}]*[{0}])*[^{0}]+[{0}]*'.format(_SANE_TEXTBOX))	#sane textbox word-backspace
-_LINE_BREAKING = " 　-"	#line breaking characters
+_SANE_TEXTBOX = r"\s\-/`~,;"			#sane textbox splitting characters
+_LAST_COLOR_RE =	re.compile('\x1b'+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
+_LAST_EFFECT_RE =	re.compile('\x1b'+r"\[2?[47]m")			#all effects that are on
+_UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
+_LINE_BREAKING = "- 　"	#line breaking characters
 #valid color names to add
-_COLOR_NAMES =	['black'
-				,'red'
-				,'green'
-				,'yellow'
-				,'blue'
-				,'magenta'
-				,'cyan'
-				,'white'
-				,''
-				,'none']
+_COLOR_NAMES =	["black"
+				,"red"
+				,"green"
+				,"yellow"
+				,"blue"
+				,"magenta"
+				,"cyan"
+				,"white"
+				,""
+				,"none"]
 #names of effects, and a tuple containing 'on' and 'off'
-_EFFECTS_O ={'reverse':		('\x1b[7m','\x1b[27m')
-			,'underline':	('\x1b[4m','\x1b[24m')
-			}
-_EFFECTS =	[('\x1b[7m','\x1b[27m')
-			,('\x1b[4m','\x1b[24m')
+_EFFECTS =	[("\x1b[7m","\x1b[27m")
+			,("\x1b[4m","\x1b[24m")
 			]
 _NUM_EFFECTS = len(_EFFECTS)
 _EFFECTS_BITS = (1 << _NUM_EFFECTS)-1
+_CAN_DEFINE_EFFECTS = True
 #storage for defined pairs
-_COLORS =	['\x1b[39;22;49m'	#Normal/Normal
-			,'\x1b[31;22;47m'	#Red/White
-			,'\x1b[31;22;41m'	#red
-			,'\x1b[32;22;42m'	#green
-			,'\x1b[34;22;44m'	#blue
+_COLORS =	["\x1b[39;22;49m"	#Normal/Normal
+			,"\x1b[31;22;47m"	#Red/White
+			,"\x1b[31;22;41m"	#red
+			,"\x1b[32;22;42m"	#green
+			,"\x1b[34;22;44m"	#blue
 			]
 _NUM_PREDEFINED = len(_COLORS)
-#clear formatting
-CLEAR_FORMATTING = '\x1b[m'
-SELECTED = lambda x: _EFFECTS[0][0] + x + CLEAR_FORMATTING
-CHAR_CURSOR = '\x1b[s'
+CHAR_CURSOR = "\x1b[s"
+CHAR_RETURN_CURSOR = "\x1b[u\n\x1b[A"
+SELECT = _EFFECTS[0][0]
+SELECT_AND_MOVE = CHAR_CURSOR + SELECT
+CLEAR_FORMATTING = "\x1b[m"
 _TABLEN = 4
 #arbitrary number of characters a scrollable can have and not scroll
 MAX_NONSCROLL_WIDTH = 5
 
-class FormattingException(Exception):
-	'''Exception for client.termform'''
+#DEBUG STUFF--------------------------------------------------------------------
+def dbmsg(*args):
+	'''
+	Since the client runs in a contained curses session, printing more
+	is out of the question. So just print to file `debug`
+	'''
+	with open("debug","a+") as a:
+		for i in args:
+			a.write(str(i)+'\t')
+		a.write('\n')
+
+#COLORING STUFF-----------------------------------------------------------------
+class DisplayException(Exception):
+	'''Exception for client.display'''
 	pass
 
-def defColor(fore, bold = None, back = 'none'):
+def defColor(fore, bold = None, back = "none"):
 	'''Define a new foreground/background pair, with optional intense color'''
 	global _COLORS
-	pair = '\x1b[3%d' % _COLOR_NAMES.index(fore);
+	pair = "\x1b[3%d" % _COLOR_NAMES.index(fore);
 	pair += bold and ";1" or ";22"
-	pair += ';4%d' % _COLOR_NAMES.index(back)
-	_COLORS.append(pair+'m')
+	pair += ";4%d" % _COLOR_NAMES.index(back)
+	_COLORS.append(pair+"m")
 def defEffect(on,off):
+	'''Define a new effect, turned on with `on`, and off with `off`'''
+	if not _CAN_DEFINE_EFFECTS:
+		raise DisplayException("cannot define effect; a Coloring object already exists")
 	global _EFFECTS,_NUM_EFFECTS,_EFFECTS_BITS
 	_EFFECTS.append((on,off))
 	_NUM_EFFECTS += 1
@@ -79,15 +87,18 @@ def defEffect(on,off):
 
 def getColor(c):
 	'''insertColor without position or coloring object'''
-	if c == None: return ''
+	if c == None: return ""
 	try:
 		return _COLORS[c + _NUM_PREDEFINED]
 	except IndexError:
-		raise FormattingException("Color definition %d not found"%c)
+		raise DisplayException("Color definition %d not found"%c)
 
 def rawNum(c):
-	'''Get raw pair number, without respect for number of predefined ones. '''+\
-	'''Use in conjunction with getColor (or insertColor) to use predefined colors'''
+	'''
+	Get raw pair number, without respect to number of predefined ones.
+	Use in conjunction with getColor or Coloring.insertColor to use
+	predefined colors
+	'''
 	return c - _NUM_PREDEFINED
 
 def getEffect(effect):
@@ -95,81 +106,15 @@ def getEffect(effect):
 	try:
 		return _EFFECTS_O[effect]
 	except KeyError:
-		raise FormattingException("Effect name %s not defined"%effect)
-
-def decolor(string):
-	'''Replace all ANSI escapes with null string'''
-	new = _ANSI_ESC_RE.subn('',string)
-	return new[0]
-
-class Coloringold:
-	'''Container for a string and default color'''
-	def __init__(self,string,default=None):
-		self._str = string
-		self.default = default
-	def __str__(self):
-		'''Colorize the string'''
-		return self._str
-	def __getitem__(self,sliced):
-		'''Set the string to a slice of itself'''
-		self._str = self._str[sliced]
-		return self
-	def __add__(self,other):
-		'''Set string to concatenation'''
-		self._str = self._str + other
-		return self
-	def __radd__(self,other):
-		'''__add__ but from the other side'''
-		self._str = other + self._str
-		return self
-	def insertColor(self,p,c=None):
-		'''Add a color at position p with color c'''
-		c = self.default if c is None else c
-		if type(c) is int: c = getColor(c)
-		self._str =  self._str[:p] + c + self._str[p:]
-		#return amount added to string
-		return len(c)
-	def addGlobalEffect(self, effect):
-		'''Add effect to string'''
-		effect = getEffect(effect)
-		self._str = effect[0] + self._str
-		#take all effect offs out
-		self._str = self._str.replace(effect[1],'')
-	def findColor(self,end):
-		'''Most recent color before end. Safe when no matches are found'''
-		lastcolor = {end-i.end(0):i.group(0) for i in \
-			 _LAST_COLOR_RE.finditer(self._str) if (end-i.end(0))>=0}
-		try:
-			return lastcolor[min(lastcolor)]
-		except:
-			return ''
-	def colorByRegex(self, regex, groupFunction, group = 0, post = None):
-		'''Color from a compiled regex, generating the respective color number from captured group. '''+\
-		'''groupFunction should be an int (or string) or callable that returns int (or string)'''
-		if not callable(groupFunction):
-			ret = groupFunction	#get another header
-			groupFunction = lambda x: ret
-		tracker = 0
-		for find in regex.finditer(str(self)+' '):
-			#we're iterating over the 'past string' so we need to preserve
-			#previous iterations
-			begin = tracker+find.start(group)
-			#find the most recent color
-			last = self.findColor(begin)
-			#insert the color
-			tracker += self.insertColor(begin,groupFunction(find.group(group)))
-			end = tracker+find.end(group)
-			#insert the end color and adjust the tracker (if we're conserving color)
-			tracker += (post is None) and self.insertColor(end,last) or self.insertColor(end,post)
-	def effectByRegex(self, regex, effect, group = 0):
-		effect = getEffect(effect)
-		self.colorByRegex(regex,lambda x: effect[0],group,effect[1])
+		raise DisplayException("Effect name %s not defined"%effect)
 
 class Coloring:
 	'''Container for a string and default color'''
-	def __init__(self,string,default=0):
+	def __init__(self,string):
+		global _CAN_DEFINE_EFFECTS
+		_CAN_DEFINE_EFFECTS = False
 		self._str = string
-		self.default = default
+		self.default = 0
 		self._positions = []
 		self._formatting = []
 		self._maxpos = -1
@@ -180,22 +125,22 @@ class Coloring:
 		return self._str
 	def __format__(self,*args):
 		'''Colorize the string'''
-		ret = self._str
+		ret = ""
 		tracker = 0
-		formatting = ''
 		lastEffect = 0
 		for pos,form in zip(self._positions,self._formatting):
 			color = form >> _NUM_EFFECTS
 			nextEffect = form & _EFFECTS_BITS
-			formatting = color > 0 and _COLORS[color-1] or ''
+			formatting = color > 0 and _COLORS[color-1] or ""
 			for i in range(_NUM_EFFECTS):
 				if ((1 << i) & nextEffect):
 					if ((1 << i) & lastEffect):
 						formatting += _EFFECTS[i][1]
 					else:
 						formatting += _EFFECTS[i][0]
-			ret = ret[:pos+tracker] + formatting + ret[pos+tracker:]
-			tracker += len(formatting)
+			ret += self._str[tracker:pos] + formatting
+			tracker = pos
+		ret += self._str[tracker:]
 		return ret + CLEAR_FORMATTING
 	def __getitem__(self,sliced):
 		'''Set the string to a slice of itself'''
@@ -230,8 +175,10 @@ class Coloring:
 			self._formatting.insert(i,formatting)
 
 	def insertColor(self,position,formatting=None):
-		'''Insert positions/formatting into color dictionary. Formatting must '''+\
-		'''be the proper color (in _COLORS, added with defColor)'''
+		'''
+		Insert positions/formatting into color dictionary. Formatting must
+		be the proper color (in _COLORS, added with defColor)
+		'''
 		if position < 0: position = max(position+len(self._str),0)
 		formatting = self.default if formatting is None else formatting
 		formatting += _NUM_PREDEFINED + 1
@@ -239,8 +186,10 @@ class Coloring:
 		self._insertColor(position,formatting)
 
 	def effectRange(self,start,end,formatting):
-		'''Insert an effect at _str[start:end]. Formatting must be a number'''+\
-		''' corresponding to an effect. As default, 0 is reverse and 1 is underline'''
+		'''
+		Insert an effect at _str[start:end]. Formatting must be a number
+		corresponding to an effect. As default, 0 is reverse and 1 is underline
+		'''
 		effect = 1 << formatting
 		if start > self._maxpos:
 			self._positions.append(start)
@@ -291,8 +240,11 @@ class Coloring:
 			last = form
 		return last
 	def colorByRegex(self, regex, groupFunction, group = 0, getLast = True):
-		'''Color from a compiled regex, generating the respective color number from captured group. '''+\
-		'''groupFunction should be an int (or string) or callable that returns int (or string)'''
+		'''
+		Color from a compiled regex, generating the respective color number
+		from captured group. groupFunction should be an int or callable that
+		returns int
+		'''
 		if not callable(groupFunction):
 			ret = groupFunction	#get another header
 			groupFunction = lambda x: ret
@@ -312,7 +264,7 @@ class Coloring:
 		for find in regex.finditer(self._str+' '):
 			self.effectRange(find.start(group),find.end(group),effect)
 
-	def breaklines(self,length,outdent=''):
+	def breaklines(self,length,outdent=""):
 		'''Break string (courteous of spaces) into a list of column-length 'length' substrings'''
 		outdentLen = strlen(outdent)
 		TABSPACE = length - outdentLen
@@ -321,10 +273,10 @@ class Coloring:
 
 		start = 0
 		space = length
-		lineBuffer = ''
+		lineBuffer = ""
 
 		formatPos = 0
-		getFormat = True
+		getFormat = bool(len(self._positions))
 		lastColor = 0
 		lastEffect = 0
 		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
@@ -337,7 +289,7 @@ class Coloring:
 				formatPos += 1
 				getFormat = formatPos != len(self._positions)
 				if space > 0:
-					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
+					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 					for i in range(_NUM_EFFECTS):
 						if ((1 << i) & nextEffect):
 							if ((1 << i) & lastEffect):
@@ -354,7 +306,7 @@ class Coloring:
 				lineBuffer += self._str[start:pos]
 				broken.append(lineBuffer + CLEAR_FORMATTING)
 				lineBuffer = outdent
-				lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
+				lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 				for i in range(_NUM_EFFECTS):
 					if lastEffect & (1 << i):
 						lineBuffer += _EFFECTS[i][0]
@@ -372,7 +324,7 @@ class Coloring:
 				if lastcol < THRESHOLD and lastcol > 0:
 					broken.append(lineBuffer + CLEAR_FORMATTING)
 					lineBuffer = outdent
-					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
+					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 					for i in range(_NUM_EFFECTS):
 						if lastEffect & (1 << i):
 							lineBuffer += _EFFECTS[i][0]
@@ -380,7 +332,7 @@ class Coloring:
 				else:
 					broken.append("{}{}{}".format(lineBuffer,self._str[start:pos],CLEAR_FORMATTING))
 					lineBuffer = outdent
-					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ''
+					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 					for i in range(_NUM_EFFECTS):
 						if lastEffect & (1 << i):
 							lineBuffer += _EFFECTS[i][0]
@@ -428,19 +380,22 @@ def columnslice(string,length):
 		escape = temp
 	return lentr + 1
 
-def breaklines(string,length,outdent=''):
-	'''Break string (courteous of spaces) into a list of column-length 'length' substrings'''
+def breaklines(string,length,outdent=""):
+	'''
+	Break string (courteous of spaces) into a list of
+	column-length `length` substrings
+	'''
 	string = string.expandtabs(_TABLEN)
 	outdentLen = strlen(outdent)
 	TABSPACE = length - outdentLen
 	THRESHOLD = length/2
 
 	broken = []
-	form = ''
-	for i,line in enumerate(string.split("\n")):
+	form = ""
+	for i,line in enumerate(string.split('\n')):
 		start = 0
 		lastbreaking,lastcol = 0,0
-		color,effect = '',''
+		color,effect = "",""
 		space = (i and TABSPACE) or length
 		escapestart = 0
 		for pos,j in enumerate(line):	#character by character, the old fashioned way
@@ -480,13 +435,13 @@ def breaklines(string,length,outdent=''):
 
 class Scrollable:
 	'''Scrollable text input'''
-	def __init__(self,width,string=''):
+	def __init__(self,width,string=""):
 		self._str = string
 		self._width = width
 		self._pos = len(string)
 		self._disp = max(0,len(string)-width)
 		#nonscrolling characters
-		self._nonscroll = ''
+		self._nonscroll = ""
 		self._nonscroll_width = 0
 		self.password = False;
 	def __repr__(self):
@@ -556,13 +511,17 @@ class Scrollable:
 		
 	#-----------------
 	def _onchanged(self):
-		'''Since this class is meant to take a 'good' slice of a string,'''+\
-		''' It's useful to have this method when that slice is updated'''
+		'''
+		Since this class is meant to take a 'good' slice of a string,
+		it's useful to have this method when that slice is updated
+		'''
 		pass
 	def setstr(self,new):
+		'''Set content of scrollable'''
 		self._str = new
 		self.end()
 	def setnonscroll(self,new):
+		'''Set nonscrolling characters of scrollable'''
 		check = strlen(new)
 		if check > MAX_NONSCROLL_WIDTH:
 			new = new[:columnslice(new,MAX_NONSCROLL_WIDTH)]
@@ -572,7 +531,7 @@ class Scrollable:
 	def setwidth(self,new):
 		if new is None: return
 		if new <= 0:
-			raise FormattingException()
+			raise DisplayException()
 		self._width = new
 		self._onchanged()
 	def movepos(self,dist):

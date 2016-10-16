@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
 #linkopen.py
-'''Library for opening links. Allows extension through wrappers
+'''
+Library for opening links. Allows extension through wrappers
 Open links by file extension, site pattern, or lambda truth
 evaluation.
 Althought this does not import .display (or any other module in the package),
-open_link expects an instance of display.main as its first argument.'''
-
+open_link expects an instance of display.Main as its first argument.
+'''
 import re
 import os #for stupid stdout/err hack
 from threading import Thread
 import subprocess
 from webbrowser import open_new_tab
 
+__all__ =	["LINK_RE","getlinks","reverselinks","getdefaults","parseLinks"
+			,"opener","open_link","daemonize","images","videos","browser"]
+
 #canonical link regex
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)[`\\s]")
-POST_FORMAT_RE = re.compile(r'\.(\w+)[&/\?]?')
-IMG_PATH = 'feh'
-MPV_PATH = 'mpv'
+_POST_FORMAT_RE = re.compile(r"\.(\w+)[&/\?]?")
+IMG_PATH = "feh"
+MPV_PATH = "mpv"
 _lastlinks = []
 
-_defaults = []
-_exts = {}
-_sites = {}
-_lambdas = []
-_lambdalut = []
+class LinkException(Exception):
+	'''Exception for errors in client.linkopen'''
 
 def getlinks():
 	return _lastlinks
@@ -34,8 +35,11 @@ def reverselinks():
 		 for i,j in enumerate(reversed(_lastlinks))]
 
 def getdefaults():
-	'''Get the names of the default functions. These are hopefully descriptive enough'''
-	return ['default'] + [i.__name__ for i in _defaults]
+	'''
+	Get the names of the default functions.
+	These are hopefully descriptive enough
+	'''
+	return ["default"] + [i.__name__ for i in open_link._defaults]
 
 def parseLinks(raw):
 	'''Add links to lastlinks'''
@@ -48,101 +52,113 @@ def parseLinks(raw):
 			newLinks.append(i)
 	_lastlinks += newLinks
 
-def extractext(link):
-	'''Ignore common post-extension formatting, e.g. .png?revision'''
-	ret = POST_FORMAT_RE.findall(link)
-	if ret:
-		return ret[-1].lower()
-	return ''
-
 #---------------------------------------------------------------
-def opener(func):
-	'''Set a default opener'''
-	global _defaults
-	_defaults.append(func)
+class open_link:
+	'''Open a link with the declared openers'''
+	#storage for openers
+	_defaults = []
+	_exts = {}
+	_sites = {}
+	_lambdas = []
+	_lambdalut = []
 
-def extopener(ext):
-	'''Set an extension opener for extension `ext`'''
-	def wrap(func):
-		global _exts
-		_exts[ext] = func
-		#allow stacking wrappers
-		return func
-	return wrap
-
-def pattopener(pattern):
-	'''Set an extension opener for website pattern `pattern`'''
-	def wrap(func):
-		global _sites
-		_sites[pattern] = func
-		return func
-	return wrap
-
-def lambdaopener(lamb):
-	'''Set a lambda opener to run when `lamb` returns true'''
-	def wrap(func):
-		global _lambdas,_lambdalut
-		link_opener.lambdas.append(lamb)
-		link_opener.lambdalut.append(func)
-		return func
-	return wrap
-
-#---------------------------------------------------------------
-def open_link(client,link,default = 0):
-	ext = extractext(link)
-	if not default:
-		run = _exts.get(ext)
-		if run:
-			return run(client,link,ext)
-		else:
-			for i,j in _sites.items():
+	def __init__(self,client,link,default = 0):
+		ext = _POST_FORMAT_RE.findall(link)
+		if not default:
+			#check from ext
+			if len(ext) > 1:
+				run = self._exts.get(ext[-1])
+				if run:
+					return run(client,link,ext[-1])
+			#check for patterns
+			for i,j in self._sites.items():
 				if 1+link.find(i):
 					return j(client,link)
-			for i,j in enumerate(_lambdas):
-				if j(link):
-					return _lambdalut[i](client,link)
-			return _defaults[default](client,link)
-	else:
-		return _defaults[default-1](client,link)
+			#check for lambdas
+			for i,j in zip(self._lambdas,self._lambdalut):
+				if i(link):
+					return j(client,link)
+			return self._defaults[default](client,link)
+		else:
+			return self._defaults[default-1](client,link)
 
-#-------------------------------------------------------------------------------------------------------
-#OPENERS
+class opener:
+	'''
+	An opener for a link. With no arguments, sets a default opener.
+	Otherwise, the first argument must be "default", "extension", "pattern",
+	or "lambda". Extension openers open links of a certain extension, pattern
+	openers match a website, and lambdas open a link when a corresponding
+	callable returns true.
+	'''
+	type = "default"
+	def __init__(self,*args):
+		if len(args) == 1 and callable(args[0]):
+			self(args[0])
+			return
+		if args[0] not in ["default","extension","pattern","lambda"]:
+			raise LinkException("invalid first argument of linkopen.opener {}".format(args[0]))
+		self.type = args[0]
+		self.argument = args[1]
+
+	def __call__(self,func):
+		#gross if statements
+		if self.type == "default":
+			open_link._defaults.append(func)
+		elif self.type == "extension":
+			open_link._exts[self.argument] = func
+		elif self.type == "pattern":
+			open_link._sites[self.argument] = func
+		elif self.type == "lambda":
+			open_link.link_opener.lambdas.append(self.argument)
+			open_link.link_opener.lambdalut.append(func)
+		#allow stacking wrappers
+		return func
+
+def daemonize(func):
+	'''Build a function that starts a daemon thread over the given function'''
+	def ret(*args,**kwargs):
+		funcThread = Thread(target = func,args = args,kwargs = kwargs)
+		funcThread.daemon = True
+		funcThread.start()
+	ret.__name__ = func.__name__
+	ret.__doc__ = func.__doc__
+	return ret
+
+#PREDEFINED OPENERS-------------------------------------------------------------------------------------
 #start and daemonize feh (or replaced image viewing program)
-@extopener("jpeg")
-@extopener("jpg")
-@extopener("jpg:large")
-@extopener("png")
-@extopener("png:large")
-def images(cli,link,ext):
-	cli.newBlurb("Displaying image... ({})".format(ext))
+@opener("extension","jpeg")
+@opener("extension","jpg")
+@opener("extension","jpg:large")
+@opener("extension","png")
+@opener("extension","png:large")
+@daemonize
+def images(main,link,ext):
+	main.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		display_thread = Thread(target = displayProcess.communicate)
-		display_thread.daemon = True
-		display_thread.start()
+		displayProcess.communicate()
 	except:
-		cli.newBlurb("No viewer %s found"%FEH_PATH)
+		main.newBlurb("No viewer %s found"%FEH_PATH)
 	
-@extopener("webm")
-@extopener("mp4")
-@extopener("gif")
-def videos(cli,link,ext):
+@opener("extension","webm")
+@opener("extension","mp4")
+@opener("extension","gif")
+@daemonize
+def videos(main,link,ext):
 	'''Start and daemonize mpv (or replaced video playing program)'''
-	cli.newBlurb("Playing video... ({})".format(ext))
+	main.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		display_thread = Thread(target = displayProcess.communicate)
-		display_thread.daemon = True
-		display_thread.start()
+		displayProcess.communicate()
 	except:
-		cli.newBlurb("No player %s found"%MPV_PATH)
+		main.newBlurb("No player %s found"%MPV_PATH)
 
 @opener
-def browser(cli,link):
+def browser(main,link):
 	'''Open new tab'''
-	cli.newBlurb("Opened new tab")
+	main.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
 	savout = os.dup(1)	#get another header for stdout
 	saverr = os.dup(2)	#get another header for stderr
