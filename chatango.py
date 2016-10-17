@@ -512,7 +512,7 @@ def chatcolors(msg,*args):
 @client.command("ignore")
 def ignore(parent,person,*args):
 	global ignores
-	if "@" == person[0]: person = person[1:]
+	if '@' == person[0]: person = person[1:]
 	if person in ignores: return
 	ignores.append(person)
 	chatbot.mainOverlay.redolines()
@@ -520,7 +520,7 @@ def ignore(parent,person,*args):
 @client.command("unignore")
 def unignore(parent,person,*args):
 	global ignores
-	if "@" == person[0]: person = person[1:]
+	if '@' == person[0]: person = person[1:]
 	if person == "all" or person == "everyone":
 		ignores.clear()
 		chatbot.mainOverlay.redolines()

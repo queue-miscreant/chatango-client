@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 #client.display.py
-'''Module for formatting; support for fitting strings to column
+'''
+Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
-generic string containers.'''
-
+generic string containers.
+'''
+#TODO fix format() in Scrollable
 import re
 from .wcwidth import wcwidth
 
@@ -155,10 +157,12 @@ class Coloring:
 		self._str = other + self._str
 		for pos,i in enumerate(self._positions):
 			self._positions[pos] = i + len(other)
+		self._maxpos += len(other)
 		return self
 
 	def _insertColor(self,position,formatting):
 		'''Backend for insertColor that doesn't do checking on formatting'''
+
 		if position > self._maxpos:
 			self._positions.append(position)
 			self._formatting.append(formatting)
@@ -190,6 +194,7 @@ class Coloring:
 		Insert an effect at _str[start:end]. Formatting must be a number
 		corresponding to an effect. As default, 0 is reverse and 1 is underline
 		'''
+		if start >= end: return
 		effect = 1 << formatting
 		if start > self._maxpos:
 			self._positions.append(start)
@@ -203,21 +208,21 @@ class Coloring:
 			i += 1
 		if self._positions[i] == start:	#if we're writing into a number
 			self._formatting[i] |= effect
-			i += 1
 		else:
 			self._positions.insert(i,start)
 			self._formatting.insert(i,effect)
-			i += 2
+		i += 1
 
 		while i < len(self._positions) and end > self._positions[i]:
 			if self._formatting[i] & effect: #if this effect turns off here
 				self._formatting[i] ^= effect
 			i += 1
-		if i == len(self._positions):
+		if end > self._maxpos:
 			self._positions.append(end)
 			self._formatting.append(effect)
 			self._maxpos = end
-		elif self._positions[i] == end:		#position exists
+		#position exists
+		elif i < len(self._positions) and self._positions[i] == end:
 			self._formatting[i] |= effect
 		else:
 			self._positions.insert(i,end)
@@ -239,6 +244,7 @@ class Coloring:
 				return last
 			last = form
 		return last
+
 	def colorByRegex(self, regex, groupFunction, group = 0, getLast = True):
 		'''
 		Color from a compiled regex, generating the respective color number
