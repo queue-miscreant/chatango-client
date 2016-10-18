@@ -6,6 +6,10 @@ widths and ANSI color escape string manipulations. Also contains
 generic string containers.
 '''
 #TODO fix format() in Scrollable
+#		to fix, display must be from the right side,rather than the left
+#		we still have to accumulate string length...
+#		maybe just measure display as both distance and columns 
+#TODO breaklines seems to have errors when a breaking character is on the edge
 import re
 from .wcwidth import wcwidth
 
@@ -15,7 +19,7 @@ __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
 			,"Coloring","Scrollable","Tabber"]
 
 #REGEXES------------------------------------------------------------------------
-_SANE_TEXTBOX = r"\s\-/`~,;"			#sane textbox splitting characters
+_SANE_TEXTBOX =		'\n'+r"\s\-/`~,;"			#sane textbox splitting characters
 _LAST_COLOR_RE =	re.compile('\x1b'+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _LAST_EFFECT_RE =	re.compile('\x1b'+r"\[2?[47]m")			#all effects that are on
 _UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
@@ -142,6 +146,7 @@ class Coloring:
 						formatting += _EFFECTS[i][0]
 			ret += self._str[tracker:pos] + formatting
 			tracker = pos
+			lastEffect = nextEffect
 		ret += self._str[tracker:]
 		return ret + CLEAR_FORMATTING
 	def __getitem__(self,sliced):
@@ -326,7 +331,7 @@ class Coloring:
 				lineBuffer += self._str[start:pos+1]
 				start = pos+1
 				lastcol = space
-			if space < 0:			#time to break
+			if space <= 0:			#time to break
 				if lastcol < THRESHOLD and lastcol > 0:
 					broken.append(lineBuffer + CLEAR_FORMATTING)
 					lineBuffer = outdent
@@ -423,7 +428,7 @@ def breaklines(string,length,outdent=""):
 			if j in _LINE_BREAKING:
 				lastbreaking = pos
 				lastcol = space
-			if space < 0:			#time to break
+			if space <= 0:			#time to break
 				if lastcol < THRESHOLD and lastbreaking > start:
 					broken.append("{}{}{}".format(form,line[start:lastbreaking],CLEAR_FORMATTING))
 					start = lastbreaking+1	#ignore whitespace

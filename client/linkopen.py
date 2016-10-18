@@ -67,7 +67,7 @@ class open_link:
 		if not default:
 			#check from ext
 			if len(ext) > 1:
-				run = self._exts.get(ext[-1])
+				run = self._exts.get(ext[-1].lower())
 				if run:
 					return run(client,link,ext[-1])
 			#check for patterns

@@ -20,6 +20,8 @@ Options:
 #TODO	Messages dropping when ping coincides with message?
 #TODO	Something with checking premature group removes
 
+#TODO	load entire creds into creds, but local creds into the chatbot. this makes the dictionary save completely
+
 import chlib
 import client
 import sys
