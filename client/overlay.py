@@ -347,8 +347,8 @@ class ListOverlay(OverlayBase,Box):
 			,ord('l'):	staticize(self.chmode,1)
 			,ord('h'):	staticize(self.chmode,-1)
 			,ord('q'):	quitlambda
-			,curses.KEY_DOWN:	staticize(self.increment,0)
-			,curses.KEY_UP:		staticize(self.increment,-2)
+			,curses.KEY_DOWN:	staticize(self.increment,1)
+			,curses.KEY_UP:		staticize(self.increment,-1)
 			,curses.KEY_RIGHT:	staticize(self.chmode,1)
 			,curses.KEY_LEFT:	staticize(self.chmode,-1)
 		})

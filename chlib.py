@@ -271,16 +271,16 @@ class Group(object):
 			for i in reversed(HTML_CODES):
 				post = post.replace(i[1],i[0])
 			post = post.replace("\n","<br/>")
-		if len(post) < 2700 and self.limited == 0:
+		if len(bytes(post,'utf-8')) < 2700 and self.limited == 0:
 			self.sendCmd("bm","meme",str(channel),"<n{}/><f x{}{}=\"{}\">{}".format(self.nColor,
 				self.fSize, self.fColor, self.fFace, post))
 
 	def sendCmd(self, *args, firstcmd = False):
 		'''Send data to socket'''
-		if not firstcmd:
-			self.wqueue.put_nowait(bytes(':'.join(args)+"\r\n\x00", "utf-8"))
-		else:
+		if firstcmd:
 			self.wqueue.put_nowait(bytes(':'.join(args)+"\x00", "utf-8"))
+		else:
+			self.wqueue.put_nowait(bytes(':'.join(args)+"\r\n\x00", "utf-8"))
 
 	def getBanList(self):
 		'''Retreive ban list'''

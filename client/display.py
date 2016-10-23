@@ -9,7 +9,6 @@ generic string containers.
 #		to fix, display must be from the right side,rather than the left
 #		we still have to accumulate string length...
 #		maybe just measure display as both distance and columns 
-#TODO breaklines seems to have errors when a breaking character is on the edge
 import re
 from .wcwidth import wcwidth
 
@@ -19,7 +18,7 @@ __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
 			,"Coloring","Scrollable","Tabber"]
 
 #REGEXES------------------------------------------------------------------------
-_SANE_TEXTBOX =		'\n'+r"\s\-/`~,;"			#sane textbox splitting characters
+_SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
 _LAST_COLOR_RE =	re.compile('\x1b'+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _LAST_EFFECT_RE =	re.compile('\x1b'+r"\[2?[47]m")			#all effects that are on
 _UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
