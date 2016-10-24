@@ -353,11 +353,14 @@ class ListOverlay(OverlayBase,Box):
 			,curses.KEY_LEFT:	staticize(self.chmode,-1)
 		})
 	def __call__(self,lines):
-		'''Display a list in a box. If too long, entries are trimmed to include an ellipsis'''
+		'''
+		Display a list in a box. If too long, entries are trimmed
+		to include an ellipsis
+		'''
 		lines[0] = self.box_top()
 		size = self.parent.y-2
 		maxx = self.parent.x-2
-		#which portion of the lmaxyist is currently displaced
+		#which portion of the list is currently displaced
 		partition = (self.it//size)*size
 		#get the partition of the list we're at, pad the list
 		subList = self.list[partition:partition+size]

@@ -264,8 +264,7 @@ class Group(object):
 		#0 is white, 1 is red, 2 is blue, 3 is both
 		#make that into 0 is white, 1 is red, 8 is blue, 9 is both
 		#then shift 8 bits and add the channel's default value
-		channel %= 16
-		channel = self.channel+((((channel&30)<<2)|(channel&17))<<8)
+		channel = self.channel+(((channel&2)<<2 | (channel&1))<<8)
 		if not html:
 			#replace HTML equivalents
 			for i in reversed(HTML_CODES):
@@ -493,25 +492,20 @@ class Digest(object):
 	def participant(self, group, bites):
 		bit = bites[1]
 		uid = bites[3]
-		if bites[1] == '0':
+		if bit == '0':	#left
 			user = bites[4].lower()
 			if bites[4] != "None" and bites[4].lower() in group.users:
 				group.users.remove(user)
 			group.users.sort()
-		if bites[1] == '1':
+		if bit == '1':	#joined
 			user = bites[4].lower()
 			if bites[-4] != "None":
 				group.users.append(user)
 			group.users.sort()
-		if bites[1] == '2':
-			user = group.uArray[uid].lower() if uid.lower() in group.uArray and bites[4] == "None" else bites[4].lower()
-			if (bites[4] == "None") and (user in group.users):
-				group.users.remove(user.lower())
-				user = group.uArray[uid]
-				del group.uArray[uid]
-			if (bites[4] != "None") and (user not in group.users):
+		if bit == '2':	#anons and tempname blogins
+			user = bites[4].lower()
+			if (bites[4] != "None") and (user not in group.users):	#temp
 				group.users.append(user)
-				group.uArray[uid] = user
 			group.users.sort()
 		self.call(bites[0], group, bit, user, uid)
 
@@ -534,11 +528,19 @@ class Digest(object):
 			fSize = ""
 			fColor = ""
 			fFace = "0"
-		chval = (int(bites[8]) >> 8) % 16
+		chval = (int(bites[8]) >> 8) & 15
+		user = bites[2].lower()
+		if not user:
+			if bites[3] != '':
+				user = "#" + bites[3].lower()
+			elif nColor:
+				user = "!anon" + Generate.aid(nColor, bites[4])
+			else:
+				user = "!anon"
 		group.pArray[bites[6]] = type("Post", (object,),
 			{"group": group
 			,"time": bites[1]
-			,"user": bites[2].lower() if bites[2] != '' else "#" + bites[3] if bites[3] != '' else "!anon" + Generate.aid(nColor, bites[4]) if nColor else "!anon"
+			,"user": user
 			,"uid": bites[4]
 			,"unid": bites[5]
 			,"pnum": bites[6]

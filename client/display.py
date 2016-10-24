@@ -310,7 +310,7 @@ class Coloring:
 			if j == '\t':			#tabs are the length of outdents
 				lenj = outdentLen
 				lineBuffer += self._str[start:pos]
-				start = pos
+				start = pos+1 #skip over tab
 				lineBuffer += ' '*min(lenj,space)
 			elif j == '\n':
 				lineBuffer += self._str[start:pos]
@@ -320,9 +320,11 @@ class Coloring:
 				for i in range(_NUM_EFFECTS):
 					if lastEffect & (1 << i):
 						lineBuffer += _EFFECTS[i][0]
-				start = pos+1
+				start = pos+1 #skip over newline
 				lastcol = 0
 				space = TABSPACE
+				continue
+			elif ord(j) < 32:		#other non printing
 				continue
 
 			space -= lenj

@@ -19,7 +19,6 @@ Options:
 #TODO	Callback for when maximum message is reached (call whatever method gets more messages from chatango)
 #TODO	Messages dropping when ping coincides with message?
 #TODO	Something with checking premature group removes
-
 #TODO	load entire creds into creds, but local creds into the chatbot. this makes the dictionary save completely
 
 import chlib
@@ -106,14 +105,18 @@ class ChatBot(chlib.ConnectionManager):
 		self.mainOverlay.add()
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
 		client.Tabber("@",self.members)
-		
-	def main(self):
-		#wait until now to initialize the object, since now the information is guaranteed to exist
+	
+	def _start(self):
+		self.isinited = 0
 		chatbot.mainOverlay.parent.updateinfo(None,self.creds["user"])
 		chatbot.mainOverlay.msgSystem("Connecting")
 		chlib.ConnectionManager.__init__(self, self.creds["user"], self.creds["passwd"], False)
 		self.isinited = 1
 		chatbot.addGroup(self.creds["room"])
+		
+	def main(self):
+		#wait until now to initialize the object, since now the information is guaranteed to exist
+		self._start()
 		chlib.ConnectionManager.main(self)
 	
 	def stop(self):
@@ -123,7 +126,7 @@ class ChatBot(chlib.ConnectionManager):
 	def reconnect(self):
 		if not self.isinited: return
 		self.stop()
-		self.start()
+		self._start()
 	
 	def changeGroup(self,newgroup):
 		self.stop()
@@ -316,7 +319,7 @@ class ChatangoOverlay(client.MainOverlay):
 
 		dispList = [i for i in self.bot.joinedGroup.uArray.values()]
 		dispList = {i:dispList.count(i) for i in dispList}
-		dispList = sorted([str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
+		dispList = [str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()]
 		def drawIgnored(string,i):
 			if dispList[i][:dispList[i].find(" ")] not in ignores: return
 			string[:-1]+"i"
