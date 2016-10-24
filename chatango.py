@@ -30,7 +30,8 @@ import re
 import json
 
 chatbot = None
-creds = {} 
+#entire creds from file
+creds_entire = {} 
 #writability of keys of creds
 #1 = read only, 2 = write only, 3 = both
 creds_readwrite = {
@@ -68,6 +69,7 @@ filtered_channels = [0, #white
 
 def readFromFile(readInto, filePath = SAVE_PATH):
 	'''Read credentials from file'''
+	global creds_entire
 	try:
 		jsonInput = open(filePath)
 		jsonData = json.loads(jsonInput.read())
@@ -75,16 +77,21 @@ def readFromFile(readInto, filePath = SAVE_PATH):
 		for i,bit in creds_readwrite.items():
 			if bit&1:
 				readInto[i] = jsonData.get(i)
+			#write into safe credentials regardless
+			creds_entire[i] = jsonData.get(i)
 	except Exception:
 		raise IOError("Error reading creds! Aborting...")
 def sendToFile(writeFrom,filePath = SAVE_PATH):
 	'''Write credentials to file'''
+	global creds_entire
 	try:
 		if filePath == "": return
 		jsonData = {}
 		for i,bit in creds_readwrite.items():
 			if bit&2:
 				jsonData[i] = writeFrom[i]
+			else:	#"safe" credentials from last write
+				jsonData[i] = creds_entire[i]
 		encoder = json.JSONEncoder(ensure_ascii=False)
 		out = open(filePath,'w')
 		out.write(encoder.encode(jsonData)) 
@@ -104,15 +111,16 @@ class ChatBot(chlib.ConnectionManager):
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
-		client.Tabber("@",self.members)
+		client.Tabber('@',self.members)
 	
 	def _start(self):
 		self.isinited = 0
-		chatbot.mainOverlay.parent.updateinfo(None,self.creds["user"])
-		chatbot.mainOverlay.msgSystem("Connecting")
+		self.members.clear()
+		self.mainOverlay.parent.updateinfo(None,self.creds["user"])
+		self.mainOverlay.msgSystem("Connecting")
 		chlib.ConnectionManager.__init__(self, self.creds["user"], self.creds["passwd"], False)
 		self.isinited = 1
-		chatbot.addGroup(self.creds["room"])
+		self.addGroup(self.creds["room"])
 		
 	def main(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
@@ -155,8 +163,7 @@ class ChatBot(chlib.ConnectionManager):
 		if self.me in "!#": self.me = self.me[1:]
 		#I modified the library to pull history messages, and put them in the group's message array
 		#this organizes them by time and pushes the message
-		past = group.pArray.values()
-		past = sorted(past,key=lambda x: x.time)
+		past = sorted(group.pArray.values(),key=lambda x: x.time)
 		for i in past:
 			self.recvPost(group, i.user, i, 1)
 		
@@ -176,7 +183,7 @@ class ChatBot(chlib.ConnectionManager):
 			self.members.append(user.lower())
 		self.members.promote(user.lower())
 		#and is short-circuited
-		isreply = self.me is not None and ("@"+self.me.lower() in post.post.lower())
+		isreply = self.me is not None and ('@'+self.me.lower() in post.post.lower())
 		#sound bell
 		if isreply and not ishistory: client.soundBell()
 		#format as ' user: message'
@@ -188,24 +195,24 @@ class ChatBot(chlib.ConnectionManager):
 	def recvshow_fw(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
 
-	def recvshow_tb(self, group, mins, secs):
-		self.recvtb(group, mins, secs)
+	def recvshow_tb(self, group, secs):
+		self.recvtb(group, secs)
 
-	def recvtb(self, group, mins, secs):
-		self.mainOverlay.msgSystem("You are banned for %d seconds"%(60*mins+secs))
+	def recvtb(self, group, secs):
+		self.mainOverlay.msgSystem("You are banned for %d seconds"%secs)
 	
 	#pull members when any of these are invoked
 	def recvg_participants(self,group):
-		self.members.extend(group.uArray.values())
+		self.members.extend(group.users)
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 
 	def recvparticipant(self, group, bit, user, uid):
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 		if user != "none":
-			if (bit == "1"):
+			if (bit == '1'):
 				self.members.append(user)
 			#notifications
-			self.mainOverlay.parent.newBlurb("%s has %s" % (user,(bit=="1") and "joined" or "left"))
+			self.mainOverlay.parent.newBlurb("%s has %s" % (user,(bit!='0') and "joined" or "left"))
 
 
 #OVERLAY EXTENSION--------------------------------------------------------------------------------------
@@ -249,7 +256,7 @@ class ChatangoOverlay(client.MainOverlay):
 			return
 		text = str(self.text)
 		#if it's not just spaces
-		if text.count(" ") != len(text):
+		if text.count(' ') != len(text):
 			#add it to the history
 			self.text.clear()
 			self.history.append(text)
@@ -268,14 +275,14 @@ class ChatangoOverlay(client.MainOverlay):
 			try:
 				#allmessages contain the colored message and arguments
 				message = self.getselected()
-				msg = str(message[0])+" "
+				msg = str(message[0])+' '
 				#first colon is separating the name from the message
-				colon = msg.find(":")
+				colon = msg.find(':')
 				name = msg[1:colon]
 				msg = msg[colon+2:]
 				if name[0] in "!#":
 					name = name[1:]
-				self.text.append("@{}: `{}`".format(name,msg.replace("`","")))
+				self.text.append("@{}: `{}`".format(name,msg.replace('`',"")))
 			except: pass
 			return 
 		self.text.complete()
@@ -285,7 +292,7 @@ class ChatangoOverlay(client.MainOverlay):
 		#enter key
 		def select(me):
 			if not client.getlinks(): return
-			current = me.list[me.it].split(":")[0] #get the number selected, not the number by iterator
+			current = me.list[me.it].split(':')[0] #get the number selected, not the number by iterator
 			current = client.getlinks()[int(current)-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			#exit
@@ -301,7 +308,7 @@ class ChatangoOverlay(client.MainOverlay):
 		if self.bot.joinedGroup is None: return
 		def select(me):
 			current = me.list[me.it]
-			current = current.split(" ")[0]
+			current = current.split(' ')[0]
 			if current[0] in "!#":
 				current = current[1:]
 			#reply
@@ -310,25 +317,26 @@ class ChatangoOverlay(client.MainOverlay):
 		def tab(me):
 			global ignores
 			current = me.list[me.it]
-			current = current.split(" ")[0]
+			current = current.split(' ')[0]
 			if current not in ignores:
 				ignores.append(current)
 			else:
 				ignores.remove(current)
 			self.redolines()
 
-		dispList = [i for i in self.bot.joinedGroup.uArray.values()]
-		dispList = {i:dispList.count(i) for i in dispList}
-		dispList = [str(i)+(j-1 and " (%d)"%j or "") for i,j in dispList.items()]
+		users = self.bot.joinedGroup.users
+		dispList = {i:users.count(i) for i in users}
+		dispList = sorted([i+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
 		def drawIgnored(string,i):
-			if dispList[i][:dispList[i].find(" ")] not in ignores: return
-			string[:-1]+"i"
+			selected = dispList[i]
+			if selected.split(' ')[0] not in ignores: return
+			string[:-1]+'i'
 			string.insertColor(-1,3)
 		
-		box = client.ListOverlay(self.parent,sorted(dispList),drawIgnored)
+		box = client.ListOverlay(self.parent,dispList,drawIgnored)
 		box.addKeys({
-			"enter":select,
-			"tab":tab,
+			"enter":select
+			,"tab":tab
 		})
 		box.add()
 
@@ -383,9 +391,7 @@ class ChatangoOverlay(client.MainOverlay):
 			#set formatting, even if changes didn't occur
 			
 		box = client.ListOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
-		box.addKeys({
-			"enter":select,
-		})
+		box.addKeys({"enter":select})
 		box.add()
 
 	def F5(self):
@@ -587,6 +593,7 @@ def runClient(main,creds):
 	chatbot.main()
 
 if __name__ == "__main__":
+	newCreds = {}
 	readCredsFlag = True
 	importCustom = True
 	credsArgFlag = 0
@@ -594,12 +601,12 @@ if __name__ == "__main__":
 	
 	for arg in sys.argv:
 		#if it's an argument
-		if arg[0] in "-":
+		if arg[0] in '-':
 			#stop creds parsing
 			if credsArgFlag == 1:
-				creds["user"] = ""
+				newCreds["user"] = ""
 			if credsArgFlag <= 2:
-				creds["passwd"] = ""
+				newCreds["passwd"] = ""
 			if groupArgFlag:
 				raise Exception("Improper argument formatting: -g without argument")
 			credsArgFlag = 0
@@ -626,21 +633,21 @@ if __name__ == "__main__":
 				sys.exit()
 			
 		if credsArgFlag:			#parse -c
-			creds[ ["user","passwd"][credsArgFlag-1] ] = arg
+			newCreds[ ["user","passwd"][credsArgFlag-1] ] = arg
 			credsArgFlag = (credsArgFlag + 1) % 3
 
 		if groupArgFlag:			#parse -g
-			creds["room"] = arg
+			newCreds["room"] = arg
 			groupArgFlag = 0
 
 	if credsArgFlag >= 1:	#null name means anon
-		creds["user"] = ""
+		newCreds["user"] = ""
 	elif credsArgFlag == 2:	#null password means temporary name
-		creds["passwd"] = ""
+		newCreds["passwd"] = ""
 	if groupArgFlag:
 		raise Exception("Improper argument formatting: -g without argument")
 
-	readFromFile(creds)
+	readFromFile(newCreds)
 
 	if importCustom:
 		try:
@@ -648,7 +655,7 @@ if __name__ == "__main__":
 		except ImportError as exc: pass
 	#start
 	try:
-		client.start(runClient,creds)
+		client.start(runClient,newCreds)
 	finally:
 		if chatbot is not None:
 			chatbot.stop()

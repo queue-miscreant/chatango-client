@@ -639,15 +639,13 @@ class Digest(object):
 		self.call(bites[0], group)
 
 	def tb(self, group, bites):
-		mins, secs = divmod(int(bites[1]), 60)
-		self.call(bites[0], group, mins, secs)
+		self.call(bites[0], group, int(bites[1]))
 
 	def show_fw(self, group, bites):
 		self.call(bites[0], group)
 	
 	def show_tb(self, group, bites):
-		mins, secs = divmod(int(bites[1]), 60)
-		self.call(bites[0], group, mins, secs)
+		self.call(bites[0], group, int(bites[1]))
 
 	def OK(self, group, bites):
 		group.sendCmd("wl")

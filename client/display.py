@@ -648,6 +648,9 @@ class PromoteSet:
 		'''Append each element in iterable'''
 		for i in iterable:
 			self.append(i)
+	def clear(self):
+		'''Clear list'''
+		self._list.clear()
 	def remove(self,old):
 		'''Remove an item from the list'''
 		if old not in self._list: raise KeyError(old)

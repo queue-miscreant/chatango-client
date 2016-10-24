@@ -196,9 +196,11 @@ class OverlayBase:
 	def __init__(self,parent):
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
-		self._keys =	{27:	self._callalt
-				,curses.KEY_RESIZE:	lambda x: parent.resize() or 1}
-		self._altkeys =	 {None:	lambda: -1}
+		self._keys = {
+			27:	self._callalt
+			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1
+		}
+		self._altkeys =	{None: lambda: -1}
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
 		ret = []
