@@ -306,7 +306,7 @@ class Group(object):
 			self.user = "!anon" + Generate.aid(self.nColor, self.uid)
 
 	def logout(self):
-		'''Log's out of an account'''
+		'''Logs out of an account'''
 		self.sendCmd("blogout")
 
 	def enableBg(self):

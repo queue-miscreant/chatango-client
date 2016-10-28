@@ -22,8 +22,8 @@ import time
 from threading import Thread
 from .display import *
 
-__all__ =	["start","soundBell","Box","filter","colorize","command"
-			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
+__all__ =	["CHAR_COMMAND","start","soundBell","Box","filter","colorize"
+			,"command","OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"InputOverlay","ConfirmOverlay","MainOverlay"]
 
 lasterr = None
@@ -764,6 +764,35 @@ class MainOverlay(TextOverlay):
 			numup += b
 			nummsg += 1
 		self._lines = newlines
+	def recolorlines(self):
+		'''
+		Re-apply colorizers and redraw all visible lines
+		'''
+		width = self.parent.x
+		height = self.parent.y
+		newlines = []
+		numup,nummsg = 0,1
+		while numup < height and nummsg <= len(self._allMessages):
+			i = self._allMessages[-nummsg]
+			if not i[3]:	#don't decolor system messages
+				i[0].clear()
+				for j in _colorizers:
+					j(i[0],*i[1])
+			try:
+				if any(j(*i[1]) for j in _filters):
+					i[2] = 0
+					nummsg += 1
+					continue
+			except: pass
+			a,b = i[0].breaklines(width,self.INDENT)
+			a.append(self._msgSplit)
+			newlines = a + newlines
+			i[2] = b
+			numup += b
+			nummsg += 1
+		self._lines = newlines
+		self.parent.display()
+
 	def clear(self):
 		'''Clear all lines and messages'''
 		#these two REALLY should be private
@@ -777,7 +806,7 @@ class MainOverlay(TextOverlay):
 		'''System message'''
 		base = Coloring(base)
 		base.insertColor(0,rawNum(1))
-		self._append(base)
+		self._append(base,None,True)
 		self.parent.display()
 	def msgTime(self, numtime = None, predicate=""):
 		'''Push a system message of the time'''
@@ -791,10 +820,10 @@ class MainOverlay(TextOverlay):
 		self._append(post,list(args))
 		self.parent.display()
 	#MESSAGE PUSHING BACKEND-----------------------------------
-	def _append(self,newline,args = None):
+	def _append(self,newline,args = None,isSystem = False):
 		'''Add new message. Use msgPost instead'''
 		#undisplayed messages have length zero
-		msg = [newline,args,0]
+		msg = [newline,args,0,isSystem]
 		self._selector += (self._selector>0)
 		#run filters
 		try:

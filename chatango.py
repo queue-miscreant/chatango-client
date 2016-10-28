@@ -16,10 +16,11 @@ Options:
 	--help:			Display this page
 '''
 #TODO	Modifiable options like the threshold to ask to open links
-#TODO	Callback for when maximum message is reached (call whatever method gets more messages from chatango)
+#TODO	get more messages from chatango callback
+#		A way to sanity check the data is use the past[-1].time pulled
+#		If less than, it's old data. If more than, it's new
 #TODO	Messages dropping when ping coincides with message?
 #TODO	Something with checking premature group removes
-#TODO	load entire creds into creds, but local creds into the chatbot. this makes the dictionary save completely
 
 import chlib
 import client
@@ -54,18 +55,20 @@ FONT_FACES = \
 	,"Typewriter" ]
 FONT_SIZES = [9,10,11,12,13,14]
 DEFAULT_FORMATTING = \
-	["DD9211" #font color
-	,"232323" #name color
-	,"0"	  #font face
-	,12]	  #font size
+	["DD9211"	#font color
+	,"232323"	#name color
+	,"0"		#font face
+	,12]		#font size
 
 #ignore list
 #needed here so that commands can access it
 ignores = []
-filtered_channels = [0, #white
-			0, #red
-			0, #blue
-			0] #both
+filtered_channels = \
+	[0	#white
+	,0	#red
+	,0	#blue
+	,0] #both
+visited_links = []
 
 def readFromFile(readInto, filePath = SAVE_PATH):
 	'''Read credentials from file'''
@@ -170,7 +173,7 @@ class ChatBot(chlib.ConnectionManager):
 		self.mainOverlay.msgTime(float(past[-1].time),"Last message at ")
 		self.mainOverlay.msgTime()
 
-	#on disconnect
+	#on removal from a group
 	def recvRemove(self,group):
 		#self.parent.unget()
 		self.stop()
@@ -187,7 +190,7 @@ class ChatBot(chlib.ConnectionManager):
 		#sound bell
 		if isreply and not ishistory: client.soundBell()
 		#format as ' user: message'
-		msg = "{}: {}".format(post.user,post.post)
+		msg = " {}: {}".format(post.user,post.post)
 		client.parseLinks(msg)
 		self.mainOverlay.msgPost(msg, user.lower(), isreply, ishistory, post.channel)
 		#extra arguments. use in colorizers
@@ -234,13 +237,20 @@ class ChatangoOverlay(client.MainOverlay):
 		},1)	#these are methods, so they're defined on __init__
 	
 	def openSelectedLinks(self):
+		global visited_links
 		try:
 			message = self.getselected()
 			msg = str(message[0])+' '
 			alllinks = client.LINK_RE.findall(msg)
 			def openall():
+				recolor = False
 				for i in alllinks:
 					client.open_link(self.parent,i)
+					if i not in visited_links:
+						visited_links.append(i)
+						recolor = True
+				if recolor: self.recolorlines()
+					
 			if len(alllinks) > 1:
 				client.ConfirmOverlay(self.parent,
 					"Really open {} links? (y/n)".format(len(alllinks)),
@@ -291,10 +301,14 @@ class ChatangoOverlay(client.MainOverlay):
 		'''List accumulated links'''
 		#enter key
 		def select(me):
+			global visited_links
 			if not client.getlinks(): return
 			current = me.list[me.it].split(':')[0] #get the number selected, not the number by iterator
 			current = client.getlinks()[int(current)-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
+			if current not in visited_links:
+				visited_links.append(current)
+				self.recolorlines()
 			#exit
 			return -1
 
@@ -442,8 +456,13 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def openlastlink(self):
 		'''Open last link'''
+		global visited_links
 		if not client.getlinks(): return
-		client.open_link(self.parent,client.getlinks()[-1])
+		last = client.getlinks()[-1]
+		client.open_link(self.parent,last)
+		if last not in visited_links:
+			visited_links.append(last)
+			self.recolorlines()
 
 	def joingroup(self):
 		'''Join a new group'''
@@ -483,7 +502,7 @@ def defaultcolor(msg,*args):
 	msg.default = getColor(args[0])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
-LINE_RE = re.compile(r"^([!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
+LINE_RE = re.compile(r"^ ([!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
 @client.colorize
 def greentext(msg,*args):
 	#match group 3 (the message sans leading replies)
@@ -492,7 +511,7 @@ def greentext(msg,*args):
 #color links white
 @client.colorize
 def link(msg,*args):
-	msg.colorByRegex(client.LINK_RE,client.rawNum(0),1)
+	msg.colorByRegex(client.LINK_RE,lambda x: (x not in visited_links) and client.rawNum(0) or None,1)
 
 #color replies by the color of the replier
 REPLY_RE = re.compile(r"@\w+?\b")
@@ -514,10 +533,10 @@ def quotes(msg,*args):
 #draw replies, history, and channel
 @client.colorize
 def chatcolors(msg,*args):
-	msg.insertColor(0)		#make sure we color the name right
-	args[1] and msg.addGlobalEffect(0)	#reply
-	args[2] and msg.addGlobalEffect(1)	#history
-	(" " + msg).insertColor(0,args[3]+12)	#channel
+	msg.insertColor(1)		#make sure we color the name right
+	args[1] and msg.addGlobalEffect(0,1)	#reply
+	args[2] and msg.addGlobalEffect(1,1)	#history
+	msg.insertColor(0,args[3]+12)	#channel
 
 #COMMANDS-----------------------------------------------------------------------------------------------
 @client.command("ignore")
@@ -548,6 +567,10 @@ def listkeys(parent,*args):
 		"enter": lambda x: -1
 	})
 	return keysList
+
+@client.command(client.CHAR_COMMAND)
+def clientcommand(parent,*args):
+	chatbot.sendCmd(*args)
 
 #FILTERS------------------------------------------------------------------------------------------------
 #filter filtered channels

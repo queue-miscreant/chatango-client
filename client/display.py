@@ -8,7 +8,7 @@ generic string containers.
 #TODO fix format() in Scrollable
 #		to fix, display must be from the right side,rather than the left
 #		we still have to accumulate string length...
-#		maybe just measure display as both distance and columns 
+#		maybe just measure display as both distance and columns  <- this
 import re
 from .wcwidth import wcwidth
 
@@ -106,13 +106,6 @@ def rawNum(c):
 	'''
 	return c - _NUM_PREDEFINED
 
-def getEffect(effect):
-	'''Get effect. Raise exception when undefined'''
-	try:
-		return _EFFECTS_O[effect]
-	except KeyError:
-		raise DisplayException("Effect name %s not defined"%effect)
-
 class Coloring:
 	'''Container for a string and default color'''
 	def __init__(self,string):
@@ -123,6 +116,12 @@ class Coloring:
 		self._positions = []
 		self._formatting = []
 		self._maxpos = -1
+	def clear(self):
+		'''Clear all positions and formatting'''
+		self._maxpos = -1
+		self._positions.clear()
+		self._formatting.clear()
+		self.default = 0
 	def __repr__(self):
 		'''Get the string contained'''
 		return "Coloring({}, positions = {}, formatting = {})".format(repr(self._str),self._positions,self._formatting)
@@ -226,15 +225,15 @@ class Coloring:
 			self._formatting.append(effect)
 			self._maxpos = end
 		#position exists
-		elif i < len(self._positions) and self._positions[i] == end:
+		elif self._positions[i] == end:
 			self._formatting[i] |= effect
 		else:
 			self._positions.insert(i,end)
 			self._formatting.insert(i,effect)
 
-	def addGlobalEffect(self, effectNumber):
+	def addGlobalEffect(self, effectNumber,pos = 0):
 		'''Add effect to string'''
-		self.effectRange(0,len(self._str),effectNumber)
+		self.effectRange(pos,len(self._str),effectNumber)
 
 	def findColor(self,end):
 		'''Most recent color before end. Safe when no matches are found'''
