@@ -189,7 +189,7 @@ class ChatBot(chlib.ConnectionManager):
 		isreply = self.me is not None and ('@'+self.me.lower() in post.post.lower())
 		#sound bell
 		if isreply and not ishistory: client.soundBell()
-		#format as ' user: message'
+		#format as ' user: message' the space is for the channel
 		msg = " {}: {}".format(post.user,post.post)
 		client.parseLinks(msg)
 		self.mainOverlay.msgPost(msg, user.lower(), isreply, ishistory, post.channel)
@@ -502,7 +502,7 @@ def defaultcolor(msg,*args):
 	msg.default = getColor(args[0])
 
 #color lines starting with '>' as green; ignore replies and ' user:'
-LINE_RE = re.compile(r"^ ([!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
+LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
 @client.colorize
 def greentext(msg,*args):
 	#match group 3 (the message sans leading replies)

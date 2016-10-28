@@ -772,7 +772,7 @@ class MainOverlay(TextOverlay):
 		height = self.parent.y
 		newlines = []
 		numup,nummsg = 0,1
-		while numup < height and nummsg <= len(self._allMessages):
+		while (numup < height or nummsg < self._selector) and nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
 			if not i[3]:	#don't decolor system messages
 				i[0].clear()
