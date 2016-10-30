@@ -74,11 +74,11 @@ class DisplayException(Exception):
 	'''Exception for client.display'''
 	pass
 
-def defColor(fore, bold = None, back = "none"):
+def defColor(fore, bold = None, back = "none", isdim = False):
 	'''Define a new foreground/background pair, with optional intense color'''
 	global _COLORS
 	pair = "\x1b[3%d" % _COLOR_NAMES.index(fore);
-	pair += bold and ";1" or ";22"
+	pair += bold and (isdim and ";2" or ";1") or ";22"
 	pair += ";4%d" % _COLOR_NAMES.index(back)
 	_COLORS.append(pair+"m")
 def defEffect(on,off):

@@ -69,6 +69,7 @@ filtered_channels = \
 	,0	#blue
 	,0] #both
 visited_links = []
+dim_for_intense = True
 
 def readFromFile(readInto, filePath = SAVE_PATH):
 	'''Read credentials from file'''
@@ -479,14 +480,15 @@ ordering = \
 	,"red"
 	,"yellow")
 for i in range(10):
-	client.defColor(ordering[i%5],i//5) #0-10: user text
-client.defColor("green",True)
-client.defColor("green")		#11: >meme arrow
-client.defColor("none",False,"none")	#12-15: channels
-client.defColor("red",False,"red")
-client.defColor("blue",False,"blue")
-client.defColor("magenta",False,"magenta")
-client.defColor("white",False,"white")	#16: extra drawing
+	client.defColor(ordering[i%5],i//5,isdim = dim_for_intense) #0-10: user text
+client.defColor("green",True,isdim = dim_for_intense)
+client.defColor("green",isdim = dim_for_intense)		#11: >meme arrow
+client.defColor("none",False,"none",isdim = dim_for_intense)	#12-15: channels
+client.defColor("red",False,"red",isdim = dim_for_intense)
+client.defColor("blue",False,"blue",isdim = dim_for_intense)
+client.defColor("magenta",False,"magenta",isdim = dim_for_intense)
+client.defColor("white",False,"white",isdim = dim_for_intense)	#16: extra drawing
+client.defColor("white",True,isdim = dim_for_intense)			#17: visited links
 
 #color by user's name
 def getColor(name,init = 6,split = 109,rot = 6):
@@ -511,7 +513,7 @@ def greentext(msg,*args):
 #color links white
 @client.colorize
 def link(msg,*args):
-	msg.colorByRegex(client.LINK_RE,lambda x: (x not in visited_links) and client.rawNum(0) or None,1)
+	msg.colorByRegex(client.LINK_RE,lambda x: (x not in visited_links) and client.rawNum(0) or 17,1)
 
 #color replies by the color of the replier
 REPLY_RE = re.compile(r"@\w+?\b")
