@@ -24,8 +24,10 @@ from .display import *
 
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","filter","colorize"
 			,"command","OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
-			,"InputOverlay","ConfirmOverlay","MainOverlay"]
+			,"InputOverlay","ConfirmOverlay","MainOverlay"
+			,"onTrueFireMessage","onDone"]
 
+main_instance = None
 lasterr = None
 #break if smaller than these
 RESERVE_LINES = 3
@@ -83,6 +85,7 @@ def cloneKey(fro,to):
 _colorizers = []
 _filters = []
 _commands = {}
+_afterDone = []
 
 #decorators for containers
 def colorize(func):
@@ -96,6 +99,9 @@ def command(commandname):
 	def wrapper(func):
 		_commands[commandname] = func
 	return wrapper
+def onDone(func):
+	_afterDone.append(func)
+	return func
 
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_COMMAND = "`"
@@ -772,7 +778,7 @@ class MainOverlay(TextOverlay):
 		height = self.parent.y
 		newlines = []
 		numup,nummsg = 0,1
-		while (numup < height or nummsg < self._selector) and nummsg <= len(self._allMessages):
+		while (numup < height or nummsg <= self._selector) and nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
 			if not i[3]:	#don't decolor system messages
 				i[0].clear()
@@ -1108,6 +1114,7 @@ class Main:
 
 def start(target,*args):
 	'''Start the client. Run this!'''
+	global main_instance
 	main_instance = Main()
 	main_instance.resize()
 	#daemonize functions bot_thread
@@ -1115,8 +1122,20 @@ def start(target,*args):
 	bot_thread.daemon = True
 	bot_thread.start()
 	main_instance.loop()	#main program loop
+	for i in _afterDone:
+		i()
 	if lasterr:
 		raise lasterr
+
+class onTrueFireMessage:
+	def __init__(self,message):
+		self.message = message
+	def __call__(self,other):
+		def inject(*args):
+			if main_instance:
+				if other(*args):
+					main_instance.newBlurb(self.message)
+		return inject
 
 #display list of defined commands
 @command("help")

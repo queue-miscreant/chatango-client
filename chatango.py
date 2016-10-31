@@ -69,7 +69,7 @@ filtered_channels = \
 	,0	#blue
 	,0] #both
 visited_links = []
-dim_for_intense = True
+dim_for_intense = False
 
 def readFromFile(readInto, filePath = SAVE_PATH):
 	'''Read credentials from file'''
@@ -286,7 +286,7 @@ class ChatangoOverlay(client.MainOverlay):
 			try:
 				#allmessages contain the colored message and arguments
 				message = self.getselected()
-				msg = str(message[0])+' '
+				msg = str(message[0])
 				#first colon is separating the name from the message
 				colon = msg.find(':')
 				name = msg[1:colon]

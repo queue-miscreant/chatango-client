@@ -74,7 +74,7 @@ class DisplayException(Exception):
 	'''Exception for client.display'''
 	pass
 
-def defColor(fore, bold = None, back = "none", isdim = False):
+def defColor(fore, bold = False, back = "none", isdim = False):
 	'''Define a new foreground/background pair, with optional intense color'''
 	global _COLORS
 	pair = "\x1b[3%d" % _COLOR_NAMES.index(fore);
@@ -313,7 +313,8 @@ class Coloring:
 				lineBuffer += ' '*min(lenj,space)
 			elif j == '\n':
 				lineBuffer += self._str[start:pos]
-				broken.append(lineBuffer + CLEAR_FORMATTING)
+				if lineBuffer.rstrip() != outdent.rstrip():
+					broken.append(lineBuffer + CLEAR_FORMATTING)
 				lineBuffer = outdent
 				lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 				for i in range(_NUM_EFFECTS):
@@ -352,7 +353,8 @@ class Coloring:
 				space = TABSPACE - lenj
 
 		lineBuffer += self._str[start:]
-		broken.append(lineBuffer+CLEAR_FORMATTING)
+		if lineBuffer.rstrip() != outdent.rstrip():
+			broken.append(lineBuffer+CLEAR_FORMATTING)
 
 		return broken,len(broken)
 
