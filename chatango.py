@@ -21,6 +21,8 @@ Options:
 #		If less than, it's old data. If more than, it's new
 #TODO	Messages dropping when ping coincides with message?
 #TODO	Something with checking premature group removes
+#
+#TODO	set up callback for i commands received. These come in batches of about 20, ordered by time descending
 
 import chlib
 import client
@@ -101,6 +103,17 @@ def sendToFile(writeFrom,filePath = SAVE_PATH):
 		out.write(encoder.encode(jsonData)) 
 	except Exception:
 		raise IOError("Error writing creds! Aborting...")
+
+def parsePost(post,me,ishistory=False):
+	#and is short-circuited
+	isreply = me is not None and ('@'+me.lower() in post.post.lower())
+	#sound bell
+	if isreply and not ishistory: client.soundBell()
+	#format as ' user: message' the space is for the channel
+	msg = " {}: {}".format(post.user,post.post)
+	client.parseLinks(msg)
+	#extra arguments. use in colorizers
+	return (msg, post.user.lower(), isreply, ishistory, post.channel)
 
 class ChatBot(chlib.ConnectionManager):
 	'''Bot for interacting with the chat'''
@@ -186,15 +199,7 @@ class ChatBot(chlib.ConnectionManager):
 		if user not in self.members:
 			self.members.append(user.lower())
 		self.members.promote(user.lower())
-		#and is short-circuited
-		isreply = self.me is not None and ('@'+self.me.lower() in post.post.lower())
-		#sound bell
-		if isreply and not ishistory: client.soundBell()
-		#format as ' user: message' the space is for the channel
-		msg = " {}: {}".format(post.user,post.post)
-		client.parseLinks(msg)
-		self.mainOverlay.msgPost(msg, user.lower(), isreply, ishistory, post.channel)
-		#extra arguments. use in colorizers
+		self.mainOverlay.msgPost(*parsePost(post,self.me,ishistory))
 
 	def recvshow_fw(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
@@ -236,6 +241,21 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
 		},1)	#these are methods, so they're defined on __init__
+
+	def _maxselect(self):
+		#when we've gotten too many messages
+		group = self.bot.joinedGroup
+		group.getMore()
+		#wait until we're done getting more
+		self.parent.newBlurb("Fetching more messages")
+		while group.gettingMore:
+			time.sleep(.1)
+		#post objects in descending order
+		for i in group.oldmsgbuffer: 
+			self.msgPrepend(*parsePost(i,self.bot.me,True))
+		self.parent.newBlurb("Fetched more messages")
+		group.oldmsgbuffer.clear()
+		client.dbmsg("gotmore")
 	
 	def openSelectedLinks(self):
 		global visited_links

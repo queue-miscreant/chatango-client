@@ -632,6 +632,7 @@ class MainOverlay(TextOverlay):
 		#traverse list of lines
 		while (selftraverse*direction) <= lenself and \
 		(linetraverse*direction) <= lenlines:
+			#TODO Resize paired with scrolling seems to trigger IndexError here
 			if self._lines[selftraverse] == self._msgSplit:
 				selftraverse += direction #disregard this line
 				msgno -= direction #count lines down downward, up upward
@@ -724,6 +725,8 @@ class MainOverlay(TextOverlay):
 				a.append(self._msgSplit)
 				self._lines = a + self._lines
 				cur[2] = b
+				#sanity checking
+				self._linesup += (b - upmsg)
 		return 1
 	def selectdown(self):
 		'''Select message down'''
@@ -825,7 +828,19 @@ class MainOverlay(TextOverlay):
 			i(post,*args)
 		self._append(post,list(args))
 		self.parent.display()
+	def msgPrepend(self,post,*args):
+		'''Parse a message and apply all colorizers'''
+		post = Coloring(post)
+		for i in _colorizers:
+			i(post,*args)
+		self._prepend(post,list(args))
+		self.parent.display()
 	#MESSAGE PUSHING BACKEND-----------------------------------
+	def _prepend(self,newline,args = None,isSystem = False):
+		'''Prepend new message. Use msgPrepend instead'''
+		#just prepend it
+		#TODO checks when to display messages above
+		self._allMessages.insert(0,[newline,args,1,isSystem])
 	def _append(self,newline,args = None,isSystem = False):
 		'''Add new message. Use msgPost instead'''
 		#undisplayed messages have length zero

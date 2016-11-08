@@ -188,6 +188,9 @@ class Group(object):
 			self.limit = 0
 			self.limited = 0
 			self.channel = 0
+			self.timesGot = 0
+			self.gettingMore = False
+			self.oldmsgbuffer = list()
 			self.unum = None
 			self.pArray = {}
 			self.uArray = {}
@@ -280,6 +283,10 @@ class Group(object):
 			self.wqueue.put_nowait(bytes(':'.join(args)+"\x00", "utf-8"))
 		else:
 			self.wqueue.put_nowait(bytes(':'.join(args)+"\r\n\x00", "utf-8"))
+
+	def getMore(self, amt = 20):
+		self.sendCmd("get_more",str(amt),str(self.timesGot))
+		self.gettingMore = True
 
 	def getBanList(self):
 		'''Retreive ban list'''
@@ -568,6 +575,8 @@ class Digest(object):
 	def i(self, group, bites):
 		group.channel = int(bites[8])%256
 		self.b(group, bites)
+		if group.gettingMore:
+			group.oldmsgbuffer.append(group.pArray[bites[6]])
 
 	def n(self, group, bites):
 		group.unum = bites[1]
@@ -658,6 +667,11 @@ class Digest(object):
 
 	def wladd(self, group, bites):
 		group.fl.append({"user": bites[1], "status": bites[2], "time": bites[3]})
+
+	def gotmore(self, group, bites):
+		group.timesGot = int(bites[1])
+		group.gettingMore = False
+		self.call(bites[0], group)
 
 	def msg(self, group, bites):
 		user = bites[1]
