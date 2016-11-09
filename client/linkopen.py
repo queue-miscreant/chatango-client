@@ -7,6 +7,7 @@ evaluation.
 Althought this does not import .display (or any other module in the package),
 open_link expects an instance of display.Main as its first argument.
 '''
+from .display import dbmsg
 import re
 import os #for stupid stdout/err hack
 from threading import Thread
@@ -41,8 +42,11 @@ def getdefaults():
 	'''
 	return ["default"] + [i.__name__ for i in open_link._defaults]
 
-def parseLinks(raw):
-	'''Add links to lastlinks'''
+def parseLinks(raw,prepend = False):
+	'''
+	Add links to lastlinks. Prepend argument for adding links backwards,
+	like with historical messages.
+	'''
 	global _lastlinks
 	newLinks = []
 	#look for whole word links starting with http:// or https://
@@ -50,7 +54,11 @@ def parseLinks(raw):
 	for i in LINK_RE.findall(raw+" "):
 		if i not in newLinks:
 			newLinks.append(i)
-	_lastlinks += newLinks
+	if prepend:
+		newLinks.reverse()
+		_lastlinks = newLinks + _lastlinks
+	else:
+		_lastlinks += newLinks
 
 #---------------------------------------------------------------
 class open_link:

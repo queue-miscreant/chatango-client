@@ -16,13 +16,8 @@ Options:
 	--help:			Display this page
 '''
 #TODO	Modifiable options like the threshold to ask to open links
-#TODO	get more messages from chatango callback
-#		A way to sanity check the data is use the past[-1].time pulled
-#		If less than, it's old data. If more than, it's new
 #TODO	Messages dropping when ping coincides with message?
 #TODO	Something with checking premature group removes
-#
-#TODO	set up callback for i commands received. These come in batches of about 20, ordered by time descending
 
 import chlib
 import client
@@ -104,16 +99,17 @@ def sendToFile(writeFrom,filePath = SAVE_PATH):
 	except Exception:
 		raise IOError("Error writing creds! Aborting...")
 
-def parsePost(post,me,ishistory=False):
+def parsePost(post, me, ishistory):
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
 	#sound bell
 	if isreply and not ishistory: client.soundBell()
 	#format as ' user: message' the space is for the channel
 	msg = " {}: {}".format(post.user,post.post)
-	client.parseLinks(msg)
+	#links
+	client.parseLinks(post.post, ishistory)
 	#extra arguments. use in colorizers
-	return (msg, post.user.lower(), isreply, post.channel)
+	return (msg, post.user.lower(), isreply, ishistory, post.channel)
 
 class ChatBot(chlib.ConnectionManager):
 	'''Bot for interacting with the chat'''
@@ -123,7 +119,8 @@ class ChatBot(chlib.ConnectionManager):
 		self.creds = creds
 		self.channel = 0
 		self.isinited = 0
-		self.me = None
+		#default to the given user name
+		self.me = creds.get("user") or None
 		self.joinedGroup = None
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
@@ -177,7 +174,7 @@ class ChatBot(chlib.ConnectionManager):
 		self.joinedGroup = group
 		self.setFormatting()
 		self.me = group.user
-		if self.me in "!#": self.me = self.me[1:]
+		if self.me[0] in "!#": self.me = self.me[1:]
 		#I modified the library to pull history messages, and put them in the group's message array
 		#recvPost has been configured for this
 		self.mainOverlay.redolines()
@@ -190,19 +187,20 @@ class ChatBot(chlib.ConnectionManager):
 		self.stop()
 		
 	#on message
-	def recvPost(self, group, post,ishistory):
+	def recvPost(self, group, post, ishistory):
 		#double check for anons
 		user = post.user
 		if user[0] in '#!': user = user[1:]
 		if user not in self.members:
 			self.members.append(user.lower())
+		msg = parsePost(post, self.me, ishistory)
 		if ishistory:
 			#prepend history messages
-			self.mainOverlay.msgPrepend(*parsePost(post,self.me),1)
+			self.mainOverlay.msgPrepend(*msg)
 		else:
 			#postpend regular ones
 			self.members.promote(user.lower())
-			self.mainOverlay.msgPost(*parsePost(post,self.me),0)
+			self.mainOverlay.msgPost(*msg)
 
 	def recvshow_fw(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
@@ -217,6 +215,7 @@ class ChatBot(chlib.ConnectionManager):
 	def recvg_participants(self,group):
 		self.members.extend(group.users)
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
+		self.mainOverlay.recolorlines()
 
 	def recvparticipant(self, group, bit, user, uid):
 		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
@@ -503,7 +502,7 @@ client.defColor("red",False,"red",isdim = dim_for_intense)
 client.defColor("blue",False,"blue",isdim = dim_for_intense)
 client.defColor("magenta",False,"magenta",isdim = dim_for_intense)
 client.defColor("white",False,"white",isdim = dim_for_intense)	#16: extra drawing
-client.defColor("white",True,isdim = dim_for_intense)			#17: visited links
+client.defColor(239)											#17: visited links
 
 #color by user's name
 def getColor(name,init = 6,split = 109,rot = 6):
@@ -515,8 +514,8 @@ def getColor(name,init = 6,split = 109,rot = 6):
 	return (total+rot)%11
 
 @client.colorize
-def defaultcolor(msg,*args):
-	msg.default = getColor(args[0])
+def defaultcolor(msg,user,*args):
+	msg.default = getColor(user)
 
 #color lines starting with '>' as green; ignore replies and ' user:'
 LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
@@ -549,11 +548,13 @@ def quotes(msg,*args):
 		
 #draw replies, history, and channel
 @client.colorize
-def chatcolors(msg,*args):
+def chatcolors(msg, _, isreply, ishistory, channel,*args):
 	msg.insertColor(1)		#make sure we color the name right
-	args[1] and msg.addGlobalEffect(0,1)	#reply
-	args[3] and msg.addGlobalEffect(1,1)	#history
-	msg.insertColor(0,args[2]+12)	#channel
+	if isreply:
+		msg.addGlobalEffect(0,1)
+	if ishistory:
+		msg.addGlobalEffect(1,1)
+	msg.insertColor(0,channel+12)	#channel
 
 #COMMANDS-----------------------------------------------------------------------------------------------
 @client.command("ignore")
@@ -592,14 +593,14 @@ def clientcommand(parent,*args):
 #FILTERS------------------------------------------------------------------------------------------------
 #filter filtered channels
 @client.filter
-def channelfilter(*args):
+def channelfilter(user, isreply, ishistory, channel, *args):
 	try:
-		return filtered_channels[args[2]]
+		return filtered_channels[channel]
 	except:
 		return True
 
 @client.filter
-def ignorefilter(*args):
+def ignorefilter(user, *args):
 	try:
 		return args[0] in ignores
 	except:

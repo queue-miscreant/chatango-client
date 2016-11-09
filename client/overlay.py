@@ -632,7 +632,6 @@ class MainOverlay(TextOverlay):
 		#traverse list of lines
 		while (selftraverse*direction) <= lenself and \
 		(linetraverse*direction) <= lenlines:
-			#TODO Resize paired with scrolling seems to trigger IndexError here
 			if self._lines[selftraverse] == self._msgSplit:
 				selftraverse += direction #disregard this line
 				msgno -= direction #count lines down downward, up upward
@@ -752,12 +751,14 @@ class MainOverlay(TextOverlay):
 		Redo lines, if current lines does not represent the unfiltered messages
 		or if the width has changed
 		'''
+		if self._linesup: raise DisplayException("redolines attempted while selecting")
 		if width is None: width = self.parent.x
 		if height is None: height = self.parent.y
 		newlines = []
 		numup,nummsg = 0,1
+
 		#while there are still messages to add (to the current height)
-		while numup < height and nummsg <= len(self._allMessages):
+		while numup < height and (nummsg <= len(self._allMessages)):
 			i = self._allMessages[-nummsg]
 			#if a filter fails, then the message should be drawn, as it's likely a system message
 			try:
@@ -839,12 +840,26 @@ class MainOverlay(TextOverlay):
 	def _prepend(self,newline,args = None,isSystem = False):
 		'''Prepend new message. Use msgPrepend instead'''
 		#just prepend it
-		#TODO checks when to display messages above
-		self._allMessages.insert(0,[newline,args,1,isSystem])
+		msg = [newline,args,1,isSystem]
+		#we actually need to draw it
+		if (self._linesup-self._unfiltup) < (self.parent.y-1):
+			#run filters
+			try:
+				if any(i(*args) for i in _filters):
+					self._allMessages.insert(0,msg)
+					return
+			except: pass
+			a,b = newline.breaklines(self.parent.x,self.INDENT)
+			self._lines.insert(0,self._msgSplit)
+			self._lines = a + self._lines
+			msg[2] = b
+
+		self._allMessages.insert(0,msg)
 	def _append(self,newline,args = None,isSystem = False):
 		'''Add new message. Use msgPost instead'''
 		#undisplayed messages have length zero
 		msg = [newline,args,0,isSystem]
+		#before we filter it
 		self._selector += (self._selector>0)
 		#run filters
 		try:
