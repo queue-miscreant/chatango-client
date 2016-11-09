@@ -15,7 +15,7 @@
 #MODIFIED 2016/8/8:		New protocol appears to be bauth as anon, then blogin. Changed Group.login during Digest.ok accordingly
 #MODIFIED 2016/9/22:	Anons can't change name color because chatango, compiled regexes, changed inline concats to formats, and
 #						improved some readability
-#TODO add buffer on sendPost
+#MODIFIED 2016/11/8:	Improved historical message getting with "i" commands
 ################################
 
 ################################
@@ -189,8 +189,6 @@ class Group(object):
 			self.limited = 0
 			self.channel = 0
 			self.timesGot = 0
-			self.gettingMore = False
-			self.lastMsg = 0
 			self.unum = None
 			self.pArray = {}
 			self.uArray = {}
@@ -286,7 +284,6 @@ class Group(object):
 
 	def getMore(self, amt = 20):
 		self.sendCmd("get_more",str(amt),str(self.timesGot))
-		self.gettingMore = True
 
 	def getBanList(self):
 		'''Retreive ban list'''
@@ -540,13 +537,8 @@ class Digest(object):
 		if not user:
 			if bites[3] != '':
 				user = "#" + bites[3].lower()
-			elif nColor:
-				user = "!anon" + Generate.aid(nColor, bites[4])
 			else:
-				user = "!anon"
-		time = float(bites[1])
-		if group.lastMsg < time:
-			group.lastMsg = time
+				user = "!anon" + Generate.aid(nColor, bites[4])
 		group.pArray[bites[6]] = type("Post", (object,),
 			{"group": group
 			,"time": bites[1]
@@ -580,8 +572,6 @@ class Digest(object):
 		#put the post in the array
 		self.b(group, bites)
 		self.call("Post", group, group.pArray[bites[6]], 1)
-#		if group.gettingMore:
-#			group.oldmsgbuffer.append(group.pArray[bites[6]])
 
 	def n(self, group, bites):
 		group.unum = bites[1]
@@ -675,7 +665,6 @@ class Digest(object):
 
 	def gotmore(self, group, bites):
 		group.timesGot = int(bites[1])
-		group.gettingMore = False
 		self.call(bites[0], group)
 
 	def msg(self, group, bites):
