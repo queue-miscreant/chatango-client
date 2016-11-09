@@ -105,7 +105,7 @@ def onDone(func):
 
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_COMMAND = "`"
-Tabber(CHAR_COMMAND,_commands)
+Tokenize(CHAR_COMMAND,_commands)
 
 def centered(string,width):
 	'''Center some text'''

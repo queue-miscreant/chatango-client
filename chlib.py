@@ -190,7 +190,7 @@ class Group(object):
 			self.channel = 0
 			self.timesGot = 0
 			self.gettingMore = False
-			self.oldmsgbuffer = list()
+			self.lastMsg = 0
 			self.unum = None
 			self.pArray = {}
 			self.uArray = {}
@@ -544,6 +544,9 @@ class Digest(object):
 				user = "!anon" + Generate.aid(nColor, bites[4])
 			else:
 				user = "!anon"
+		time = float(bites[1])
+		if group.lastMsg < time:
+			group.lastMsg = time
 		group.pArray[bites[6]] = type("Post", (object,),
 			{"group": group
 			,"time": bites[1]
@@ -565,7 +568,7 @@ class Digest(object):
 			setattr(post, "pid", bites[2])
 			if post.post: #not blank post
 				user = post.user
-				self.call("Post", group, user, post)
+				self.call("Post", group, post, 0)
 				if post.post[0] == self.manager.prefix:
 					auth = group.getAuth(post.user)
 					cmd = post.post.split()[0][1:].lower()
@@ -574,9 +577,11 @@ class Digest(object):
 
 	def i(self, group, bites):
 		group.channel = int(bites[8])%256
+		#put the post in the array
 		self.b(group, bites)
-		if group.gettingMore:
-			group.oldmsgbuffer.append(group.pArray[bites[6]])
+		self.call("Post", group, group.pArray[bites[6]], 1)
+#		if group.gettingMore:
+#			group.oldmsgbuffer.append(group.pArray[bites[6]])
 
 	def n(self, group, bites):
 		group.unum = bites[1]

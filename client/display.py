@@ -15,7 +15,7 @@ from .wcwidth import wcwidth
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
 			,"SELECT_AND_MOVE","dbmsg","rawNum","strlen"
-			,"Coloring","Scrollable","Tabber"]
+			,"Coloring","Scrollable","Tokenize"]
 
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
@@ -518,7 +518,7 @@ class Scrollable:
 		#if there is no lastspace, settle for 0
 		search = self._str[lastSpace+1:self._pos]
 		if lastSpace == -1: search = self._nonscroll + search
-		ret = Tabber.complete(search)
+		ret = Tokenize.complete(search)
 		if ret:
 			self.append(ret + " ")
 		
@@ -603,7 +603,7 @@ class Scrollable:
 		self._disp = 0
 		self.movepos(len(self._str))
 
-class Tabber:
+class Tokenize:
 	'''Class for holding new tab-completers'''
 	prefixes = []			#list of prefixes to search for
 	suggestionlists = []	#list of (references to) lists for each prefix paradigm
@@ -615,12 +615,12 @@ class Tabber:
 	def complete(incomplete):
 		'''Find rest of a name in a list'''
 		#O(|prefixes|*|suggestionlists|), so n**2
-		for pno,prefix in enumerate(Tabber.prefixes):
+		for pno,prefix in enumerate(Tokenize.prefixes):
 			preflen = len(prefix)
 			if (incomplete[:preflen] == prefix):
 				search = incomplete[preflen:]
 				#search for the transformed search
-				for complete in list(Tabber.suggestionlists[pno]):
+				for complete in list(Tokenize.suggestionlists[pno]):
 					#run the transforming lambda
 					if not complete.find(search):	#in is bad practice
 						return complete[len(incomplete)-1:]

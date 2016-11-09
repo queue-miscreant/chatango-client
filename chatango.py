@@ -113,7 +113,7 @@ def parsePost(post,me,ishistory=False):
 	msg = " {}: {}".format(post.user,post.post)
 	client.parseLinks(msg)
 	#extra arguments. use in colorizers
-	return (msg, post.user.lower(), isreply, ishistory, post.channel)
+	return (msg, post.user.lower(), isreply, post.channel)
 
 class ChatBot(chlib.ConnectionManager):
 	'''Bot for interacting with the chat'''
@@ -128,7 +128,7 @@ class ChatBot(chlib.ConnectionManager):
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
-		client.Tabber('@',self.members)
+		client.Tokenize('@',self.members)
 	
 	def _start(self):
 		self.isinited = 0
@@ -179,12 +179,9 @@ class ChatBot(chlib.ConnectionManager):
 		self.me = group.user
 		if self.me in "!#": self.me = self.me[1:]
 		#I modified the library to pull history messages, and put them in the group's message array
-		#this organizes them by time and pushes the message
-		past = sorted(group.pArray.values(),key=lambda x: x.time)
-		for i in past:
-			self.recvPost(group, i.user, i, 1)
-		
-		self.mainOverlay.msgTime(float(past[-1].time),"Last message at ")
+		#recvPost has been configured for this
+		self.mainOverlay.redolines()
+		self.mainOverlay.msgTime(group.lastMsg,"Last message at ")
 		self.mainOverlay.msgTime()
 
 	#on removal from a group
@@ -193,13 +190,19 @@ class ChatBot(chlib.ConnectionManager):
 		self.stop()
 		
 	#on message
-	def recvPost(self, group, user, post, ishistory = 0):
+	def recvPost(self, group, post,ishistory):
 		#double check for anons
+		user = post.user
 		if user[0] in '#!': user = user[1:]
 		if user not in self.members:
 			self.members.append(user.lower())
-		self.members.promote(user.lower())
-		self.mainOverlay.msgPost(*parsePost(post,self.me,ishistory))
+		if ishistory:
+			#prepend history messages
+			self.mainOverlay.msgPrepend(*parsePost(post,self.me),1)
+		else:
+			#postpend regular ones
+			self.members.promote(user.lower())
+			self.mainOverlay.msgPost(*parsePost(post,self.me),0)
 
 	def recvshow_fw(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
@@ -248,14 +251,6 @@ class ChatangoOverlay(client.MainOverlay):
 		group.getMore()
 		#wait until we're done getting more
 		self.parent.newBlurb("Fetching more messages")
-		while group.gettingMore:
-			time.sleep(.1)
-		#post objects in descending order
-		for i in group.oldmsgbuffer: 
-			self.msgPrepend(*parsePost(i,self.bot.me,True))
-		self.parent.newBlurb("Fetched more messages")
-		group.oldmsgbuffer.clear()
-		client.dbmsg("gotmore")
 	
 	def openSelectedLinks(self):
 		global visited_links
@@ -557,8 +552,8 @@ def quotes(msg,*args):
 def chatcolors(msg,*args):
 	msg.insertColor(1)		#make sure we color the name right
 	args[1] and msg.addGlobalEffect(0,1)	#reply
-	args[2] and msg.addGlobalEffect(1,1)	#history
-	msg.insertColor(0,args[3]+12)	#channel
+	args[3] and msg.addGlobalEffect(1,1)	#history
+	msg.insertColor(0,args[2]+12)	#channel
 
 #COMMANDS-----------------------------------------------------------------------------------------------
 @client.command("ignore")
@@ -599,7 +594,7 @@ def clientcommand(parent,*args):
 @client.filter
 def channelfilter(*args):
 	try:
-		return filtered_channels[args[3]]
+		return filtered_channels[args[2]]
 	except:
 		return True
 
