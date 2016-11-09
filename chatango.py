@@ -175,9 +175,9 @@ class ChatBot(chlib.ConnectionManager):
 		self.setFormatting()
 		self.me = group.user
 		if self.me[0] in "!#": self.me = self.me[1:]
-		#I modified the library to pull history messages, and put them in the group's message array
-		#recvPost has been configured for this
+		#show past messages
 		self.mainOverlay.redolines()
+		#show last message time
 		self.mainOverlay.msgTime(group.lastMsg,"Last message at ")
 		self.mainOverlay.msgTime()
 
@@ -201,6 +201,9 @@ class ChatBot(chlib.ConnectionManager):
 			#postpend regular ones
 			self.members.promote(user.lower())
 			self.mainOverlay.msgPost(*msg)
+
+	def recvgotmore(self, group):
+		self.mainOverlay.canselect = True
 
 	def recvshow_fw(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
@@ -231,6 +234,7 @@ class ChatangoOverlay(client.MainOverlay):
 	def __init__(self,parent,bot):
 		client.MainOverlay.__init__(self,parent)
 		self.bot = bot
+		self.canselect = False
 		self.addKeys({	"enter":	self.onenter
 						,"a-enter":	self.onaltenter
 						,"tab":		self.ontab
@@ -247,9 +251,11 @@ class ChatangoOverlay(client.MainOverlay):
 	def _maxselect(self):
 		#when we've gotten too many messages
 		group = self.bot.joinedGroup
-		group.getMore()
-		#wait until we're done getting more
-		self.parent.newBlurb("Fetching more messages")
+		if group:
+			self.canselect = False
+			group.getMore()
+			#wait until we're done getting more
+			self.parent.newBlurb("Fetching more messages")
 	
 	def openSelectedLinks(self):
 		global visited_links
@@ -548,7 +554,7 @@ def quotes(msg,*args):
 		
 #draw replies, history, and channel
 @client.colorize
-def chatcolors(msg, _, isreply, ishistory, channel,*args):
+def chatcolors(msg, user, isreply, ishistory, channel,*args):
 	msg.insertColor(1)		#make sure we color the name right
 	if isreply:
 		msg.addGlobalEffect(0,1)

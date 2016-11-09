@@ -604,6 +604,7 @@ class MainOverlay(TextOverlay):
 	_msgSplit = '\x1b' 
 	def __init__(self,parent,pushtimes = True):
 		TextOverlay.__init__(self,parent)
+		self.canselect = True
 		self._pushtimes = pushtimes
 		self.history = History()
 		self.clear()
@@ -712,6 +713,7 @@ class MainOverlay(TextOverlay):
 		soundBell()
 	def selectup(self):
 		'''Select message up'''
+		if not self.canselect: return 1
 		#go up the number of lines of the "next" selected message
 		upmsg = self._getnextmessage(1)
 		#but only if there is a next message
@@ -729,6 +731,7 @@ class MainOverlay(TextOverlay):
 		return 1
 	def selectdown(self):
 		'''Select message down'''
+		if not self.canselect: return 1
 		#go down the number of lines of the currently selected message
 		self._linesup = max(0,self._linesup-self.getselected()[2]-1)
 		self._getnextmessage(-1)
@@ -751,7 +754,7 @@ class MainOverlay(TextOverlay):
 		Redo lines, if current lines does not represent the unfiltered messages
 		or if the width has changed
 		'''
-		if self._linesup: raise DisplayException("redolines attempted while selecting")
+		if self._linesup: raise SizeException("redolines attempted while selecting")
 		if width is None: width = self.parent.x
 		if height is None: height = self.parent.y
 		newlines = []
@@ -774,6 +777,7 @@ class MainOverlay(TextOverlay):
 			numup += b
 			nummsg += 1
 		self._lines = newlines
+		self.canselect = True
 	def recolorlines(self):
 		'''
 		Re-apply colorizers and redraw all visible lines
