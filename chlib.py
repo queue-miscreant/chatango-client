@@ -189,6 +189,7 @@ class Group(object):
 			self.limited = 0
 			self.channel = 0
 			self.timesGot = 0
+			self.lastMsg = 0
 			self.unum = None
 			self.pArray = {}
 			self.uArray = {}
@@ -539,6 +540,9 @@ class Digest(object):
 				user = "#" + bites[3].lower()
 			else:
 				user = "!anon" + Generate.aid(nColor, bites[4])
+		time = float(bites[1])
+		if time > group.lastMsg:
+			group.lastMsg = time
 		group.pArray[bites[6]] = type("Post", (object,),
 			{"group": group
 			,"time": bites[1]
