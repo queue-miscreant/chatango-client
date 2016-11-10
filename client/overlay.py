@@ -8,6 +8,8 @@ different stdout printing calls.
 '''
 #TODO	dbmsg that turns off cbreak mode and back on
 #TODO	overlay-specific lookup tables
+#TODO	on instantiation of Main, link it to all onTrueFireMessage
+#		This just means having a variable under the class
 try:
 	import curses
 except ImportError:
@@ -933,7 +935,7 @@ class Main:
 		#sadly, I can't put this in main.loop to make it more readable
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
-
+		#scheduler 
 		self._schedule = _Schedule()
 		self.active = True
 		self.candisplay = True
@@ -943,6 +945,7 @@ class Main:
 		#input/display stack
 		self._ins = []
 		self._scrolls = []
+		#last high-priority overlay
 		self._lastReplace = 0
 		self._blurbQueue = []
 		self._bottom_edges = [" "," "]
@@ -975,21 +978,19 @@ class Main:
 		'''Blurb display backend'''
 		if not (self.active and self.candisplay): return
 		if self.last < 0: return
-
-		if blurb == "":
-			pass
+		#try to queue a blurb	
+		if blurb == "": pass
 		elif isinstance(blurb,Coloring):
 			vector,_ = blurb.breaklines(self.x)
-			self._blurbQueue.extend(vector)
+			self._blurbQueue = vector
 		else:
 			vector,_ = Coloring(blurb).breaklines(self.x)
-			self._blurbQueue.extend(vector)
-			
+			self._blurbQueue = vector
+		#next blurb is either a pop from the last message or nothing
 		if len(self._blurbQueue):
 			blurb = self._blurbQueue.pop(0)
 		else:
 			blurb = ""
-
 		self.last = time
 		_moveCursor(self.y+2)
 		print("{}\x1b[K".format(blurb),end=CHAR_RETURN_CURSOR)
