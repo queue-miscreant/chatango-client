@@ -105,13 +105,21 @@ class Group:
 		self._wlock = False
 
 		self.manager = manager
-		self.digest = Digest(self)
 
-		self.name = room
-		self.uid = Generate.uid()
+		self._name = room
+		self._owner = None
+		self._uid = Generate.uid()
+		self._aid = None
+		self._aname  = None
+		#chatango needs nameColor here, so the rest are here too
+		self._nColor = None	
+		self._fSize  = None
+		self._fColor = None
+		self._fFace  = None
+		self._mods = []
+
 		self._connected = False
 		self._reconnecting = False
-
 		if manager: self._connect()
 
 	def lock(self,lock):
@@ -146,10 +154,10 @@ class Group:
 
 	def _disconnect(self):
 		if not self._reconnecting: self.connected = False
-		self._users = {}
-		self._userlist = []
+		self.users = {}
+		self.userlist = []
 #		self._pingTask.cancel()
-		self._sock.close()
+		self.sock.close()
 
 	def disconnect(self):
 		self.callEvent("onDisconnect")
@@ -163,10 +171,28 @@ class Group:
 		self._connect()
 		self._reconnecting = False
 
-	def callEvent(self, event, *args, **kw):
-		try:
-			getattr(self.manager, event)(self, *args, **kw)
-		except AttributeError: pass
+	def sendPost(self, post, channel = 0, html = False):
+		'''Send a post to the group'''
+		#0 is white, 1 is red, 2 is blue, 3 is both
+		#make that into 0 is white, 1 is red, 8 is blue, 9 is both
+		#then shift 8 bits and add the channel's default value
+		channel = self.channel+(((channel&2)<<2 | (channel&1))<<8)
+		if not html:
+			#replace HTML equivalents
+			for i,j in reversed(HTML_CODES):
+				post = post.replace(j,i)
+			post = post.replace("\n","<br/>")
+		if len(post) > self.maxLength:
+			if self.manager._tooBigMessage == BigMessage_Cut:
+				self.message(post[:self.manager._maxLength], html = html)
+			elif self.manager._tooBigMessage == BigMessage_Multiple:
+				while len(post) > 0:
+					sect = post[:self._maxLength]
+					post = post[self._maxLength:]
+					self.sendPost(sect, html = html)
+				return
+		self.sendCommand("bm","meme",str(channel),"<n{}/><f x{}{}=\"{}\">{}".format(self.nColor,
+			self.fSize, self.fColor, self.fFace, post))
 
 	def sendCommand(self, *args, firstcmd = False):
 		'''Send data to socket'''
@@ -175,55 +201,84 @@ class Group:
 		else:
 			self._write(bytes(':'.join(args)+"\r\n\x00", "utf-8"))
 
-	def getUsers(self):
-		return self._userlist
+	def _callEvent(self, event, *args, **kw):
+		try:
+			getattr(self.manager, event)(self, *args, **kw)
+		except AttributeError: pass
 
-class Digest:
-	def __init__(self,group):
-		self.group = group
-
-	def __call__(self,data):
+	def _digest(self, data):
 		for cmd in data.split(b"\x00"):
-			args = raw.decode("utf_8").rstrip("\r\n").split(":")
+			args = data.decode("utf_8").rstrip("\r\n").split(":")
 			try:
-				getattr(self, args[0])(self.group, args)
+				getattr(self, "_recv_"+args[0])(self, args)
 			except AttributeError: pass
 
-	def _callback(self,event,*args,**kwargs):
-		self.group.callEvent(event,*args,**kwargs)
+	def _recv_denied(self, bites):
+		self._callEvent("onDenied")
 
-	def b(self, args):
-		'''message...'''
-		pass
-
-	def ok(self, args):
-		if args[2] == "N" and self.group.manager.password == None and self.group.manager.name == None: 
+	def _recv_ok(self, args):
+		if args[2] == "N" and self.manager.password == None and self.manager.name == None: 
 			n = args[4].rsplit('.', 1)[0]
 			n = n[-4:]
 			aid = args[1][0:8]
-			pid = "!anon" + getAnonId(n, aid)
-			#TODO move these to the actual group
-			self.group.aname = pid
-			self.group.nameColor = n
+			self._aname = "!anon" + getAnonId(n, aid)
+			self._nameColor = n
 		elif args[2] == "N" and self.mgr.password == None:
 		  self._sendCommand("blogin", self.mgr.name)
 		elif args[2] != "M": #unsuccesful login
-		  self._callback("onLoginFail")
+		  self._callEvent("onLoginFail")
 		  self.disconnect()
-		self.owner = args[0]
-		self.group.uid = args[1]
-		self.group.aid = args[1][4:8]
-		self.group.mods = set(map(args[6].split(";")))
+		self._owner = args[0]
+		self._uid = args[1]
+		self._aid = args[1][4:8]
+		self._mods = set(map(args[6].split(";")))
 	
-	def inited(self, args):
-		self.group.sendCommand("g_participants", "start")
-		self.group.sendCommand("getpremium", "1")
-		self.group.requestBanlist()
-		group.sendCmd("getbannedwords")
-		group.sendCmd("getratelimit")
-		self._callback("onConnect")
-		self.group.lock(False)
+	def _recv_inited(self, args):
+		self.sendCommand("g_participants", "start")
+		self.sendCommand("getpremium", "1")
+		self.sendCommand("getbannedwords")
+		self.sendCommand("getratelimit")
+		self._callEvent("onConnect")
+		self.lock(False)
 
+	def _recv_premium(self, args):
+		if int(args[2]) > time.time():
+			group.sendCmd("msgbg", "1")
+
+	def _recv_g_participants(self, args):
+		#g_participants splits people by args
+		people = ':'.join(args[1:]).split(";")
+		for person in people:
+			person = person.split(':')
+			if person[-2] != "None" and person[-1] == "None":
+				self._users.append(person[-2].lower())
+				self._uArray[person[-3]] = person[-2].lower()
+		self.users.sort()
+		self._callEvent("onParticipants")
+	
+	def _recv_participant(self, args):
+		bit = args[1]
+		uid = args[3]
+		if bit == '0':	#left
+			user = args[4].lower()
+			if args[4] != "None" and args[4].lower() in group.users:
+				group.users.remove(user)
+			group.users.sort()
+		if bit == '1':	#joined
+			user = args[4].lower()
+			if args[-4] != "None":
+				group.users.append(user)
+			group.users.sort()
+		if args == '2':	#anons and tempname blogins
+			user = args[4].lower()
+			if (args[4] != "None") and (user not in group.users):	#temp
+				group.users.append(user)
+			group.users.sort()
+		self.call(args[0], group, bit, user, uid)
+		
+	def _recv_b(self, args):
+		'''message...'''
+		pass
 
 
 
@@ -359,20 +414,6 @@ class Group:
 		'''Clean's all PM XML'''
 		return XML_TAG_RE.sub("", pm)
 
-	def sendPost(self, post, channel = 0, html = False):
-		'''Send a post to the group'''
-		#0 is white, 1 is red, 2 is blue, 3 is both
-		#make that into 0 is white, 1 is red, 8 is blue, 9 is both
-		#then shift 8 bits and add the channel's default value
-		channel = self.channel+(((channel&2)<<2 | (channel&1))<<8)
-		if not html:
-			#replace HTML equivalents
-			for i in reversed(HTML_CODES):
-				post = post.replace(i[1],i[0])
-			post = post.replace("\n","<br/>")
-		if len(bytes(post,'utf-8')) < 2700 and self.limited == 0:
-			self.sendCmd("bm","meme",str(channel),"<n{}/><f x{}{}=\"{}\">{}".format(self.nColor,
-				self.fSize, self.fColor, self.fFace, post))
 
 	def sendCmd(self, *args, firstcmd = False):
 		'''Send data to socket'''
