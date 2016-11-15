@@ -547,6 +547,7 @@ class Digest(object):
 			{"group": group
 			,"time": bites[1]
 			,"user": user
+			,"pid":	None
 			,"uid": bites[4]
 			,"unid": bites[5]
 			,"pnum": bites[6]
@@ -561,7 +562,7 @@ class Digest(object):
 	def u(self, group, bites):
 		post = group.pArray[bites[1]] if group.pArray.get(bites[1]) else None
 		if post:
-			setattr(post, "pid", bites[2])
+			post.pid = bites[2]
 			if post.post: #not blank post
 				user = post.user
 				self.call("Post", group, post, 0)

@@ -109,7 +109,7 @@ def parsePost(post, me, ishistory):
 	#links
 	client.parseLinks(post.post, ishistory)
 	#extra arguments. use in colorizers
-	return (msg, post.user.lower(), isreply, ishistory, post.channel)
+	return (msg, post.user.lower(), isreply, ishistory, post.channel, post)
 
 class ChatBot(chlib.ConnectionManager):
 	'''Bot for interacting with the chat'''
@@ -246,6 +246,7 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^t":		self.joingroup
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
+						,"^a":		self.whatdoesflaggingdo
 		},1)	#these are methods, so they're defined on __init__
 
 	def _maxselect(self):
@@ -490,6 +491,14 @@ class ChatangoOverlay(client.MainOverlay):
 		inp = client.InputOverlay(self.parent,"Enter group name")
 		inp.add()
 		inp.runOnDone(lambda x: self.clear() or self.bot.changeGroup(x))
+	
+	def whatdoesflaggingdo(self):
+		if self.isselecting():
+			message = self.getselected()
+			post = message[1][0]
+			self.bot.joinedGroup.flag(post)
+			
+		
 
 #COLORIZERS---------------------------------------------------------------------
 #initialize colors
