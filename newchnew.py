@@ -4,12 +4,16 @@
 #pnum :: post number, before display
 #TODO	are unids sent on participant calls?
 #		for mods only?
+#TODO	threaded start function
 
 import socket
 import time
 import threading
 import re
 import select
+
+BigMessage_Cut = 0
+BigMessage_Multiple = 1
 
 AUTH_RE = re.compile("auth\.chatango\.com ?= ?(.*?);")
 POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1}|[a-fA-F0-9]{3}|[a-fA-F0-9]{4}|[a-fA-F0-9]{6})\/>)?(<f x([\d]{0}|[\d]{2})([0-9a-fA-F]{1}|[0-9a-fA-F]{3}|[0-9a-fA-F]{6})=\"([0-9a-zA-Z]*)\">)?")
@@ -137,27 +141,28 @@ class Group:
 	_pingDelay = 20
 	_messageBackground = True
 	_messageRecord = False
+	_tooBigMessage = BigMessage_Multiple
 
 	def __init__(self, room, manager = None):
+		self._manager = manager
+		#socket stuff
 		self._server = server or getServer(room)
 		self._port = port or 443
 		self.sock = None
-
 		self.wbuff = b""
 		self._rbuff = b""
 		self._wbufflock = b""
 		self._wlock = False
-
-		self.manager = manager
-
+		#user information
 		self._name = room
 		self._owner = None
 		self._mods = set()
 		self._bannedWords = []
 		self._banlist = []
-		self._users = set()
+		self._users = []
 		self._userSessions = {}
-
+		self._usercount = 0
+		#intermediate message stuff and aux data for commands
 		self._messages = {}
 		self._history = []
 		self._last = 0
@@ -176,17 +181,36 @@ class Group:
 		if manager: self._connect()
 
 	#
-	# TODO Properties XXX
+	# Properties
 	#
 
-	def setNameColor(self,nColor):	if not self._anon: self._nColor = nColor
-	def setFontColor(self,fColor):	self._fColor = fColor
-	def setFontSize(self,fSize):	self._fSize = min(22,max(9,fSize))
-	def setFontFace(self,fFace):	self._fFace = fFace
-	def getNameColor(self):			return self._nColor
-	def getFontColor(self):			return self._fColor
-	def getFontSize(self):			return self._fSize
-	def getFontFace(self):			return self._fFace
+	def _setNameColor(self,nColor):	if not self._anon: self._nColor = nColor
+	def _setFontColor(self,fColor):	self._fColor = fColor
+	def _setFontSize(self,fSize):	self._fSize = min(22,max(9,fSize))
+	def _setFontFace(self,fFace):	self._fFace = fFace
+	def _getNameColor(self):		return self._nColor
+	def _getFontColor(self):		return self._fColor
+	def _getFontSize(self):			return self._fSize
+	def _getFontFace(self):			return self._fFace
+
+	nColor = property(_getNameColor,_setNameColor)
+	fColor = property(_getFontColor,_setFontColor)
+	fSize  = property(_getFontSize,_setFontSize)
+	fFace  = property(_getFontFace,_setFontFace)
+
+	def _getName(self):			return self._name
+	def _getOwner(self):		return self._owner
+	def _getModlist(self):		return set(self._mods)							#cloned set
+	def _getUserlist(self):		return list(self._users)						#cloned list
+	def _getUsercount(self):	return self._usercount
+	def _getBanlist(self):		return [banned[2] for banned in self._banlist]	#by name; cloned
+
+	name      = property(_getName)
+	owner     = property(_getOwner)
+	modlist   = property(_getModlist)
+	userlist  = property(_getUserlist)
+	usercount = property(_getUsercount)
+	banlist   = property(_getBanlist)
 
 	def lock(self,lock):
 		'''Lock/unlock writing buffer'''
@@ -209,8 +233,8 @@ class Group:
 		self.sock.setblocking(False)
 		self.wbuff = b""
 		#authenticate
-		if self.manager.username and self.manager.password:
-			self._sendCommand("bauth", self._name, self._uid, self.manager.username, self.manager.password)
+		if self._manager.username and self._manager.password:
+			self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password)
 		else:
 			self._sendCommand("bauth", self.name)
 
@@ -266,14 +290,14 @@ class Group:
 #	Commands received from socket
 #########################################
 	def _recv_ok(self, args):
-		if args[2] == "N" and self.manager.password == None and self.manager.username == None: 
+		if args[2] == "N" and self._manager.password == None and self._manager.username == None: 
 			n = args[4].rsplit('.', 1)[0]
 			n = n[-4:]
 			aid = args[1][4:8]
 			self._anon = "!anon" + getAnonId(n, aid)
 			self._nColor = n
-		elif args[2] == "N" and self.manager.password == None:
-			self._sendCommand("blogin", self.manager.username)
+		elif args[2] == "N" and self._manager.password == None:
+			self._sendCommand("blogin", self._manager.username)
 		elif args[2] != "M": #unsuccesful login
 			self._callEvent("onLoginFail")
 			self.disconnect()
@@ -286,10 +310,10 @@ class Group:
 		self._callEvent("onDenied")
 	
 	def _recv_inited(self, args):
-		self.sendCommand("g_participants", "start")
-		self.sendCommand("getpremium", "1")
-		self.sendCommand("getbannedwords")
-		self.sendCommand("getratelimit")
+		self._sendCommand("g_participants", "start")
+		self._sendCommand("getpremium", "1")
+		self._sendCommand("getbannedwords")
+		self._sendCommand("getratelimit")
 		self._callEvent("onConnect")
 		self._callEvent("onHistoryDone", self._history)
 		self._history.clear()
@@ -447,9 +471,9 @@ class Group:
 				post = post.replace(j,i)
 			post = post.replace("\n","<br/>")
 		if len(post) > self._maxLength:
-			if self.manager.tooBigMessage == BigMessage_Cut:
-				self.message(post[:self.manager._maxLength], html = html)
-			elif self.manager.tooBigMessage == BigMessage_Multiple:
+			if self._tooBigMessage == BigMessage_Cut:
+				self.message(post[:self._manager._maxLength], html = html)
+			elif self._tooBigMessage == BigMessage_Multiple:
 				while len(post) > 0:
 					sect = post[:self._maxLength]
 					post = post[self._maxLength:]
@@ -459,11 +483,11 @@ class Group:
 			self.fSize, self.fColor, self.fFace, post))
 
 	def addMod(self, user):
-		if self.getLevel(self.manager.username) == 2:
+		if self.getLevel(self._manager.username) == 2:
 			self._sendCommand("addmod", user)
 
 	def removeMod(self, user):
-		if self.getLevel(self.manager.username) == 2:
+		if self.getLevel(self._manager.username) == 2:
 			self._sendCommand("removemod", user)
 
 	def setBgMode(self, mode):
@@ -589,3 +613,4 @@ class Manager:
 		for group in self.groups:
 			if group.name == groupName:
 				return group
+
