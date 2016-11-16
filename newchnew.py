@@ -2,46 +2,8 @@
 #unid :: unique user id, in base 64
 #pid :: post id, after display
 #pnum :: post number, before display
-#
-#major TODO: implement threaded stuff and ping
-'''
-b
-:1479201115.43		#0
-:c0debreak			#1	user
-:					#2	tempname
-:45951550			#3:	user id
-:					#4	(something mod related), user id in b64
-:ChMM1YStrsrDXiAjGtuduA==	#5
-:					#6	(ip)
-:0					#7	channel
-:					#8	######################################################## :<n3c0/><f x120cc=""><b>@cubebert: `Flagged that message` Grill&#39;s been reported to chatango&#39;s secret police<br/></b>
-
-
-i
-:1479200010.45		#0: time
-:cubebert			#1: user
-:					#2	tempname
-:61230343			#3:	user id
-:					#4	(something mod related), user id in b64
-:2Z2wwF23NwI0oVg=	#5	message id assigned after display
-:					#6	(ip)
-:0					#7	channel
-:					#8	########################################################
-:<n3355ff/><f x120ecd64="8">But there appears to be a command for it
-
-
-
-Message before refresh:
-
-from u:
-	2Z2wwF23NQM0p10=
-
-i:1479201666.65:cubebert::82894187:1yNRtZGRN5ekjk7Bu1uBbw==:2Z2wwF23NQM0p10=:64.189.165.191:256::<n000/><f x12f96="1">and if i switch channels?
-	2Z2wwF23NQM0p10=
-
-'''
-
-
+#TODO	are unids sent on participant calls?
+#		for mods only?
 
 import socket
 import time
@@ -55,12 +17,12 @@ XML_TAG_RE = re.compile("(<.*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 
 HTML_CODES = [
-	["&#39;","'"],
-	["&gt;",">"],
-	["&lt;","<"],
-	["&quot;",'"'],
-	["&apos;","'"],
-	["&amp;",'&'],
+	("&#39;","'"),
+	("&gt;",">"),
+	("&lt;","<"),
+	("&quot;",'"'),
+	("&apos;","'"),
+	("&amp;",'&'),
 ]
 def _formatRaw(raw):
 	if len(raw) == 0: return raw
@@ -69,8 +31,8 @@ def _formatRaw(raw):
 	for i in XML_TAG_RE.findall(raw):
 		raw = raw.replace(i,i == "<br/>" and "\n" or "")
 	raw.replace("&nbsp;",' ')
-	for i in HTML_CODES:
-		raw = raw.replace(i[0],i[1])
+	for i,j in HTML_CODES:
+		raw = raw.replace(i,j)
 	#remove trailing \n's
 	while len(raw) and raw[-1] == "\n":
 		raw = raw[:-1]
@@ -118,7 +80,29 @@ def _formatMsg(raw, bori):
 		post.fColor = tag.group(5)
 		post.fFace = tag.group(6)
 	return post
+
+class Task:
+	def __init__(self, manager, timeout, interval, func, *args, **kwargs):
+		self._manager = manager
+		self._timeout = timeout
+		self.target = time.time() + timeout
+		self._isInterval = interval
+		self._func = func
+		self._args = args
+		self._kwargs = kwargs
 	
+	def __call__(self):
+		self._func(*self._args,**self._kwargs)
+		if self._isInterval:
+			self.target = time.time() + self._timeout
+		else:
+			self.cancel()
+
+	def cancel(self):
+		self._manager.tasks.remove(self)
+	
+	def add(self):
+		self._manager.tasks.add(self)
 
 class Generate:
 	def uid():
@@ -147,46 +131,20 @@ class Generate:
 			return re.search("auth.chatango.com=(.*?);", auth).group(1)
 		except:
 			return None
-
-class Manager:
-	'''THIS WILL CONTAIN ALL (onEvent)S'''
-	def __init__(self, username, password, pm):
-		self.username = username
-		self.password = password
-		self.pm = pm
-		self.running = False
-		self.groups = []
-
-	def manage(self, data):
-		socks = [group.sock for group in self.groups]
-		read, write, err = select.select(socks,socks,[])
-		for i,sock in enumerate(read):
-			group = self.groups[i]
-			rbuff = b""					#reading buffer
-			lenread = -1
-			try:
-				while lenread and rbuff[-1] != b'\x00':
-					read = self.chSocket.recv(1024)
-					lenread = len(read)
-					rubff += read
-				if lenread: #!=0
-					group.digest(rbuff)
-			except socket.error:
-				pass
-		for i,sock in enumerate(write):
-			group = self.groups[i]
-			try:
-				size = sock.send(group.wbuff)
-				group.wbuff = group.wbuff[size:]
-			except socket.error:
-				pass
 			
 class Group:
+	_maxLength = 2700
+	_pingDelay = 20
+	_messageBackground = True
+	_messageRecord = False
+
 	def __init__(self, room, manager = None):
 		self._server = server or getServer(room)
 		self._port = port or 443
 		self.sock = None
+
 		self.wbuff = b""
+		self._rbuff = b""
 		self._wbufflock = b""
 		self._wlock = False
 
@@ -194,19 +152,41 @@ class Group:
 
 		self._name = room
 		self._owner = None
+		self._mods = set()
+		self._bannedWords = []
+		self._banlist = []
+		self._users = set()
+		self._userSessions = {}
+
+		self._messages = {}
+		self._history = []
+		self._last = 0
+		self._timesGot = 0
+		#account information
 		self._uid = Generate.uid()
-		self._aid = None
-		self._aname  = None
-		#chatango needs nameColor here, so the rest are here too
+		self._anon = None
+		self._premium = False
 		self._nColor = None	
-		self._fSize  = None
-		self._fColor = None
-		self._fFace  = None
-		self._mods = []
+		self._fSize  = 11
+		self._fColor = ""
+		self._fFace  = 0
 
 		self._connected = False
 		self._reconnecting = False
 		if manager: self._connect()
+
+	#
+	# TODO Properties XXX
+	#
+
+	def setNameColor(self,nColor):	if not self._anon: self._nColor = nColor
+	def setFontColor(self,fColor):	self._fColor = fColor
+	def setFontSize(self,fSize):	self._fSize = min(22,max(9,fSize))
+	def setFontFace(self,fFace):	self._fFace = fFace
+	def getNameColor(self):			return self._nColor
+	def getFontColor(self):			return self._fColor
+	def getFontSize(self):			return self._fSize
+	def getFontFace(self):			return self._fFace
 
 	def lock(self,lock):
 		'''Lock/unlock writing buffer'''
@@ -229,20 +209,22 @@ class Group:
 		self.sock.setblocking(False)
 		self.wbuff = b""
 		#authenticate
-		if self.manager.name and self.manager.password:
-			self._sendCommand("bauth", self.name, self._uid, self.manager.name, self.manager.password)
+		if self.manager.username and self.manager.password:
+			self._sendCommand("bauth", self._name, self._uid, self.manager.username, self.manager.password)
 		else:
 			self._sendCommand("bauth", self.name)
 
 		self._setWriteLock(True) #lock until inited
-#		self._pingTask = self.mgr.setInterval(self.mgr._pingDelay, self.ping)
+		self._pingTask = Task(self.manager, self._pingDelay, True, self.ping)
+		self._pingTask.add()
+		self._canPing = True
 		if not self._reconnecting: self.connected = True
 
 	def _disconnect(self):
 		if not self._reconnecting: self.connected = False
 		self.users = {}
 		self.userlist = []
-#		self._pingTask.cancel()
+		self._pingTask.cancel()
 		self.sock.close()
 
 	def disconnect(self):
@@ -269,33 +251,35 @@ class Group:
 			getattr(self.manager, event)(self, *args, **kw)
 		except AttributeError: pass
 
-	def _digest(self, data):
-		for cmd in data.split(b"\x00"):
-			args = data.decode("utf_8").rstrip("\r\n").split(":")
+	def digest(self, data):
+		self._rbuff += data
+		commands = data.split(b"\x00")
+		for command in commands[:-1]
+			args = command.decode("utf_8").rstrip("\r\n").split(":")
 			try:
-				if len(args) == 1:
+				if command == b"\r\n":
 					getattr(self, "_recv_ping")()
 				getattr(self, "_recv_"+args[0])(args[1:])
 			except AttributeError: pass
+		self._rbuff = commands[-1]
 #########################################
 #	Commands received from socket
 #########################################
 	def _recv_ok(self, args):
-		if args[2] == "N" and self.manager.password == None and self.manager.name == None: 
+		if args[2] == "N" and self.manager.password == None and self.manager.username == None: 
 			n = args[4].rsplit('.', 1)[0]
 			n = n[-4:]
 			aid = args[1][4:8]
-			self._aname = "!anon" + getAnonId(n, aid)									#bound name _aname to anon name
-			self._nColor = n															#bound name _nColor to name color
+			self._anon = "!anon" + getAnonId(n, aid)
+			self._nColor = n
 		elif args[2] == "N" and self.manager.password == None:
-			self._sendCommand("blogin", self.manager.name)
+			self._sendCommand("blogin", self.manager.username)
 		elif args[2] != "M": #unsuccesful login
 			self._callEvent("onLoginFail")
 			self.disconnect()
-		self._owner = args[0]															#bound name _owner to room owner
-		self._uid = args[1]																#bound name _uid to unique id
-		self._aid = args[1][4:8]														#bound name _aid to anon id
-		self._mods = set(args[6].split(";"))											#bound name _mods to moderators
+		self._owner = args[0]
+		self._uid = args[1]	
+		self._mods = set(args[6].split(";"))
 
 	def _recv_denied(self, args):
 		self._disconnect()
@@ -307,14 +291,15 @@ class Group:
 		self.sendCommand("getbannedwords")
 		self.sendCommand("getratelimit")
 		self._callEvent("onConnect")
+		self._callEvent("onHistoryDone", self._history)
+		self._history.clear()
 		self.lock(False)
 
 	def _recv_premium(self, args):
 		if float(args[1]) > time.time():
-			self._premium = True														#bound name _premium to whether account is premium
-			#TODO make this code work
-#			if self.user._mbg: self.setBgMode(1)
-#			if self.user._mrec: self.setRecordingMode(1)
+			self._premium = True
+			if self._messageBackground: self.setBgMode(1)
+			if self._messageRecord: self.setRecordingMode(1)
 		else:
 			self._premium = False
 
@@ -324,8 +309,8 @@ class Group:
 		for person in people:
 			person = person.split(':')
 			if person[-2] != "None" and person[-1] == "None":
-				self._users.append(person[-2].lower())									#bound name _users to list of registered chatango users
-				self._userSessions[person[-3]] = person[-2].lower()						#bound name _userSessions to list of user sessions (uids)
+				self._users.add(person[-2].lower())
+				self._userSessions[person[-3]] = person[-2].lower()
 		self._callEvent("onParticipants")
 	
 	def _recv_participant(self, args):
@@ -347,35 +332,22 @@ class Group:
 			group._callEvent("onJoin", user)
 
 	def _recv_bw(self, args):
-		group._bannedWords = args[0].split("%2C")										#bound name _bannedWords to banned words list
+		group._bannedWords = args[0].split("%2C")
 
 	def _recv_n(self, args):
-		self._usercount = int(args[0],16)												#bound name _usercount to user count
+		self._usercount = int(args[0],16)
 		self._callEvent("onUsercount",self._usercount)
 		
 	def _recv_b(self, args):
-		#TODO function that extrapolates i and b
 		post = _formatMsg(args, 'b')
 		if post.time > self._last:
-			self._last = post.time														#bound name _last to last most recent message time
-		self._messages[post.pnum] = type("Post", (object,),								#bound name _messages to message array
-			{"time": time
-			,"user": user
-			,"pid":	None
-			,"uid": args[3]
-			,"unid": args[4]
-			,"pnum": args[5]
-			,"ip": args[6]
-			,"channel":(chval&1|(chval&8)>>2)
-			,"post": formatRaw(":".join(args[9:]))
-			,"nColor": nColor
-			,"fSize": fSize
-			,"fFace": fFace
-			,"fColor": fColor})
+			self._last = post.time
+		self._messages[post.pnum] = post
 
 	def _recv_u(self,args):
-		post = group._messages.get(args[0])
+		post = self._messages.get(args[0])
 		if post:
+			del self._messages[args[0]]
 			post.pid = args[1]
 			self._callEvent("onMessage", post)
 		else:
@@ -383,12 +355,12 @@ class Group:
 
 	def _recv_i(self,args):
 		post = _formatMsg(args, 'i')
-		self._history.append(post)														#bound name _history to historical messages
+		self._history.append(post)
 
 	def _recv_gotmore(self, args):
 		self._callEvent("onHistoryDone", self._history)
 		self._history.clear()
-		self._timesGot += 1																#bound name _timesGot to times gotmore has been fired
+		self._timesGot += 1
 
 	def _recv_show_fw(self, args):
 		self._callEvent("onFloodWarning")
@@ -399,8 +371,8 @@ class Group:
 	def _recv_tb(self, args):
 		self._callEvent("onFloodBanRepeat",int(args[0]))
 
-	def rcmd_blocklist(self, args):
-		self._banlist = list()															#bound name _banlist to ban list
+	def _recv_blocklist(self, args):
+		self._banlist.clear()
 		sections = ":".join(args).split(";")
 		for section in sections:
 			params = section.split(":")
@@ -421,14 +393,14 @@ class Group:
 		user = args[3]
 		self._banlist.append((args[0], args[1], target, float(args[4]), user))
 		self._callEvent("onBan", user, target)
-#		self.requestBanlist()															TODO code for requestbanlist
+		self.requestBanlist()
   
 	def _recv_unblocked(self, args):
 		if args[2] == "": return
 		target = args[2]
 		user = args[3]
 		self._callEvent("onUnban", user, target)
-#		self.requestBanlist()
+		self.requestBanlist()
   
 	def _recv_mods(self, args):
 		mods = set(map(lambda x: x.lower(), args))
@@ -444,20 +416,17 @@ class Group:
 	def _recv_delete(self, args):
 		msg = self._messages[args[0]]
 		if msg:
-			if msg in self._history:
-				self._history.remove(msg)
-				self._callEvent("onMessageDelete", msg.user, msg)
-				msg.detach()
+			self._callEvent("onMessageDelete", msg.user, msg)
   
 	def _recv_deleteall(self, args):
 		for msgid in args:
 			self._recv_delete([msgid])
 
 	def _recv_ping(self, args):
-		self._canPing = True													#bound name _canPing to ability to ping without disconnecting
+		self._canPing = True
 
 #########################################
-#	Frontends to send to socket XXX
+#	Frontends to send to socket 
 #########################################
 	def ping(self):
 		if self._canPing:
@@ -477,10 +446,10 @@ class Group:
 			for i,j in reversed(HTML_CODES):
 				post = post.replace(j,i)
 			post = post.replace("\n","<br/>")
-		if len(post) > self.maxLength:
-			if self.manager._tooBigMessage == BigMessage_Cut:
+		if len(post) > self._maxLength:
+			if self.manager.tooBigMessage == BigMessage_Cut:
 				self.message(post[:self.manager._maxLength], html = html)
-			elif self.manager._tooBigMessage == BigMessage_Multiple:
+			elif self.manager.tooBigMessage == BigMessage_Multiple:
 				while len(post) > 0:
 					sect = post[:self._maxLength]
 					post = post[self._maxLength:]
@@ -488,13 +457,135 @@ class Group:
 				return
 		self._sendCommand("bm","meme",str(channel),"<n{}/><f x{}{}=\"{}\">{}".format(self.nColor,
 			self.fSize, self.fColor, self.fFace, post))
-	
-		
+
 	def addMod(self, user):
-		if self.getLevel(self.user) == 2:											#bound name user to username
+		if self.getLevel(self.manager.username) == 2:
 			self._sendCommand("addmod", user)
 
 	def removeMod(self, user):
-		if self.getLevel(self.user) == 2:											#bound name user to username
+		if self.getLevel(self.manager.username) == 2:
 			self._sendCommand("removemod", user)
 
+	def setBgMode(self, mode):
+		self._sendCommand("msgbg", str(mode))
+  
+	def setRecordingMode(self, mode):
+		self._sendCommand("msgmedia", str(mode))
+
+	def flag(self, message):
+		self._sendCommand("g_flag", message.pnum)
+
+	def delete(self, message):
+		if self.getLevel(self.user) > 0:
+			self._sendCommand("delmsg", message.pnum)
+
+	def clearUser(self, msg):
+		if self.getLevel(self.user) > 0:
+			self._sendCommand("delallmsg", msg.unid)
+
+	def clearall(self):
+		"""Clear all messages. (Owner only)"""
+		if self.getLevel(self.user) == 2:
+			self._sendCommand("clearall")
+	
+	def ban(self, msg):
+		"""
+		Ban a message's sender. (Moderator only)
+		
+		@type message: Message
+		@param message: message to ban sender of
+		"""
+		if self.getLevel(self.user) > 0:
+			self._sendCommand("block", msg.user, msg.ip, msg.unid)
+
+	def requestBanlist(self):
+		"""Request an updated banlist."""
+		self._sendCommand("blocklist", "block", "", "next", "500")
+  
+	def unban(self, user):
+		"""
+		Unban a user. (Moderator only)
+		
+		@type user: User
+		@param user: user to unban
+		
+		@rtype: bool
+		@return: whether it succeeded
+		"""
+		rec = None
+		for record in self._banlist:
+			if record[2] == user:
+				rec = record
+				break
+		if rec:
+			self._sendCommand("removeblock", rec[0], rec[1], rec[2])
+			return True
+		else:
+			return False
+
+	def getMore(self, amt = 20):
+		self._sendCommand("get_more",str(amt),str(self.timesGot))
+
+	def getLevel(self, user):
+		if user == self._owner: return 2
+		if user in self._mods: return 1
+		return 0
+
+class Manager:
+	'''THIS WILL CONTAIN ALL (onEvent)S'''
+	def __init__(self, username, password):
+		self.username = username
+		self.password = password
+		self.running = False
+		self.groups = set()
+		self.tasks = set()
+
+	def main(self):
+		self.onInit()
+		self.running = True
+		while self.running:
+			socks = [group.sock for group in self.groups]
+			read, write, err = select.select(socks,socks,[])
+			for sock in read:
+				group = [i for i in self.groups if i.sock == sock][0]
+				rbuff = b""					#reading buffer
+				lenread = -1
+				try:
+					read = self.chSocket.recv(1024)
+					group.digest(read)
+				except socket.error:
+					pass
+			for sock in write:
+				group = [i for i in self.groups if i.sock == sock][0]
+				try:
+					size = sock.send(group.wbuff)
+					group.wbuff = group.wbuff[size:]
+				except socket.error:
+					pass
+			self._tick()
+
+	def _tick(self):
+		now = time.time()
+		for task in self.tasks:
+			if task.target <= now:
+				task()
+
+	def joinGroup(self, groupName):
+		groupName = groupName.lower()
+		if roomName != self.username:
+			ret = Group(self,roomName)
+			self.groups.add(ret)
+			return ret
+
+	def leaveGroup(self, groupName)
+		groupName = groupName.lower()
+		for group in self.groups:
+			if group.name == groupName:
+				con.disconnect()
+				return
+
+	def getGroup(self, groupName):
+		groupName = groupName.lower()
+		for group in self.groups:
+			if group.name == groupName:
+				return group
