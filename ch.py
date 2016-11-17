@@ -267,7 +267,7 @@ class PM:
       self._callEvent("onLoginFail")
       self._sock = None
       return False
-    self._sendCommand("tlogin", self._auid, "2")
+    self._sendCommand("tlogin", self._auid, "2", firstcmd = True)
     self._setWriteLock(True)
     return True
   
@@ -361,10 +361,10 @@ class PM:
     self._callEvent("onPMOfflineMessage", user, body)
   
   def rcmd_wlonline(self, args):
-    self._callEvent("onPMContactOnline", User(args[0]))
+    self._callEvent("onPMContactOnline", args[0])
   
   def rcmd_wloffline(self, args):
-    self._callEvent("onPMContactOffline", User(args[0]))
+    self._callEvent("onPMContactOffline", args[0])
   
   def rcmd_kickingoff(self, args):
     self.disconnect()
