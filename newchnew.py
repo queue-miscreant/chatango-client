@@ -7,6 +7,7 @@
 #TODO	threaded start function
 
 import socket
+import random
 import time
 import threading
 import re
@@ -14,6 +15,23 @@ import select
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
+
+weights = [['5', 75], ['6', 75], ['7', 75], ['8', 75], ['16', 75], ['17', 75], ['18', 75], ['9', 95], ['11', 95], ['12', 95], ['13', 95], ['14', 95], ['15', 95], ['19', 110], ['23', 110], ['24', 110], ['25', 110], ['26', 110], ['28', 104], ['29', 104], ['30', 104], ['31', 104], ['32', 104], ['33', 104], ['35', 101], ['36', 101], ['37', 101], ['38', 101], ['39', 101], ['40', 101], ['41', 101], ['42', 101], ['43', 101], ['44', 101], ['45', 101], ['46', 101], ['47', 101], ['48', 101], ['49', 101], ['50', 101], ['52', 110], ['53', 110], ['55', 110], ['57', 110], ['58', 110], ['59', 110], ['60', 110], ['61', 110], ['62', 110], ['63', 110], ['64', 110], ['65', 110], ['66', 110], ['68', 95], ['71', 116], ['72', 116], ['73', 116], ['74', 116], ['75', 116], ['76', 116], ['77', 116], ['78', 116], ['79', 116], ['80', 116], ['81', 116], ['82', 116], ['83', 116], ['84', 116]]
+specials = {"de-livechat": 5, "ver-anime": 8, "watch-dragonball": 8, "narutowire": 10, "dbzepisodeorg": 10, "animelinkz": 20, "kiiiikiii": 21, "soccerjumbo": 21, "vipstand": 21, "cricket365live": 21, "pokemonepisodeorg": 22, "watchanimeonn": 22, "leeplarp": 27, "animeultimacom": 34, "rgsmotrisport": 51, "cricvid-hitcric-": 51, "tvtvanimefreak": 54, "stream2watch3": 56, "mitvcanal": 56, "sport24lt": 56, "ttvsports": 56, "eafangames": 56, "myfoxdfw": 67, "peliculas-flv": 69, "narutochatt": 70}
+
+def getServer(group):
+	'''Return server number'''
+	if group in specials.keys():
+		return specials[group]
+	group = re.sub("-|_", "q", group)
+	wt, gw = sum([n[1] for n in weights]), 0
+	num1 = 1000 if len(group) < 7 else max(int(group[6:9], 36), 1000)
+	num2 = (int(group[:5],36) % num1) / num1
+	for i, v in weights:
+		gw += v / wt
+		if gw >= num2:
+			return i
+	return None
 
 AUTH_RE = re.compile("auth\.chatango\.com ?= ?(.*?);")
 POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1}|[a-fA-F0-9]{3}|[a-fA-F0-9]{4}|[a-fA-F0-9]{6})\/>)?(<f x([\d]{0}|[\d]{2})([0-9a-fA-F]{1}|[0-9a-fA-F]{3}|[0-9a-fA-F]{6})=\"([0-9a-zA-Z]*)\">)?")
@@ -55,7 +73,7 @@ def _formatMsg(raw, bori):
 		,"pnum": None
 		,"ip": raw[6]
 		,"channel": 0
-		,"post": formatRaw(":".join(raw[9:]))
+		,"post": _formatRaw(":".join(raw[9:]))
 		,"nColor": ""
 		,"fSize": ""
 		,"fFace": ""
@@ -111,7 +129,7 @@ class Task:
 class Generate:
 	def uid():
 		'''Generate unique ID'''
-		str(int(random.randrange(10 ** 15, (10 ** 16) - 1)))
+		return str(int(random.randrange(10 ** 15, (10 ** 16) - 1)))
 
 	def aid(n, aid):
 		'''Generate anon ID'''
@@ -143,10 +161,10 @@ class Group:
 	_messageRecord = False
 	_tooBigMessage = BigMessage_Multiple
 
-	def __init__(self, room, manager = None):
+	def __init__(self, room, manager, port = None):
 		self._manager = manager
 		#socket stuff
-		self._server = server or getServer(room)
+		self._server = getServer(room)
 		self._port = port or 443
 		self.sock = None
 		self.wbuff = b""
@@ -184,14 +202,15 @@ class Group:
 	# Properties
 	#
 
-	def _setNameColor(self,nColor):	if not self._anon: self._nColor = nColor
-	def _setFontColor(self,fColor):	self._fColor = fColor
-	def _setFontSize(self,fSize):	self._fSize = min(22,max(9,fSize))
-	def _setFontFace(self,fFace):	self._fFace = fFace
-	def _getNameColor(self):		return self._nColor
-	def _getFontColor(self):		return self._fColor
-	def _getFontSize(self):			return self._fSize
-	def _getFontFace(self):			return self._fFace
+	def _setNameColor(self,nColor):
+		if not self._anon: self._nColor = nColor
+	def _setFontColor(self,fColor): self._fColor = fColor
+	def _setFontSize(self,fSize): 	self._fSize = min(22,max(9,fSize))
+	def _setFontFace(self,fFace): 	self._fFace = fFace
+	def _getNameColor(self): 		return self._nColor
+	def _getFontColor(self): 		return self._fColor
+	def _getFontSize(self): 		return self._fSize
+	def _getFontFace(self): 		return self._fFace
 
 	nColor = property(_getNameColor,_setNameColor)
 	fColor = property(_getFontColor,_setFontColor)
@@ -222,32 +241,30 @@ class Group:
 	def _write(self,data):
 		'''Write to writing buffer'''
 		if self._wlock:
-			self.wbuff += data
-		else:
 			self._wbufflock += data
+		else:
+			self.wbuff += data
 	
 	def _connect(self):
 		'''Connect to the server.'''
-		self.sock = socket.socket()
-		self.sock.connect((self._server, self._port))
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.sock.connect(("s{}.chatango.com".format(self._server), self._port))
 		self.sock.setblocking(False)
 		self.wbuff = b""
 		#authenticate
 		if self._manager.username and self._manager.password:
-			self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password)
+			self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password, firstcmd = True)
 		else:
-			self._sendCommand("bauth", self.name)
+			self._sendCommand("bauth", self._name, firstcmd = True)
 
-		self._setWriteLock(True) #lock until inited
-		self._pingTask = Task(self.manager, self._pingDelay, True, self.ping)
+		self.lock(True) #lock until inited
+		self._pingTask = Task(self._manager, self._pingDelay, True, self.ping)
 		self._pingTask.add()
 		self._canPing = True
 		if not self._reconnecting: self.connected = True
 
 	def _disconnect(self):
 		if not self._reconnecting: self.connected = False
-		self.users = {}
-		self.userlist = []
 		self._pingTask.cancel()
 		self.sock.close()
 
@@ -272,13 +289,13 @@ class Group:
 
 	def _callEvent(self, event, *args, **kw):
 		try:
-			getattr(self.manager, event)(self, *args, **kw)
+			getattr(self._manager, event)(self, *args, **kw)
 		except AttributeError: pass
 
 	def digest(self, data):
 		self._rbuff += data
 		commands = data.split(b"\x00")
-		for command in commands[:-1]
+		for command in commands[:-1]:
 			args = command.decode("utf_8").rstrip("\r\n").split(":")
 			try:
 				if command == b"\r\n":
@@ -356,7 +373,7 @@ class Group:
 			group._callEvent("onJoin", user)
 
 	def _recv_bw(self, args):
-		group._bannedWords = args[0].split("%2C")
+		self._bannedWords = args[0].split("%2C")
 
 	def _recv_n(self, args):
 		self._usercount = int(args[0],16)
@@ -464,7 +481,7 @@ class Group:
 		#0 is white, 1 is red, 2 is blue, 3 is both
 		#make that into 0 is white, 1 is red, 8 is blue, 9 is both
 		#then shift 8 bits and add the channel's default value
-		channel = self.channel+(((channel&2)<<2 | (channel&1))<<8)
+		channel = (((channel&2)<<2 | (channel&1))<<8)
 		if not html:
 			#replace HTML equivalents
 			for i,j in reversed(HTML_CODES):
@@ -557,6 +574,7 @@ class Group:
 
 class Manager:
 	'''THIS WILL CONTAIN ALL (onEvent)S'''
+	_socketTimer = .2
 	def __init__(self, username, password):
 		self.username = username
 		self.password = password
@@ -567,26 +585,27 @@ class Manager:
 	def main(self):
 		self.onInit()
 		self.running = True
-		while self.running:
-			socks = [group.sock for group in self.groups]
-			read, write, err = select.select(socks,socks,[])
-			for sock in read:
-				group = [i for i in self.groups if i.sock == sock][0]
-				rbuff = b""					#reading buffer
-				lenread = -1
-				try:
-					read = self.chSocket.recv(1024)
-					group.digest(read)
-				except socket.error:
-					pass
-			for sock in write:
-				group = [i for i in self.groups if i.sock == sock][0]
-				try:
-					size = sock.send(group.wbuff)
-					group.wbuff = group.wbuff[size:]
-				except socket.error:
-					pass
-			self._tick()
+		try:
+			while self.running:
+				socks = [group.sock for group in self.groups]
+				read, write, err = select.select(socks,socks,[],self._socketTimer)
+				for sock in read:
+					group = [i for i in self.groups if i.sock == sock][0]
+					try:
+						read = sock.recv(1024)
+						group.digest(read)
+					except socket.error:
+						pass
+				for sock in write:
+#					print("writing socket found")
+					group = [i for i in self.groups if i.sock == sock][0]
+					try:
+						size = sock.send(group.wbuff)
+						group.wbuff = group.wbuff[size:]
+					except socket.error:
+						pass
+				self._tick()
+		except KeyboardInterrupt: pass
 
 	def _tick(self):
 		now = time.time()
@@ -596,12 +615,12 @@ class Manager:
 
 	def joinGroup(self, groupName):
 		groupName = groupName.lower()
-		if roomName != self.username:
-			ret = Group(self,roomName)
+		if groupName != self.username:
+			ret = Group(groupName,self)
 			self.groups.add(ret)
 			return ret
 
-	def leaveGroup(self, groupName)
+	def leaveGroup(self, groupName):
 		groupName = groupName.lower()
 		for group in self.groups:
 			if group.name == groupName:
@@ -614,3 +633,11 @@ class Manager:
 			if group.name == groupName:
 				return group
 
+	def onInit(self):
+		pass
+
+def mainThread(username,password):
+	instance = Manager(username,password)
+	thr = threading.Thread(target=instance.main,daemon=True)
+	thr.start()
+	return instance
