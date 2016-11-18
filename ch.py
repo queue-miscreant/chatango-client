@@ -42,6 +42,32 @@ POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([\d]{0}|[\d]{2})([0-9a
 XML_TAG_RE = re.compile("(<.*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 
+class Generate:
+	def uid():
+		'''Generate user ID'''
+		return str(int(random.randrange(10 ** 15, (10 ** 16) - 1)))
+
+	def aid(n, uid):
+		'''Generate anon ID'''
+		if n == None: n = "3452"
+		n = n.rsplit('.', 1)[0]
+		return "".join(map(lambda i,v: str(int(i) + int(v))[-1],
+					   str(n)[-4:], uid[4:8]))
+
+	def auth(user, password):
+		'''Generate auth token for PMs'''
+		auth = urllib.request.urlopen("http://chatango.com/login",
+			urllib.parse.urlencode({
+			"user_id": user,
+			"password": password,
+			"storecookie": "on",
+			"checkerrors": "yes" }).encode()
+			).getheader("Set-Cookie")
+		try:
+			return re.search("auth.chatango.com=(.*?);", auth).group(1)
+		except:
+			return None
+
 HTML_CODES = [
 	("&#39;","'"),
 	("&gt;",'>'),
@@ -107,7 +133,7 @@ def _formatMsg(raw, bori):
 		if raw[2] != '':
 			user = '#' + raw[2].lower()
 		else:
-			user = "!anon" + Generate.aid(post.nColor, raw[3])
+			user = "!anon" + Generate.aid(post.nColor, post.uid)
 	post.user = user
 	channel = (int(raw[7]) >> 8) & 15		#TODO mod channel on 2**15
 	post.channel = channel&1|(channel&8)>>2
@@ -162,34 +188,6 @@ class Task:
 	def add(self):
 		'''Add a task to the manager, which will call it when necessary'''
 		self._manager.tasks.add(self)
-
-class Generate:
-	def uid():
-		'''Generate user ID'''
-		return str(int(random.randrange(10 ** 15, (10 ** 16) - 1)))
-
-	def aid(n, aid):
-		'''Generate anon ID'''
-		if n == None: n = "3452"
-		try:
-			return "".join(map(lambda i,v: str(int(i) + int(v))[-1],
-						   str(n), aid))
-		except:
-			return "3452"
-
-	def auth(user, password):
-		'''Generate auth token for PMs'''
-		auth = urllib.request.urlopen("http://chatango.com/login",
-			urllib.parse.urlencode({
-			"user_id": user,
-			"password": password,
-			"storecookie": "on",
-			"checkerrors": "yes" }).encode()
-			).getheader("Set-Cookie")
-		try:
-			return re.search("auth.chatango.com=(.*?);", auth).group(1)
-		except:
-			return None
 
 class _Connection:
 	'''A virtual connection object to chatango. Superclass to PM and Groups'''
@@ -415,10 +413,7 @@ class Group(_Connection):
 	def _recv_ok(self, args):
 		'''Acknowledgement from server that login succeeded'''
 		if args[2] == 'N' and self._manager.password == None and self._manager.username == None: 
-			n = args[4].rsplit('.', 1)[0]
-			n = n[-4:]
-			aid = args[1][4:8]
-			self._anon = "!anon" + getAnonId(n, aid)
+			self._anon = "!anon" + Generate.aid(args[4], args[1])
 			self._nColor = n
 		elif args[2] == 'N' and self._manager.password == None:
 			self._sendCommand("blogin", self._manager.username)
