@@ -29,7 +29,7 @@ def getServer(group):
 	'''Return server number'''
 	if group in specials.keys():
 		return specials[group]
-	group = re.sub("-|_", "q", group)
+	group = re.sub("-|_", 'q', group)
 	wt, gw = sum([n[1] for n in weights]), 0
 	num1 = 1000 if len(group) < 7 else max(int(group[6:9], 36), 1000)
 	num2 = (int(group[:5],36) % num1) / num1
@@ -46,8 +46,8 @@ THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 
 HTML_CODES = [
 	("&#39;","'"),
-	("&gt;",">"),
-	("&lt;","<"),
+	("&gt;",'>'),
+	("&lt;",'<'),
 	("&quot;",'"'),
 	("&apos;","'"),
 	("&amp;",'&'),
@@ -78,30 +78,30 @@ def _formatMsg(raw, bori):
 	Post objects have support for channels and formatting parsing
 	'''
 	post = type("Post",(object,),
-		{"time": float(raw[0])
-		,"user": None
-		,"pid":	None
-		,"uid": raw[3]
-		,"unid": raw[4]
-		,"pnum": None
-		,"ip": raw[6]
-		,"channel": 0
-		,"post": formatRaw(":".join(raw[9:]))
-		,"nColor": ""
-		,"fSize": ""
-		,"fFace": ""
-		,"fColor": '0'})
+		{"time":	float(raw[0])
+		,"user":	None
+		,"msgid":	None
+		,"uid":		raw[3]
+		,"unid":	raw[4]
+		,"pnum":	None
+		,"ip":		raw[6]
+		,"channel":	0
+		,"post":	formatRaw(':'.join(raw[9:]))
+		,"nColor":	""
+		,"fSize":	""
+		,"fFace":	""
+		,"fColor":	'0'})
 
 	if bori == 'b':
 		post.pnum = raw[5]
 	elif bori == 'i':
-		post.pid = raw[5]
+		post.msgid = raw[5]
 
 	#user parsing
 	user = raw[1].lower()
 	if not user:
 		if raw[2] != '':
-			post.user = "#" + raw[2].lower()
+			post.user = '#' + raw[2].lower()
 		else:
 			post.user = "!anon" + Generate.aid(nColor, raw[3])
 	#
@@ -279,7 +279,7 @@ class _Connection:
 
 	def disconnect(self):
 		'''Disconnect and call event'''
-		self.callEvent("onDisconnect")
+		self._callEvent("onDisconnect")
 		self._disconnect()
 
 	def reconnect(self):
@@ -410,20 +410,20 @@ class Group(_Connection):
 
 	def _recv_ok(self, args):
 		'''Acknowledgement from server that login succeeded'''
-		if args[2] == "N" and self._manager.password == None and self._manager.username == None: 
+		if args[2] == 'N' and self._manager.password == None and self._manager.username == None: 
 			n = args[4].rsplit('.', 1)[0]
 			n = n[-4:]
 			aid = args[1][4:8]
 			self._anon = "!anon" + getAnonId(n, aid)
 			self._nColor = n
-		elif args[2] == "N" and self._manager.password == None:
+		elif args[2] == 'N' and self._manager.password == None:
 			self._sendCommand("blogin", self._manager.username)
-		elif args[2] != "M": #unsuccesful login
+		elif args[2] != 'M': #unsuccesful login
 			self._callEvent("onLoginFail")
 			self.disconnect()
 		self._owner = args[0]
 		self._uid = args[1]	
-		self._mods = set(args[6].split(";"))
+		self._mods = set(args[6].split(';'))
 
 	def _recv_denied(self, args):
 		'''Acknowledgement that login was denied'''
@@ -434,7 +434,7 @@ class Group(_Connection):
 		'''Command fired on room inited, after recent messages have sent'''
 		#TODO weed out null commands
 		self._sendCommand("g_participants", "start")
-		self._sendCommand("getpremium", "1")
+		self._sendCommand("getpremium", '1')
 		self._sendCommand("getbannedwords")
 		self._sendCommand("getratelimit")
 		self._callEvent("onConnect")
@@ -445,7 +445,7 @@ class Group(_Connection):
 	def _recv_g_participants(self, args):
 		'''Command that contains information of current room members'''
 		#g_participants splits people by ;
-		people = ':'.join(args).split(";")
+		people = ':'.join(args).split(';')
 		for person in people:
 			person = person.split(':')
 			if person[-2] != "None" and person[-1] == "None":
@@ -493,10 +493,10 @@ class Group(_Connection):
 		post = self._messages.get(args[0])
 		if post:
 			del self._messages[args[0]]
-			post.pid = args[1]
+			post.msgid = args[1]
 			self._callEvent("onMessage", post)
 		else:
-			self.call("onDroppedMessage", args)
+			self._callEvent("onDroppedMessage", args)
 
 	def _recv_i(self,args):
 		'''Command fired on historical message'''
@@ -524,9 +524,9 @@ class Group(_Connection):
 	def _recv_blocklist(self, args):
 		'''Command fired on list of banned users'''
 		self._banlist.clear()
-		sections = ":".join(args).split(";")
+		sections = ':'.join(args).split(';')
 		for section in sections:
-			params = section.split(":")
+			params = section.split(':')
 			if len(params) != 5: continue
 			if params[2] == "": continue
 			self._banlist.append((
@@ -569,9 +569,7 @@ class Group(_Connection):
 
 	def _recv_delete(self, args):
 		'''Command fired on message delete'''
-		msg = self._messages[args[0]]
-		if msg:
-			self._callEvent("onMessageDelete", msg.user, msg)
+		self._callEvent("onMessageDelete", args[0])
   
 	def _recv_deleteall(self, args):
 		'''Command fired on message delete (multiple)'''
@@ -589,7 +587,7 @@ class Group(_Connection):
 			#replace HTML equivalents
 			for i,j in reversed(HTML_CODES):
 				post = post.replace(j,i)
-			post = post.replace("\n","<br/>")
+			post = post.replace('\n',"<br/>")
 		if len(post) > self._maxLength:
 			if self._tooBigMessage == BigMessage_Cut:
 				self.sendPost(post[:self._maxLength], html = html)
@@ -709,7 +707,7 @@ class PM(_Connection):
 		self.sock.connect((self._PMHost, self._port))
 		self.sock.setblocking(False)
 
-		self._sendCommand("tlogin", self._auid, "2")
+		self._sendCommand("tlogin", self._auid, '2')
 		self._setWriteLock(True)
 
 		self._pingTask = Task.addInterval(self._manager, self._pingDelay, self.ping)
@@ -741,6 +739,12 @@ class PM(_Connection):
 	def _recv_wladd(self, args):
 		'''Command fired on friend added'''
 		contacts.add(args[0])
+		self._callEvent("onPMContactAdded", args[0])
+
+	def _recv_wldelete(self, args):
+		'''Command fired on friend deleted'''
+		contacts.remove(args[0])
+		self._callEvent("onPMContactRemoved",args[0])
 
 	def _recv_msg(self, args):
 		'''Command fired on PM received'''
@@ -750,8 +754,8 @@ class PM(_Connection):
 	
 	def _recv_msgoff(self, args):
 		'''Command fired on offline PM received'''
+		body = formatRaw(':'.join(args[1:]))
 		user = args[0]
-		body = strip_html(":".join(args[5:]))
 		self._callEvent("onPMOffline", user, body)
 
 	def _recv_wlonline(self, args):
@@ -768,6 +772,7 @@ class PM(_Connection):
 		for name in args:
 			if name == "": continue
 			self._blocklist.add(name)
+		self._callEvent("onPMBlockList")
 
 	def _recv_kickingoff(self, args):
 		'''Command fired on disconnect'''
@@ -783,7 +788,7 @@ class PM(_Connection):
 			#replace HTML equivalents
 			for i,j in reversed(HTML_CODES):
 				post = post.replace(j,i)
-			post = post.replace("\n","<br/>")
+			post = post.replace('\n',"<br/>")
 
 		if len(post) > self._maxLength:
 			if self._tooBigMessage == BigMessage_Cut:
@@ -804,14 +809,12 @@ class PM(_Connection):
 		if user not in self._contacts:
 			self._sendCommand("wladd", user.name)
 			self._contacts.add(user)
-			self._callEvent("onPMContactAdd", user)
 	
 	def removeContact(self, user):
 		'''Remove a friend'''
 		if user in self._contacts:
 			self._sendCommand("wldelete", user.name)
 			self._contacts.remove(user)
-			self._callEvent("onPMContactRemove", user)
 
 	def block(self, user):
 		'''Block a user'''
@@ -828,7 +831,14 @@ class PM(_Connection):
 			self._callEvent("onPMUnblock", user)
 
 class Manager:
-	'''THIS WILL CONTAIN ALL (onEvent)S'''
+	'''
+	Class that manages multiple connections to chatango
+	All methods of the form `on*` are virtual methods for event callbacks
+
+	Event callbacks (except for onInit) have the same initial argument
+	(other than self): `group` corresponds to a _Connection (Group or PM)
+	object the event was called from.
+	'''
 	_socketTimer = .2
 	def __init__(self, username, password, pm = False):
 		self.username = username
@@ -841,6 +851,7 @@ class Manager:
 			self.pm = PM(self)
 
 	def main(self):
+		'''Main function to read/write from all connected sockets'''
 		self.onInit()
 		self.running = True
 		try:
@@ -866,12 +877,14 @@ class Manager:
 		except KeyboardInterrupt: pass
 
 	def _tick(self):
+		'''Call all tasks if it's time'''
 		now = time.time()
 		for task in self.tasks:
 			if task.target <= now:
 				task()
 
 	def joinGroup(self, groupName):
+		'''Join group `groupName`'''
 		groupName = groupName.lower()
 		if groupName != self.username:
 			ret = Group(groupName,self)
@@ -879,6 +892,7 @@ class Manager:
 			return ret
 
 	def leaveGroup(self, groupName):
+		'''Leave group `groupName`'''
 		groupName = groupName.lower()
 		for group in self._groups:
 			if group.name == groupName:
@@ -886,10 +900,233 @@ class Manager:
 				return
 
 	def getGroup(self, groupName):
+		'''Look for joined group `groupName`'''
 		groupName = groupName.lower()
 		for group in self._groups:
 			if group.name == groupName:
 				return group
+	
+	###################################
+	#	Events
+	###################################
 
 	def onInit(self):
+		'''Event called before main()'''
+		pass
+
+	def onDisconnect(self, group):
+		'''Event called on group disconnect'''
+		pass
+
+	def onConnectionLost(self, group):
+		'''Event called on group connection lost'''
+		pass
+
+	def onLoginFail(self, group):
+		'''Event called on group login failure'''
+		pass
+
+	def onDisconnect(self, group):
+		'''Event called on successful group disconnect'''
+		pass
+
+	def onConnectionLost(self, group):
+		'''Event called on ping before a response to a ping has been received'''
+		pass
+
+	def onDenied(self, group):
+		'''Event called on unsuccessful group join'''
+		pass
+
+	def onConnect(self, group):
+		'''Event called on successful connection to group'''
+		pass
+
+	def onParticipants(self, group):
+		'''Event called on group's members received'''
+		pass
+
+	def onLeave(self, group, user):
+		'''
+		Event called on group member leave
+		Arguments:
+			str user:	the name of the user who left
+		'''
+		pass
+
+	def onJoin(self, group, user):
+		'''
+		Event called on group member join
+		Arguments:
+			str user:	the name of the user who joined
+		'''
+		pass
+
+	def onUsercount(self, group):
+		'''Event called on group member count'''
+		pass
+
+	def onMessage(self, group, post):
+		'''
+		Event called on message received
+		Arguments:
+			Post post:	a Post object generated by formatRaw()
+		'''
+		pass
+
+	def onHistoryDone(self, group, history):
+		'''
+		Event called when historical messages have been received
+		Arguments:
+			[Post] history:	an array of Post objects generated by formatRaw(), 
+							in descending time order
+		'''
+		pass
+
+	def onFloodWarning(self, group):
+		'''Event called on flood warning'''
+		pass
+
+	def onFloodBan(self, group, seconds):
+		'''
+		Event called on flood ban
+		Arguments:
+			int seconds:	the number of seconds before the ban is lifted
+		'''
+		pass
+
+	def onFloodBanRepeat(self, group, seconds):
+		'''
+		Event called on flood reminder
+		Arguments:
+			int seconds:	the number of seconds before the ban is lifted
+		'''
+		pass
+
+	def onBanlistUpdate(self, group):
+		'''Event called on ban list update'''
+		pass
+
+	def onBan(self, group, user, target):
+		'''
+		Event called on user banned
+		Arguments:
+			str user:	the mod that banned the user
+			str target:	the user that was banned
+		'''
+		pass
+
+	def onUnban(self, group, user, target):
+		'''
+		Event called on user unbanned
+		Arguments:
+			str user:	the mod that unbanned the user
+			str target:	the user that was unbanned
+		'''
+		pass
+
+	def onModAdd(self, group, user):
+		'''
+		Event called on mod added
+		Arguments:
+			str user:	the mod that was added
+		'''
+		pass
+
+	def onModRemove(self, group, user):
+		'''
+		Event called on mod removed
+		Arguments:
+			str user:	the mod that was removed
+		'''
+		pass
+
+	def onModChange(self, group):
+		'''Event called on modlist changed'''
+		pass
+
+	def onMessageDelete(self, group, msgid):
+		'''
+		Event called on message deleted
+		Arguments:
+			str msgid:	message ID of the message that was deleted	
+		'''
+		pass
+	
+	###################################
+	#	PM Events
+	###################################
+
+	def onPMConnect(self, group):
+		'''Event called on connect to PMs'''
+		pass
+
+	def onPMContactList(self, group):
+		'''Event called on PM friends list received'''
+		pass
+
+	def onPM(self, group, user, message):
+		'''
+		Event called on PM received
+		Arguments:
+			str user:		the user that sent the message
+			str message:	the message body, formatted with _formatRaw
+		'''
+		pass
+
+	def onPMOffline(self, group, user, message):
+		'''
+		Event called on offline PM received
+		Arguments:
+			str user:		the user that sent the message
+			str message:	the message body, formatted with _formatRaw
+		'''
+		pass
+
+	def onPMContactOnline(self, group, user):
+		'''
+		Event called on PM contact online
+		Arguments:
+			str user:		the user that went online
+		'''
+		pass
+
+	def onPMContactOffline(self, group, user):
+		'''
+		Event called on PM contact offline
+		Arguments:
+			str user:		the user that went offline
+		'''
+		pass
+
+	def onPMContactAdd(self, group, user):
+		'''
+		Event called on PM contact add
+		Arguments:
+			str user:		the user that was added
+		'''
+		pass
+
+	def onPMContactRemove(self, group, user):
+		'''
+		Event called on PM contact remove
+		Arguments:
+			str user:		the user that was removed
+		'''
+		pass
+
+	def onPMBlock(self, group, user):
+		'''
+		Event called on PM user banned
+		Arguments:
+			str user:		the user that was banned
+		'''
+		pass
+
+	def onPMUnblock(self, group, user):
+		'''
+		Event called on PM user unbanned
+		Arguments:
+			str user:		the user that was unbanned
+		'''
 		pass
