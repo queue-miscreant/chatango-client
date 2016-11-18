@@ -16,7 +16,6 @@ Options:
 	--help:			Display this page
 '''
 #TODO	Modifiable options like the threshold to ask to open links
-#TODO	Messages dropping when ping coincides with message?
 #TODO	Something with checking premature group removes
 
 import ch
@@ -109,7 +108,7 @@ def parsePost(post, me, ishistory):
 	#links
 	client.parseLinks(post.post, ishistory)
 	#extra arguments. use in colorizers
-	return (msg, post.user.lower(), isreply, ishistory, post.channel, post)
+	return (msg, post, isreply, ishistory)
 
 class ChatBot(ch.Manager):
 	'''Bot for interacting with the chat'''
@@ -262,7 +261,7 @@ class ChatangoOverlay(client.MainOverlay):
 		global visited_links
 		try:
 			message = self.getselected()
-			msg = str(message[0])+' '
+			msg = message[1][0].post+' '
 			alllinks = client.LINK_RE.findall(msg)
 			def openall():
 				recolor = False
@@ -307,15 +306,10 @@ class ChatangoOverlay(client.MainOverlay):
 			try:
 				#allmessages contain the colored message and arguments
 				message = self.getselected()
-				msg = str(message[0])
-				#first colon is separating the name from the message
-				colon = msg.find(':')
-				name = msg[1:colon]
-				msg = msg[colon+2:]
-				if name[0] in "!#":
-					name = name[1:]
+				msg,name = message[1][0].post, message[1][0].user
+				if name[0] in "!#": name = name[1:]
 				self.text.append("@{}: `{}`".format(name,msg.replace('`',"")))
-			except: pass
+			except Exception as e: client.dbmsg(e)
 			return 
 		self.text.complete()
 
@@ -459,12 +453,8 @@ class ChatangoOverlay(client.MainOverlay):
 			try:
 				#allmessages contain the colored message and arguments
 				message = self.getselected()
-				msg = str(message[0])
-				#first colon is separating the name from the message
-				colon = msg.find(":")
-				name = msg[1:colon]
-				if name[0] in "!#":
-					name = name[1:]
+				name = message[1][0].user
+				if name[0] in "!#": name = name[1:]
 				if name in ignores: return
 				ignores.append(name)
 				self.redolines()
@@ -503,7 +493,7 @@ ordering = \
 for i in range(10):
 	client.defColor(ordering[i%5],i//5,isdim = dim_for_intense) #0-10: user text
 client.defColor("green",True,isdim = dim_for_intense)
-client.defColor("green",isdim = dim_for_intense)		#11: >meme arrow
+client.defColor("green",isdim = dim_for_intense)				#11: >meme arrow
 client.defColor("none",False,"none",isdim = dim_for_intense)	#12-15: channels
 client.defColor("red",False,"red",isdim = dim_for_intense)
 client.defColor("blue",False,"blue",isdim = dim_for_intense)
@@ -521,13 +511,13 @@ def getColor(name,init = 6,split = 109,rot = 6):
 	return (total+rot)%11
 
 @client.colorize
-def defaultcolor(msg,user,*args):
-	msg.default = getColor(user)
+def defaultcolor(msg, post, *args):
+	msg.default = getColor(post.user)
 
 #color lines starting with '>' as green; ignore replies and ' user:'
 LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
 @client.colorize
-def greentext(msg,*args):
+def greentext(msg, *args):
 	#match group 3 (the message sans leading replies)
 	msg.colorByRegex(LINE_RE,lambda x: x[0] == ">" and 11 or None,3,"")
 
@@ -539,7 +529,7 @@ def link(msg,*args):
 #color replies by the color of the replier
 REPLY_RE = re.compile(r"@\w+?\b")
 @client.colorize
-def names(msg,*args):
+def names(msg, *args):
 	def check(group):
 		name = group.lower()[1:]
 		if chatbot and name in chatbot.members:
@@ -550,18 +540,18 @@ def names(msg,*args):
 #underline quotes
 QUOTE_RE = re.compile(r"`[^`]+`")
 @client.colorize
-def quotes(msg,*args):
+def quotes(msg, *args):
 	msg.effectByRegex(QUOTE_RE,1)
 		
 #draw replies, history, and channel
 @client.colorize
-def chatcolors(msg, user, isreply, ishistory, channel,*args):
+def chatcolors(msg, post, isreply, ishistory, *args):
 	msg.insertColor(1)		#make sure we color the name right
 	if isreply:
 		msg.addGlobalEffect(0,1)
 	if ishistory:
 		msg.addGlobalEffect(1,1)
-	msg.insertColor(0,channel+12)	#channel
+	msg.insertColor(0,post.channel+12)	#channel
 
 #COMMANDS-----------------------------------------------------------------------------------------------
 @client.command("ignore")
@@ -600,16 +590,16 @@ def clientcommand(parent,*args):
 #FILTERS------------------------------------------------------------------------------------------------
 #filter filtered channels
 @client.filter
-def channelfilter(user, isreply, ishistory, channel, *args):
+def channelfilter(post, isreply, ishistory, *args):
 	try:
-		return filtered_channels[channel]
+		return filtered_channels[post.channel]
 	except:
 		return True
 
 @client.filter
-def ignorefilter(user, *args):
+def ignorefilter(post, *args):
 	try:
-		return args[0] in ignores
+		return post.user.lower() in ignores
 	except:
 		return True
 #-------------------------------------------------------------------------------------------------------
@@ -619,7 +609,8 @@ def runClient(main,creds):
 	for num,i in enumerate(["user","passwd","room"]):
 		#skip if supplied
 		if creds.get(i) is not None: continue
-		inp = client.InputOverlay(main,"Enter your " + ["username","password","room name"][num], num == 1,True)
+		inp = client.InputOverlay(main,"Enter your " + \
+			 ["username","password","room name"][num], num == 1,True)
 		inp.add()
 		creds[i] = inp.waitForInput()
 		if not main.active: return

@@ -10,6 +10,7 @@ different stdout printing calls.
 #TODO	overlay-specific lookup tables
 #TODO	on instantiation of Main, link it to all onTrueFireMessage
 #		This just means having a variable under the class
+#TODO	overlay-specific colorizers
 try:
 	import curses
 except ImportError:
@@ -660,6 +661,9 @@ class MainOverlay(TextOverlay):
 			self._linesup = 0
 			self._unfiltup = 0
 			self.parent.updateinput()	#put the cursor back
+			if self._redoScheduled:
+				self.redolines()
+				self._redoScheduled = False
 			return 1
 	def add(self):
 		'''Start timeloop and add overlay'''
@@ -740,6 +744,17 @@ class MainOverlay(TextOverlay):
 		if not self._selector:
 			self.parent.updateinput()	#move the cursor back
 		return 1
+
+	def clear(self):
+		'''Clear all lines and messages'''
+		#these two REALLY should be private
+		self._allMessages = []
+		self._lines = []
+		#these too because they select the previous two
+		self._selector = 0
+		self._unfiltup = 0
+		self._linesup = 0
+		self._redoScheduled = False
 	#FRONTENDS--------------------------------------------------
 	def isselecting(self):
 		'''Whether a message is selected or not'''
@@ -756,7 +771,8 @@ class MainOverlay(TextOverlay):
 		Redo lines, if current lines does not represent the unfiltered messages
 		or if the width has changed
 		'''
-		if self._linesup: raise SizeException("redolines attempted while selecting")
+		if self.isselecting(): self._redoScheduled = True
+#		raise SizeException("redolines attempted while selecting")
 		if width is None: width = self.parent.x
 		if height is None: height = self.parent.y
 		newlines = []
@@ -809,15 +825,6 @@ class MainOverlay(TextOverlay):
 		self._lines = newlines
 		self.parent.display()
 
-	def clear(self):
-		'''Clear all lines and messages'''
-		#these two REALLY should be private
-		self._allMessages = []
-		self._lines = []
-		#these too because they select the previous two
-		self._selector = 0
-		self._unfiltup = 0
-		self._linesup = 0
 	def msgSystem(self, base):
 		'''System message'''
 		base = Coloring(base)
