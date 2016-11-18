@@ -19,7 +19,7 @@ Options:
 #TODO	Messages dropping when ping coincides with message?
 #TODO	Something with checking premature group removes
 
-import chlib
+import ch
 import client
 import sys
 import os
@@ -111,7 +111,7 @@ def parsePost(post, me, ishistory):
 	#extra arguments. use in colorizers
 	return (msg, post.user.lower(), isreply, ishistory, post.channel, post)
 
-class ChatBot(chlib.ConnectionManager):
+class ChatBot(ch.Manager):
 	'''Bot for interacting with the chat'''
 	members = client.PromoteSet()
 
@@ -127,23 +127,18 @@ class ChatBot(chlib.ConnectionManager):
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
 		client.Tokenize('@',self.members)
 	
-	def _start(self):
+	def onInit(self):
+		#wait until now to initialize the object, since now the information is guaranteed to exist
 		self.isinited = 0
 		self.members.clear()
-		self.mainOverlay.parent.updateinfo(None,self.creds["user"])
 		self.mainOverlay.msgSystem("Connecting")
-		chlib.ConnectionManager.__init__(self, self.creds["user"], self.creds["passwd"], False)
+		super(ChatBot,self).__init__(self.creds["user"], self.creds["passwd"], False)
 		self.isinited = 1
-		self.addGroup(self.creds["room"])
-		
-	def main(self):
-		#wait until now to initialize the object, since now the information is guaranteed to exist
-		self._start()
-		chlib.ConnectionManager.main(self)
+		self.joinGroup(self.creds["room"])
 	
 	def stop(self):
 		if not self.isinited: return
-		chlib.ConnectionManager.stop(self)
+		super(ChatBot,self).stop()
 	
 	def reconnect(self):
 		if not self.isinited: return
@@ -153,15 +148,15 @@ class ChatBot(chlib.ConnectionManager):
 	def changeGroup(self,newgroup):
 		self.stop()
 		self.creds["room"] = newgroup
-		self.addGroup(newgroup)
+		self.joinGroup(newgroup)
 
 	def setFormatting(self):
 		group = self.joinedGroup
 		
-		group.setFontColor(self.creds["formatting"][0])
-		group.setNameColor(self.creds["formatting"][1])
-		group.setFontFace(self.creds["formatting"][2])
-		group.setFontSize(self.creds["formatting"][3])
+		group.fColor = self.creds["formatting"][0]
+		group.nColor = self.creds["formatting"][1]
+		group.fFace = self.creds["formatting"][2]
+		group.fSize = self.creds["formatting"][3]
 		
 		sendToFile(self.creds)
 	
@@ -169,70 +164,76 @@ class ChatBot(chlib.ConnectionManager):
 		if self.joinedGroup is None: return
 		self.joinedGroup.sendPost(text,self.channel)
 	
-	def recvinited(self, group):
+	def onConnect(self, group):
 		self.mainOverlay.msgSystem("Connected to "+group.name)
 		self.joinedGroup = group
 		self.setFormatting()
-		self.me = group.user
+		self.me = group.username
 		if self.me[0] in "!#": self.me = self.me[1:]
-		#show past messages
-		self.mainOverlay.redolines()
+		self.mainOverlay.parent.updateinfo(None,self.me)
 		#show last message time
-		self.mainOverlay.msgTime(group.lastMsg,"Last message at ")
+		self.mainOverlay.msgTime(group.last,"Last message at ")
 		self.mainOverlay.msgTime()
 
 	#on removal from a group
-	def recvRemove(self,group):
+	def onLeave(self,group):
 		#self.parent.unget()
+		client.dbmsg("")
 		self.stop()
 		
 	#on message
-	def recvPost(self, group, post, ishistory):
+	def onMessage(self, group, post):
 		#double check for anons
 		user = post.user
 		if user[0] in '#!': user = user[1:]
 		if user not in self.members:
 			self.members.append(user.lower())
-		msg = parsePost(post, self.me, ishistory)
-		if ishistory:
-			#prepend history messages
-			self.mainOverlay.msgPrepend(*msg)
-		else:
-			#postpend regular ones
-			self.members.promote(user.lower())
-			self.mainOverlay.msgPost(*msg)
+		msg = parsePost(post, self.me, False)
 
-	def recvgotmore(self, group):
+		self.members.promote(user.lower())
+		self.mainOverlay.msgPost(*msg)
+
+	def onHistoryDone(self, group, history):
+		for post in history:
+			user = post.user
+			if user[0] in '#!': user = user[1:]
+			if user not in self.members:
+				self.members.append(user.lower())
+			msg = parsePost(post, self.me, True)
+			self.mainOverlay.msgPrepend(*msg)
 		self.mainOverlay.canselect = True
 
-	def recvshow_fw(self, group):
+	def onFloodWarning(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
 
-	def recvshow_tb(self, group, secs):
-		self.recvtb(group, secs)
+	def onFloodBan(self, group, secs):
+		self.onFloodBanRepeat(group, secs)
 
-	def recvtb(self, group, secs):
+	def onFloodBanRepeat(self, group, secs):
 		self.mainOverlay.msgSystem("You are banned for %d seconds"%secs)
 	
-	#pull members when any of these are invoked
-	def recvg_participants(self,group):
+	def onParticipants(self,group):
 		self.members.extend(group.users)
-		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
 		self.mainOverlay.recolorlines()
 
-	def recvparticipant(self, group, bit, user, uid):
-		self.mainOverlay.parent.updateinfo(str(int(group.unum,16)))
+	def onUsercount(self, group):
+		self.mainOverlay.parent.updateinfo(str(group.usercount))
+
+	def onJoin(self, group, user):
 		if user != "none":
-			if (bit == '1'):
-				self.members.append(user)
+			self.members.append(user)
 			#notifications
-			self.mainOverlay.parent.newBlurb("%s has %s" % (user,(bit!='0') and "joined" or "left"))
+			self.mainOverlay.parent.newBlurb("%s has joined" % user)
+
+	def onLeave(self, group, user):
+		if user != "none":
+			self.mainOverlay.parent.newBlurb("%s has left" % user)
 
 
 #OVERLAY EXTENSION--------------------------------------------------------------------------------------
 class ChatangoOverlay(client.MainOverlay):
 	def __init__(self,parent,bot):
-		client.MainOverlay.__init__(self,parent)
+		super(ChatangoOverlay, self).__init__(parent)
 		self.bot = bot
 		self.canselect = False
 		self.addKeys({	"enter":	self.onenter
@@ -246,7 +247,6 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^t":		self.joingroup
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
-						,"^a":		self.whatdoesflaggingdo
 		},1)	#these are methods, so they're defined on __init__
 
 	def _maxselect(self):
@@ -360,7 +360,7 @@ class ChatangoOverlay(client.MainOverlay):
 				ignores.remove(current)
 			self.redolines()
 
-		users = self.bot.joinedGroup.users
+		users = self.bot.joinedGroup.userlist
 		dispList = {i:users.count(i) for i in users}
 		dispList = sorted([i+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
 		def drawIgnored(string,i):
@@ -491,14 +491,6 @@ class ChatangoOverlay(client.MainOverlay):
 		inp = client.InputOverlay(self.parent,"Enter group name")
 		inp.add()
 		inp.runOnDone(lambda x: self.clear() or self.bot.changeGroup(x))
-	
-	def whatdoesflaggingdo(self):
-		if self.isselecting():
-			message = self.getselected()
-			post = message[1][0]
-			self.bot.joinedGroup.flag(post)
-			
-		
 
 #COLORIZERS---------------------------------------------------------------------
 #initialize colors

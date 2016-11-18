@@ -14,7 +14,7 @@ from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
-			,"SELECT_AND_MOVE","dbmsg","rawNum","strlen"
+			,"SELECT_AND_MOVE","dbmsg","rawNum","strlen","getColor"
 			,"Coloring","Scrollable","Tokenize"]
 
 #REGEXES------------------------------------------------------------------------

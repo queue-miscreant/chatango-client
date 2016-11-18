@@ -293,7 +293,7 @@ class OverlayBase:
 class TextOverlay(OverlayBase):
 	'''Virtual overlay with text input (at bottom of screen)'''
 	def __init__(self,parent = None):
-		OverlayBase.__init__(self,parent)
+		super(TextOverlay, self).__init__(parent)
 		self.text = parent.addScrollable()
 		self._keys.update({
 			-1:				self._input
@@ -343,7 +343,7 @@ class ListOverlay(OverlayBase,Box):
 	#				  1	2			3
 	setmins(7,3)
 	def __init__(self,parent,outList,drawOther = None,modes = [""]):
-		OverlayBase.__init__(self,parent)
+		super(ListOverlay, self).__init__(parent)
 		self.it = 0
 		self.mode = 0
 		self.list = outList
@@ -408,7 +408,7 @@ class ColorOverlay(OverlayBase,Box):
 	#		  1	2     3	 4	5 6  7  8
 	setmins(17,8)
 	def __init__(self,parent,initcolor = [127,127,127]):
-		OverlayBase.__init__(self,parent)
+		super(ColorOverlay, self).__init__(parent)
 		#allow setting from hex value
 		if isinstance(initcolor,str):
 			self.setHex(initcolor)
@@ -476,7 +476,7 @@ class InputOverlay(TextOverlay,Box):
 	'''Replacement for input(). '''
 	replace = False
 	def __init__(self,parent,prompt,password = False,end = False):
-		TextOverlay.__init__(self,parent)
+		super(InputOverlay, self).__init__(parent)
 		self._done = False
 		self._prompt = Coloring(prompt)
 		self._prompts,self._numprompts = self._prompt.breaklines(parent.x-2)
@@ -534,7 +534,7 @@ class CommandOverlay(TextOverlay):
 	replace = False
 	history = History()	#global command history
 	def __init__(self,parent = None):
-		TextOverlay.__init__(self,parent)
+		super(CommandOverlay, self).__init__(parent)
 		self.text.setnonscroll(CHAR_COMMAND)
 		self.controlHistory(self.history,self.text)
 		self._keys.update({
@@ -574,7 +574,7 @@ class EscapeOverlay(OverlayBase):
 	'''Overlay for redirecting input after \ is pressed'''
 	replace = False
 	def __init__(self,parent,scroll):
-		OverlayBase.__init__(self,parent)
+		super(EscapeOverlay, self).__init__(parent)
 		self._keys.update({
 			-1:		quitlambda
 			,10:		quitlambda
@@ -587,7 +587,7 @@ class ConfirmOverlay(OverlayBase):
 	'''Overlay to confirm selection confirm y/n (no slash)'''
 	replace = False
 	def __init__(self,parent,prompt,confirmfunc):
-		OverlayBase.__init__(self,parent)
+		super(ConfirmOverlay, self).__init__(parent)
 		self.parent.holdBlurb(prompt)
 		self._keys.update({ #run these in order
 			ord('y'):	lambda x: confirmfunc() or self.parent.releaseBlurb() or -1
@@ -605,7 +605,7 @@ class MainOverlay(TextOverlay):
 	INDENT = "    "
 	_msgSplit = '\x1b' 
 	def __init__(self,parent,pushtimes = True):
-		TextOverlay.__init__(self,parent)
+		super(MainOverlay, self).__init__(parent)
 		self.canselect = True
 		self._pushtimes = pushtimes
 		self.history = History()
@@ -889,7 +889,7 @@ class _NScrollable(Scrollable):
 	can run Main.updateinput()
 	'''
 	def __init__(self,width,parent,index):
-		Scrollable.__init__(self,width)
+		super(_NScrollable, self).__init__(width)
 		self.parent = parent
 		self.index = index
 	def _onchanged(self):
@@ -1137,11 +1137,10 @@ class Main:
 	def catcherr(self,func,*args):
 		'''Catch error and end client'''
 		def wrap():
+			global lasterr
 			try:
 				func(*args)
 			except Exception as e:
-				dbmsg("ERROR OCCURRED, ABORTING")
-				global lasterr
 				lasterr = e
 				self.active = False
 				curses.ungetch('\x1b')
@@ -1157,9 +1156,12 @@ def start(target,*args):
 	bot_thread.daemon = True
 	bot_thread.start()
 	main_instance.loop()	#main program loop
-	for i in _afterDone:
-		i()
-	if lasterr:
+	try:
+		for i in _afterDone:
+			i()
+	except Exception as e:
+		dbmsg("Error occurred during shutdown: ", e)
+	if lasterr is not None:
 		raise lasterr
 
 class onTrueFireMessage:
