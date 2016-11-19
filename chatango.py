@@ -218,15 +218,18 @@ class ChatBot(ch.Manager):
 	def onUsercount(self, group):
 		self.mainOverlay.parent.updateinfo(str(group.usercount))
 
-	def onJoin(self, group, user):
-		if user != "none":
+	def onMemberJoin(self, group, user):
+		if user != "anon":
 			self.members.append(user)
-			#notifications
-			self.mainOverlay.parent.newBlurb("%s has joined" % user)
+		#notifications
+		self.mainOverlay.parent.newBlurb("%s has joined" % user)
 
-	def onLeave(self, group, user):
-		if user != "none":
-			self.mainOverlay.parent.newBlurb("%s has left" % user)
+	def onMemberLeave(self, group, user):
+		self.mainOverlay.parent.newBlurb("%s has left" % user)
+
+	def onConnectionLost(self, group):
+		self.mainOverlay.msgSystem("Connection lost; attempting to reestablish")
+		group.connect()
 
 
 #OVERLAY EXTENSION--------------------------------------------------------------------------------------

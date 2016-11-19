@@ -6,6 +6,7 @@ ch.py. Event based library for chatango rooms. Features channel support and
 fetching history messages among all other necessary functionalities.
 '''
 #TODO	better modtools
+#TODO	property docstrings
 
 ################################
 #Python Imports
@@ -460,17 +461,19 @@ class Group(_Connection):
 			user = args[3].lower()
 			if args[3] != "None" and args[3].lower() in self.users:
 				self._users.remove(user)
-			self._callEvent("onLeave", user)
+				self._callEvent("onMemberLeave", user)
+			else:
+				self._callEvent("onMemberLeave", "anon")
 		elif bit == '1':	#joined
 			user = args[3].lower()
 			if args[3] != "None":
 				self._users.append(user)
-				self._callEvent("onJoin", user)
+				self._callEvent("onMemberJoin", user)
 			else:
-				self._callEvent("onJoin", "anon")
+				self._callEvent("onMemberJoin", "anon")
 		elif bit == '2':	#tempname blogins
 			user = args[4].lower()
-			self._callEvent("onJoin", user)
+			self._callEvent("onMemberJoin", user)
 
 	def _recv_bw(self, args):
 		'''Banned words'''
@@ -708,7 +711,7 @@ class PM(_Connection):
 		self.sock.setblocking(False)
 
 		self._sendCommand("tlogin", self._auid, '2')
-		self._setWriteLock(True)
+		self._lockWrite(True)
 
 		self._pingTask = Task.addInterval(self._manager, self._pingDelay, self.ping)
 		self._connected = True
@@ -719,7 +722,7 @@ class PM(_Connection):
 
 	def _recv_OK(self, args):
 		'''Acknowledgement of PM login success'''
-		self._setWriteLock(False)
+		self._lockWrite(False)
 		self._sendCommand("wl")
 		self._sendCommand("getblock")
 		self._callEvent("onPMConnect")
@@ -856,7 +859,10 @@ class Manager:
 		self.running = True
 		while self.running:
 			socks = [group.sock for group in self._groups if group.connected]
-			read, write, err = select.select(socks,socks,[],self._socketTimer)
+			#don't write null strings
+			wsocks = [group.sock for group in self._groups if group.connected and group.wbuff]
+			#select
+			read, write, err = select.select(socks,wsocks,[],self._socketTimer)
 			for sock in read:
 				group = [i for i in self._groups if i.sock == sock][0]
 				try:
@@ -928,10 +934,6 @@ class Manager:
 		'''Event called on group login failure'''
 		pass
 
-	def onConnectionLost(self, group):
-		'''Event called on ping before a response to a ping has been received'''
-		pass
-
 	def onDenied(self, group):
 		'''Event called on unsuccessful group join'''
 		pass
@@ -944,7 +946,7 @@ class Manager:
 		'''Event called on group's members received'''
 		pass
 
-	def onLeave(self, group, user):
+	def onMemberLeave(self, group, user):
 		'''
 		Event called on group member leave
 		Arguments:
@@ -952,7 +954,7 @@ class Manager:
 		'''
 		pass
 
-	def onJoin(self, group, user):
+	def onMemberJoin(self, group, user):
 		'''
 		Event called on group member join
 		Arguments:
