@@ -49,10 +49,13 @@ class Generate:
 
 	def aid(n, uid):
 		'''Generate anon ID'''
-		if n == None: n = "3452"
-		n = n.rsplit('.', 1)[0]
+		try:
+			n = n.rsplit('.', 1)[0]
+			n = int(n[-4:])
+		except:
+			n = 3452
 		return "".join(map(lambda i,v: str(int(i) + int(v))[-1],
-					   str(n)[-4:], uid[4:8]))
+					   str(n), str(uid)[4:8]))
 
 	def auth(user, password):
 		'''Generate auth token for PMs'''
