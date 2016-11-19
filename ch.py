@@ -399,10 +399,7 @@ class Group(_Connection):
 		self.sock.setblocking(False)
 		self._clearBuffers()
 		#authenticate
-		if self._manager.username and self._manager.password:
-			self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password, firstcmd = True)
-		else:
-			self._sendCommand("bauth", self._name, firstcmd = True)
+		self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password, firstcmd = True)
 
 		self._lockWrite(True) #lock until inited
 		self._pingTask = Task.addInterval(self._manager, self._pingDelay, self.ping)
@@ -415,17 +412,18 @@ class Group(_Connection):
 
 	def _recv_ok(self, args):
 		'''Acknowledgement from server that login succeeded'''
-		if args[2] == 'N' and self._manager.password == None and self._manager.username == None: 
+		if args[2] == 'C' and (not self._manager.password) and (not self._manager.username):
 			self._anon = "!anon" + Generate.aid(args[4], args[1])
-			self._nColor = n
-		elif args[2] == 'N' and self._manager.password == None:
+			self._nColor = "CCC"
+		elif args[2] == 'C' and (not self._manager.password):
 			self._sendCommand("blogin", self._manager.username)
 		elif args[2] != 'M': #unsuccesful login
 			self._callEvent("onLoginFail")
 			self.disconnect()
+			return
 		self._owner = args[0]
 		self._uid = args[1]	
-		self._mods = set(args[6].split(';'))
+		self._mods = set(mod.split(',')[0].lower() for mod in args[6].split(';'))
 
 	def _recv_denied(self, args):
 		'''Acknowledgement that login was denied'''
@@ -856,27 +854,24 @@ class Manager:
 		'''Main function to read/write from all connected sockets'''
 		self.onInit()
 		self.running = True
-		try:
-			while self.running:
-				socks = [group.sock for group in self._groups]
-				read, write, err = select.select(socks,socks,[],self._socketTimer)
-				for sock in read:
-					group = [i for i in self._groups if i.sock == sock][0]
-					try:
-						read = sock.recv(1024)
-						group.digest(read)
-					except socket.error:
-						pass
-				for sock in write:
-#					print("writing socket found")
-					group = [i for i in self._groups if i.sock == sock][0]
-					try:
-						size = sock.send(group.wbuff)
-						group.wbuff = group.wbuff[size:]
-					except socket.error:
-						pass
-				self._tick()
-		except KeyboardInterrupt: pass
+		while self.running:
+			socks = [group.sock for group in self._groups if group.connected]
+			read, write, err = select.select(socks,socks,[],self._socketTimer)
+			for sock in read:
+				group = [i for i in self._groups if i.sock == sock][0]
+				try:
+					read = sock.recv(1024)
+					group.digest(read)
+				except socket.error:
+					pass
+			for sock in write:
+				group = [i for i in self._groups if i.sock == sock][0]
+				try:
+					size = sock.send(group.wbuff)
+					group.wbuff = group.wbuff[size:]
+				except socket.error:
+					pass
+			self._tick()
 
 	def stop(self):
 		self.running = False
