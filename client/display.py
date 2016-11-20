@@ -20,7 +20,6 @@ __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
 _LAST_COLOR_RE =	re.compile('\x1b'+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
-_LAST_EFFECT_RE =	re.compile('\x1b'+r"\[2?[47]m")			#all effects that are on
 _UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
 _LINE_BREAKING = "- 　"	#line breaking characters
 #valid color names to add
@@ -99,7 +98,6 @@ def defEffect(on,off):
 
 def getColor(c):
 	'''insertColor without position or coloring object'''
-	if c == None: return ""
 	try:
 		return _COLORS[c + _NUM_PREDEFINED]
 	except IndexError:
@@ -111,15 +109,15 @@ def rawNum(c):
 	Use in conjunction with getColor or Coloring.insertColor to use
 	predefined colors
 	'''
+	if c < 0: raise DisplayException("raw numbers must not be below 0")
 	return c - _NUM_PREDEFINED
 
 class Coloring:
-	'''Container for a string and default color'''
+	'''Container for a string and coloring to be done'''
 	def __init__(self,string):
 		global _CAN_DEFINE_EFFECTS
 		_CAN_DEFINE_EFFECTS = False
 		self._str = string
-		self.default = 0
 		self._positions = []
 		self._formatting = []
 		self._maxpos = -1
@@ -128,7 +126,6 @@ class Coloring:
 		self._maxpos = -1
 		self._positions.clear()
 		self._formatting.clear()
-		self.default = 0
 	def __repr__(self):
 		'''Get the string contained'''
 		return "Coloring({}, positions = {}, formatting = {})".format(repr(self._str),self._positions,self._formatting)
@@ -171,8 +168,7 @@ class Coloring:
 		return self
 
 	def _insertColor(self,position,formatting):
-		'''Backend for insertColor that doesn't do checking on formatting'''
-
+		'''insertColor backend that doesn't do sanity checking on formatting'''
 		if position > self._maxpos:
 			self._positions.append(position)
 			self._formatting.append(formatting)
@@ -188,21 +184,20 @@ class Coloring:
 			self._positions.insert(i,position)
 			self._formatting.insert(i,formatting)
 
-	def insertColor(self,position,formatting=None):
+	def insertColor(self,position,formatting):
 		'''
-		Insert positions/formatting into color dictionary. Formatting must
-		be the proper color (in _COLORS, added with defColor)
+		Insert positions/formatting into color dictionary
+		formatting must be a proper color (in _COLORS, added with defColor)
 		'''
 		if position < 0: position = max(position+len(self._str),0)
-		formatting = self.default if formatting is None else formatting
 		formatting += _NUM_PREDEFINED + 1
 		formatting <<= _NUM_EFFECTS
 		self._insertColor(position,formatting)
 
 	def effectRange(self,start,end,formatting):
 		'''
-		Insert an effect at _str[start:end]. Formatting must be a number
-		corresponding to an effect. As default, 0 is reverse and 1 is underline
+		Insert an effect at _str[start:end]
+		formatting must be a number corresponding to an effect
 		'''
 		if start >= end: return
 		effect = 1 << formatting
@@ -242,10 +237,10 @@ class Coloring:
 		'''Add effect to string'''
 		self.effectRange(pos,len(self._str),effectNumber)
 
-	def findColor(self,end):
+	def findColor(self, end):
 		'''Most recent color before end. Safe when no matches are found'''
 		if self._maxpos == -1:
-			return self.default and self.default + _NUM_PREDEFINED + 1 or 1
+			return None
 		if end > self._maxpos:
 			return self._formatting[-1]
 		last = self._formatting[0]
@@ -255,7 +250,7 @@ class Coloring:
 			last = form
 		return last
 
-	def colorByRegex(self, regex, groupFunction, group = 0, getLast = True):
+	def colorByRegex(self, regex, groupFunction, fallback = None, group = 0):
 		'''
 		Color from a compiled regex, generating the respective color number
 		from captured group. groupFunction should be an int or callable that
@@ -264,14 +259,19 @@ class Coloring:
 		if not callable(groupFunction):
 			ret = groupFunction	#get another header
 			groupFunction = lambda x: ret
+		#only getLast when supplied a color number fallback
+		getLast = False
+		if isinstance(fallback, int):
+			getLast = True
+
 		for find in regex.finditer(self._str+' '):
 			begin = find.start(group)
 			end = find.end(group)
 			#insert the color
-			#if there's no post-effect, conserve the last color
 			if getLast:
 				#find the most recent color
 				last = self.findColor(begin)
+				last = last is None and fallback or last
 				self.insertColor(begin,groupFunction(find.group(group)))
 				self._insertColor(end,last) #backend because last is already valid
 			else:

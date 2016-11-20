@@ -16,7 +16,6 @@ Options:
 	--help:			Display this page
 '''
 #TODO	Modifiable options like the threshold to ask to open links
-#TODO	Something with checking premature group removes
 
 import ch
 import client
@@ -26,7 +25,6 @@ import time
 import re
 import json
 
-chatbot = None
 #entire creds from file
 creds_entire = {} 
 #writability of keys of creds
@@ -128,11 +126,12 @@ class ChatBot(ch.Manager):
 	
 	def onInit(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
-		self.isinited = 0
-		self.members.clear()
+		if not self.isinited:
+			self.isinited = 0
+			super(ChatBot,self).__init__(self.creds["user"], self.creds["passwd"], False)
+			self.isinited = 1
 		self.mainOverlay.msgSystem("Connecting")
-		super(ChatBot,self).__init__(self.creds["user"], self.creds["passwd"], False)
-		self.isinited = 1
+		self.members.clear()
 		self.joinGroup(self.creds["room"])
 	
 	def stop(self):
@@ -142,6 +141,8 @@ class ChatBot(ch.Manager):
 	def reconnect(self):
 		if not self.isinited: return
 		self.leaveGroup(self.joinedGroup)
+		self.mainOverlay.clear()
+		self.onInit()
 	
 	def changeGroup(self,newgroup):
 		self.leaveGroup(self.joinedGroup)
@@ -226,9 +227,11 @@ class ChatBot(ch.Manager):
 		self.mainOverlay.parent.newBlurb("%s has left" % user)
 
 	def onConnectionLost(self, group):
-		#TODO add overlay
-		self.mainOverlay.msgSystem("Connection lost; attempting to reestablish")
-		group.reconnect()
+		message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
+		def reconnect():
+			self.mainOverlay.msgDelete(message)
+			self.reconnect()
+		client.BlockingOverlay(self.mainOverlay.parent,reconnect).add()
 
 
 #OVERLAY EXTENSION--------------------------------------------------------------------------------------
@@ -275,9 +278,9 @@ class ChatangoOverlay(client.MainOverlay):
 				if recolor: self.recolorlines()
 					
 			if len(alllinks) > 1:
-				client.ConfirmOverlay(self.parent,
-					"Really open {} links? (y/n)".format(len(alllinks)),
-					openall).add()
+				self.parent.holdBlurb(
+					"Really open {} links? (y/n)".format(len(alllinks)))
+				client.ConfirmOverlay(self.parent, openall).add()
 			else:
 				openall()
 		except Exception as exc: client.dbmsg(exc)
@@ -484,8 +487,45 @@ class ChatangoOverlay(client.MainOverlay):
 		inp.add()
 		inp.runOnDone(lambda x: self.clear() or self.bot.changeGroup(x))
 
-#COLORIZERS---------------------------------------------------------------------
-#initialize colors
+	def filterMessage(self, post, isreply, ishistory):
+		return any((
+				#filtered channels
+				filtered_channels[post.channel]
+				#ignored users
+				,post.user.lower() in ignores
+		))
+
+	def colorizeMessage(self, msg, post, isreply, ishistory):
+		default = getColor(post.user)
+
+		#greentext, font color
+		textColor = lambda x: x[0] == ">" and 11 or default
+		msg.colorByRegex(LINE_RE, textColor, group = 3)
+
+		#links in white
+		linkColor = lambda x: (x not in visited_links) and client.rawNum(0) or 17
+		msg.colorByRegex(client.LINK_RE, linkColor, default, 1)
+
+		#color group members
+		def check(group):
+			name = group.lower()[1:]
+			return (name in self.bot.members) and getColor(name) or default
+		msg.colorByRegex(REPLY_RE, check, default)
+
+		#underline quotes
+		msg.effectByRegex(QUOTE_RE,1)
+
+		#make sure we color the name right
+		msg.insertColor(1, default)
+		if isreply:   msg.addGlobalEffect(0,1)
+		if ishistory: msg.addGlobalEffect(1,1)
+		#channel
+		msg.insertColor(0,post.channel+12)
+
+LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
+REPLY_RE = re.compile(r"@\w+?\b")
+QUOTE_RE = re.compile(r"`[^`]+`")
+
 ordering = \
 	("blue"
 	,"cyan"
@@ -494,14 +534,15 @@ ordering = \
 	,"yellow")
 for i in range(10):
 	client.defColor(ordering[i%5],i//5,isdim = dim_for_intense) #0-10: user text
-client.defColor("green",True,isdim = dim_for_intense)
-client.defColor("green",isdim = dim_for_intense)				#11: >meme arrow
-client.defColor("none",False,"none",isdim = dim_for_intense)	#12-15: channels
-client.defColor("red",False,"red",isdim = dim_for_intense)
-client.defColor("blue",False,"blue",isdim = dim_for_intense)
-client.defColor("magenta",False,"magenta",isdim = dim_for_intense)
-client.defColor("white",False,"white",isdim = dim_for_intense)	#16: extra drawing
-client.defColor(239)											#17: visited links
+del ordering
+client.defColor("green",True,				isdim = dim_for_intense)
+client.defColor("green",					isdim = dim_for_intense)	#11: >meme arrow
+client.defColor("none",False,"none",		isdim = dim_for_intense)	#12-15: channels
+client.defColor("red",False,"red",			isdim = dim_for_intense)
+client.defColor("blue",False,"blue",		isdim = dim_for_intense)
+client.defColor("magenta",False,"magenta",	isdim = dim_for_intense)
+client.defColor("white",False,"white",		isdim = dim_for_intense)	#16: extra drawing
+client.defColor(239)													#17: visited links
 
 #color by user's name
 def getColor(name,init = 6,split = 109,rot = 6):
@@ -512,49 +553,6 @@ def getColor(name,init = 6,split = 109,rot = 6):
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-@client.colorize
-def defaultcolor(msg, post, *args):
-	msg.default = getColor(post.user)
-
-#color lines starting with '>' as green; ignore replies and ' user:'
-LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
-@client.colorize
-def greentext(msg, *args):
-	#match group 3 (the message sans leading replies)
-	msg.colorByRegex(LINE_RE,lambda x: x[0] == ">" and 11 or None,3,"")
-
-#color links white
-@client.colorize
-def link(msg,*args):
-	msg.colorByRegex(client.LINK_RE,lambda x: (x not in visited_links) and client.rawNum(0) or 17,1)
-
-#color replies by the color of the replier
-REPLY_RE = re.compile(r"@\w+?\b")
-@client.colorize
-def names(msg, *args):
-	def check(group):
-		name = group.lower()[1:]
-		if chatbot and name in chatbot.members:
-			return getColor(name)
-		return None
-	msg.colorByRegex(REPLY_RE,check)
-
-#underline quotes
-QUOTE_RE = re.compile(r"`[^`]+`")
-@client.colorize
-def quotes(msg, *args):
-	msg.effectByRegex(QUOTE_RE,1)
-		
-#draw replies, history, and channel
-@client.colorize
-def chatcolors(msg, post, isreply, ishistory, *args):
-	msg.insertColor(1)		#make sure we color the name right
-	if isreply:
-		msg.addGlobalEffect(0,1)
-	if ishistory:
-		msg.addGlobalEffect(1,1)
-	msg.insertColor(0,post.channel+12)	#channel
-
 #COMMANDS-----------------------------------------------------------------------------------------------
 @client.command("ignore")
 def ignore(parent,person,*args):
@@ -562,7 +560,8 @@ def ignore(parent,person,*args):
 	if '@' == person[0]: person = person[1:]
 	if person in ignores: return
 	ignores.append(person)
-	chatbot.mainOverlay.redolines()
+	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+	if chatOverlay: chatOverlay[-1].redolines()
 
 @client.command("unignore")
 def unignore(parent,person,*args):
@@ -570,42 +569,26 @@ def unignore(parent,person,*args):
 	if '@' == person[0]: person = person[1:]
 	if person == "all" or person == "everyone":
 		ignores.clear()
-		chatbot.mainOverlay.redolines()
+		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+		if chatOverlay: chatOverlay[-1].redolines()
 		return
 	if person not in ignores: return
 	ignores.remove(person)
-	chatbot.mainOverlay.redolines()
+	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+	if chatOverlay: chatOverlay[-1].redolines()
 
 @client.command("keys")
 def listkeys(parent,*args):
-	'''Get list of the chatbot's keys'''
-	keysList = client.ListOverlay(parent,dir(chatbot.mainOverlay))
-	keysList.addKeys({
-		"enter": lambda x: -1
-	})
-	return keysList
+	'''Get list of the ChatangoOverlay's keys'''
+	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+	if chatOverlay:
+		keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
+		keysList.addKeys({
+			"enter": lambda x: -1
+		})
+		return keysList
 
-@client.command(client.CHAR_COMMAND)
-def clientcommand(parent,*args):
-	chatbot.sendCmd(*args)
-
-#FILTERS------------------------------------------------------------------------------------------------
-#filter filtered channels
-@client.filter
-def channelfilter(post, isreply, ishistory, *args):
-	try:
-		return filtered_channels[post.channel]
-	except:
-		return True
-
-@client.filter
-def ignorefilter(post, *args):
-	try:
-		return post.user.lower() in ignores
-	except:
-		return True
 #-------------------------------------------------------------------------------------------------------
-
 def runClient(main,creds):
 	#fill in credential holes
 	for num,i in enumerate(["user","passwd","room"]):
@@ -628,9 +611,9 @@ def runClient(main,creds):
 			new.append(creds["formatting"][i])
 		creds["formatting"] = new
 
-	global chatbot
 	#initialize chat bot
 	chatbot = ChatBot(creds,main)
+	client.onDone(chatbot.stop)
 	chatbot.main()
 
 if __name__ == "__main__":
@@ -695,8 +678,4 @@ if __name__ == "__main__":
 			import custom #custom plugins
 		except ImportError as exc: pass
 	#start
-	try:
-		client.start(runClient,newCreds)
-	finally:
-		if chatbot is not None:
-			chatbot.stop()
+	client.start(runClient,newCreds)

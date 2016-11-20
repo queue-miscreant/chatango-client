@@ -10,7 +10,6 @@ different stdout printing calls.
 #TODO	overlay-specific lookup tables
 #TODO	on instantiation of Main, link it to all onTrueFireMessage
 #		This just means having a variable under the class
-#TODO	overlay-specific colorizers
 try:
 	import curses
 except ImportError:
@@ -25,9 +24,9 @@ import time
 from threading import Thread
 from .display import *
 
-__all__ =	["CHAR_COMMAND","start","soundBell","Box","filter","colorize"
-			,"command","OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
-			,"InputOverlay","ConfirmOverlay","MainOverlay"
+__all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
+			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
+			,"InputOverlay","ConfirmOverlay","BlockingOverlay","MainOverlay"
 			,"onTrueFireMessage","onDone"]
 
 main_instance = None
@@ -85,18 +84,10 @@ def cloneKey(fro,to):
 	_KEY_LUT[fro] = to
 
 #EXTENDABLE CONTAINERS----------------------------------------------------------
-_colorizers = []
-_filters = []
 _commands = {}
 _afterDone = []
 
 #decorators for containers
-def colorize(func):
-	'''Add function as a colorizer'''
-	_colorizers.append(func)
-def filter(func):
-	'''Add function as a filter'''
-	_filters.append(func)
 def command(commandname):
 	'''Add function as a command `commandname`'''
 	def wrapper(func):
@@ -113,40 +104,6 @@ Tokenize(CHAR_COMMAND,_commands)
 def centered(string,width):
 	'''Center some text'''
 	return string.rjust((width+len(string))//2).ljust(width)
-
-class Box:
-	'''
-	Group of useful box shaping characters. To use, inherit from
-	OverlayBase and this class simultaneously.
-	'''
-	parent = None
-	CHAR_HSPACE = '─'
-	CHAR_VSPACE = '│'
-	CHAR_TOPL = '┌'
-	CHAR_TOPR = '┐'
-	CHAR_BTML = '└'
-	CHAR_BTMR = '┘'
-	
-	def box_format(self,left,string,right,justchar = ' '):
-		'''Format and justify part of box'''
-		return "{}{}{}".format(left,self.box_just(string,justchar),right)
-	def box_just(self,string,justchar = ' '):
-		'''Pad string by column width'''
-		if not isinstance(self.parent,Main):
-			raise Exception("box object {} has no parent".format(self.__name__))
-		return "{}{}".format(string,justchar*(self.parent.x-2-strlen(string)))
-	def box_noform(self,string):
-		'''Returns a string in the sides of a box. Does not pad spaces'''
-		return self.CHAR_VSPACE + string + self.CHAR_VSPACE
-	def box_part(self,fmt = '') :
-		'''Returns a properly sized string of the sides of a box'''
-		return self.box_format(self.CHAR_VSPACE,fmt,self.CHAR_VSPACE)
-	def box_top(self,fmt = ''):
-		'''Returns a properly sized string of the top of a box'''
-		return self.box_format(self.CHAR_TOPL,fmt,self.CHAR_TOPR,self.CHAR_HSPACE)
-	def box_bottom(self,fmt = ''):
-		'''Returns a properly sized string of the bottom of a box'''
-		return self.box_format(self.CHAR_BTML,fmt,self.CHAR_BTMR,self.CHAR_HSPACE)
 
 class History:
 	'''Container class for historical entries, similar to an actual shell'''
@@ -196,6 +153,39 @@ def staticize(func,*args):
 		return func(*args)
 	ret.__doc__ = func.__doc__	#preserve documentation text
 	return ret
+
+class Box:
+	'''
+	Virtual class containing useful box shaping characters.
+	To use, inherit from OverlayBase and this class simultaneously.
+	'''
+	CHAR_HSPACE = '─'
+	CHAR_VSPACE = '│'
+	CHAR_TOPL = '┌'
+	CHAR_TOPR = '┐'
+	CHAR_BTML = '└'
+	CHAR_BTMR = '┘'
+	
+	def box_format(self,left,string,right,justchar = ' '):
+		'''Format and justify part of box'''
+		return "{}{}{}".format(left,self.box_just(string,justchar),right)
+	def box_just(self,string,justchar = ' '):
+		'''Pad string by column width'''
+		if not isinstance(self.parent,Main):
+			raise Exception("box object {} has no parent".format(self.__name__))
+		return "{}{}".format(string,justchar*(self.parent.x-2-strlen(string)))
+	def box_noform(self,string):
+		'''Returns a string in the sides of a box. Does not pad spaces'''
+		return self.CHAR_VSPACE + string + self.CHAR_VSPACE
+	def box_part(self,fmt = '') :
+		'''Returns a properly sized string of the sides of a box'''
+		return self.box_format(self.CHAR_VSPACE,fmt,self.CHAR_VSPACE)
+	def box_top(self,fmt = ''):
+		'''Returns a properly sized string of the top of a box'''
+		return self.box_format(self.CHAR_TOPL,fmt,self.CHAR_TOPR,self.CHAR_HSPACE)
+	def box_bottom(self,fmt = ''):
+		'''Returns a properly sized string of the bottom of a box'''
+		return self.box_format(self.CHAR_BTML,fmt,self.CHAR_BTMR,self.CHAR_HSPACE)
 
 class OverlayBase:
 	'''
@@ -251,6 +241,8 @@ class OverlayBase:
 			return self._keys[char](chars[1:-1] or [None]) or self._post()
 		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
 			return self._keys[-1](chars[:-1]) or self._post()
+		elif 0 in self._keys:
+			return self._keys[0](chars[:-1]) or self._post()
 	def resize(self,newx,newy):
 		'''Overridable function. On resize event, all added overlays have this called'''
 		pass
@@ -416,12 +408,12 @@ class ColorOverlay(OverlayBase,Box):
 		else:
 			self.color = initcolor
 		self._rgb = 0
-		self._keys.update({
-			ord('q'):		quitlambda
+		self._keys.update(
+			{ord('q'):		quitlambda
 			,ord('k'):		staticize(self.increment,1)
 			,ord('j'):		staticize(self.increment,-1)
-			,ord('l'):	staticize(self.chmode,1)
-			,ord('h'):	staticize(self.chmode,-1)
+			,ord('l'):		staticize(self.chmode,1)
+			,ord('h'):		staticize(self.chmode,-1)
 			,curses.KEY_UP:		staticize(self.increment,1)
 			,curses.KEY_DOWN:	staticize(self.increment,-1)
 			,curses.KEY_PPAGE:	staticize(self.increment,10)
@@ -555,19 +547,19 @@ class CommandOverlay(TextOverlay):
 		'''Run command'''
 		text = str(self.text)
 		self.history.append(text)
-		arglist = text.split(' ')
-		if arglist[0] not in _commands:
-			self.parent.newBlurb("Command \"{}\" not found".format(arglist[0]))
+		args = text.split(' ')
+		if args[0] not in _commands:
+			self.parent.newBlurb("Command \"{}\" not found".format(args[0]))
 			return -1
-		command = _commands[arglist[0]]
+		command = _commands[args[0]]
 		try:
-			add = command(self.parent,*arglist[1:])
+			add = command(self.parent,*args[1:])
 			if isinstance(add,OverlayBase):
 				self.swap(add)
 				return
 		except Exception as exc:
 			dbmsg('{} occurred in command {}: {}'.format(
-				type(exc).__name__,arglist[0], exc))
+				type(exc).__name__,args[0], exc))
 		except KeyboardInterrupt: pass
 		return -1
 
@@ -587,13 +579,20 @@ class EscapeOverlay(OverlayBase):
 class ConfirmOverlay(OverlayBase):
 	'''Overlay to confirm selection confirm y/n (no slash)'''
 	replace = False
-	def __init__(self,parent,prompt,confirmfunc):
+	def __init__(self,parent,confirmfunc):
 		super(ConfirmOverlay, self).__init__(parent)
-		self.parent.holdBlurb(prompt)
-		self._keys.update({ #run these in order
-			ord('y'):	lambda x: confirmfunc() or self.parent.releaseBlurb() or -1
+		self._keys.update( #run these in order
+			#TODO remove hack
+			{ord('y'):	lambda x: confirmfunc() or self.parent.releaseBlurb() or -1
 			,ord('n'):	lambda x: self.parent.releaseBlurb() or -1
 		})
+
+class BlockingOverlay(OverlayBase):
+	'''Block until any input is received'''
+	replace = False
+	def __init__(self,parent,confirmfunc):
+		super(BlockingOverlay, self).__init__(parent)
+		self._keys.update({0: lambda x: confirmfunc() or self.parent.releaseBlurb() or -1})
 
 class MainOverlay(TextOverlay):
 	'''
@@ -755,6 +754,22 @@ class MainOverlay(TextOverlay):
 		self._unfiltup = 0
 		self._linesup = 0
 		self._redoScheduled = False
+	#VIRTUAL FILTERING------------------------------------------
+	def colorizeMessage(self, msg, *args):
+		'''
+		Virtual function. Overload to apply some transformation on argument
+		`msg`, which is a client.Coloring object. Arguments are left generic
+		so that the user can define message args
+		'''
+		return msg
+	def filterMessage(self, *args):
+		'''
+		Virtual function called to see if a message can be displayed. If False,
+		the message can be displayed. Otherwise, the message is pushed to
+		_allMessages without drawing to _lines. Arguments are left generic so
+		that the user can define message args
+		'''
+		return False
 	#FRONTENDS--------------------------------------------------
 	def isselecting(self):
 		'''Whether a message is selected or not'''
@@ -766,13 +781,14 @@ class MainOverlay(TextOverlay):
 		and how many lines it occupies
 		'''
 		return self._allMessages[-self._selector]
-	def redolines(self,width = None,height = None):
+	def redolines(self, width = None, height = None):
 		'''
 		Redo lines, if current lines does not represent the unfiltered messages
 		or if the width has changed
 		'''
-		if self.isselecting(): self._redoScheduled = True
-#		raise SizeException("redolines attempted while selecting")
+		if self.isselecting():
+			self._redoScheduled = True
+			return
 		if width is None: width = self.parent.x
 		if height is None: height = self.parent.y
 		newlines = []
@@ -783,7 +799,7 @@ class MainOverlay(TextOverlay):
 			i = self._allMessages[-nummsg]
 			#if a filter fails, then the message should be drawn, as it's likely a system message
 			try:
-				if any(j(*i[1]) for j in _filters):
+				if (not i[3]) and self.filterMessage(*i[1]):
 					i[2] = 0
 					nummsg += 1
 					continue
@@ -797,9 +813,7 @@ class MainOverlay(TextOverlay):
 		self._lines = newlines
 		self.canselect = True
 	def recolorlines(self):
-		'''
-		Re-apply colorizers and redraw all visible lines
-		'''
+		'''Re-apply colorizeMessage and redraw all visible lines'''
 		width = self.parent.x
 		height = self.parent.y
 		newlines = []
@@ -808,10 +822,9 @@ class MainOverlay(TextOverlay):
 			i = self._allMessages[-nummsg]
 			if not i[3]:	#don't decolor system messages
 				i[0].clear()
-				for j in _colorizers:
-					j(i[0],*i[1])
+				self.colorizeMessage(i[0],*i[1])
 			try:
-				if any(j(*i[1]) for j in _filters):
+				if (not i[3]) and self.filterMessage(*i[1]):
 					i[2] = 0
 					nummsg += 1
 					continue
@@ -836,50 +849,58 @@ class MainOverlay(TextOverlay):
 		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
 		self.msgSystem(predicate+dtime)
 	def msgPost(self,post,*args):
-		'''Parse a message and apply all colorizers'''
+		'''Parse a message and apply colorizeMessage'''
 		post = Coloring(post)
-		for i in _colorizers:
-			i(post,*args)
-		self._append(post,list(args))
+		self.colorizeMessage(post,*args)
+		ret = self._append(post,list(args))
 		self.parent.display()
+		return ret
 	def msgPrepend(self,post,*args):
-		'''Parse a message and apply all colorizers'''
+		'''Parse a message and apply colorizeMessage'''
 		post = Coloring(post)
-		for i in _colorizers:
-			i(post,*args)
-		self._prepend(post,list(args))
+		self.colorizeMessage(post,*args)
+		ret = self._prepend(post,list(args))
 		self.parent.display()
+		return ret
+	def msgDelete(self,number):
+		for i,j in enumerate(reversed(self._allMessages)):
+			if number == j[4]:
+				del self._allMessages[-i-1]
+				self.redolines()
+				self.parent.display()
+				return
+	def msgDeleteLast(self):
+		self.msgDelete(len(self._allMessages)-1)
+
 	#MESSAGE PUSHING BACKEND-----------------------------------
 	def _prepend(self,newline,args = None,isSystem = False):
 		'''Prepend new message. Use msgPrepend instead'''
 		#just prepend it
-		msg = [newline,args,1,isSystem]
+		msg = [newline,args,1,isSystem,len(self._allMessages)]
 		#we actually need to draw it
 		if (self._linesup-self._unfiltup) < (self.parent.y-1):
 			#run filters
-			try:
-				if any(i(*args) for i in _filters):
-					self._allMessages.insert(0,msg)
-					return
-			except: pass
+			if (not isSystem) and self.filterMessage(*args):
+				self._allMessages.insert(0,msg)
+				return msg[4]
 			a,b = newline.breaklines(self.parent.x,self.INDENT)
 			self._lines.insert(0,self._msgSplit)
 			self._lines = a + self._lines
 			msg[2] = b
 
 		self._allMessages.insert(0,msg)
+		return msg[4]
+		
 	def _append(self,newline,args = None,isSystem = False):
 		'''Add new message. Use msgPost instead'''
 		#undisplayed messages have length zero
-		msg = [newline,args,0,isSystem]
+		msg = [newline,args,0,isSystem,len(self._allMessages)]
 		#before we filter it
 		self._selector += (self._selector>0)
 		#run filters
-		try:
-			if any(i(*args) for i in _filters):
-				self._allMessages.append(msg)
-				return
-		except: pass
+		if (not isSystem) and self.filterMessage(*args):
+			self._allMessages.append(msg)
+			return msg[4]
 		a,b = newline.breaklines(self.parent.x,self.INDENT)
 		self._lines += a
 		msg[2] = b
@@ -889,6 +910,7 @@ class MainOverlay(TextOverlay):
 		if self._selector:
 			self._linesup += b+1
 			self._unfiltup += 1
+		return msg[4]
 
 class _NScrollable(Scrollable):
 	'''
@@ -1048,7 +1070,7 @@ class Main:
 		self.display()
 	def popOverlay(self,overlay):
 		'''Pop the overlay `overlay`'''
-		self._ins.pop(overlay.index)
+		del self._ins[overlay.index]
 		#look for the last replace
 		if overlay.index == self._lastReplace: 
 			newReplace = 0
@@ -1084,7 +1106,7 @@ class Main:
 		return newScroll
 	def popScrollable(self,which):
 		'''Pop a scrollable added from addScrollable'''
-		self._scrolls.pop(which.index)
+		del self._scrolls[which.index]
 		self.updateinput()
 	#Loop Backend--------------------------------------------------------------
 	def _input(self):

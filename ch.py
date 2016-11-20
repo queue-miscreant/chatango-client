@@ -17,6 +17,7 @@ import re
 import socket
 import select
 import urllib.request
+import client
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
@@ -165,6 +166,9 @@ class Task:
 		else:
 			self.cancel()
 
+	def __bool__(self):
+		return self in self._manager.tasks
+
 	@classmethod
 	def addInterval(cons, manager, timeout, func, *args, **kwargs):
 		'''
@@ -196,7 +200,6 @@ class Task:
 class _Connection:
 	'''A virtual connection object to chatango. Superclass to PM and Groups'''
 	_maxLength = 2700
-	_pingDelay = 20
 	_messageBackground = True
 	_messageRecord = False
 	_tooBigMessage = BigMessage_Multiple
@@ -341,10 +344,11 @@ class _Connection:
 	def ping(self):
 		'''Send a ping, or fail and disconnect'''
 		if self._canPing:
+			self._canPing = False
 			self._sendCommand("")
 		else:
-			self._callEvent("onConnectionLost")
 			self._disconnect()
+			self._callEvent("onConnectionLost")
 
 class Group(_Connection):
 	'''_Connection subclass for typical chatango Groups'''
@@ -394,16 +398,19 @@ class Group(_Connection):
 	last      = property(_getLastMsgTime)
 
 	def _connect(self):
-		'''Connect to the server'''
-		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.sock.connect(("s{}.chatango.com".format(self._server), self._port))
-		self.sock.setblocking(False)
+		'''Connect to the server. Fires onConnectionLost when this fails'''
+		try:
+			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			self.sock.connect(("s{}.chatango.com".format(self._server), self._port))
+			self.sock.setblocking(False)
+		except socket.gaierror:
+			self._callEvent("onConnectionLost")
 		self._clearBuffers()
 		#authenticate
 		self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password, firstcmd = True)
 
 		self._lockWrite(True) #lock until inited
-		self._pingTask = Task.addInterval(self._manager, self._pingDelay, self.ping)
+		self._pingTask = Task.addInterval(self._manager, self._manager._pingDelay, self.ping)
 		self._canPing = True
 		if not self._reconnecting: self.connected = True
 
@@ -713,7 +720,7 @@ class PM(_Connection):
 		self._sendCommand("tlogin", self._auid, '2')
 		self._lockWrite(True)
 
-		self._pingTask = Task.addInterval(self._manager, self._pingDelay, self.ping)
+		self._pingTask = Task.addInterval(self._manager, self._manager._pingDelay, self.ping)
 		self._connected = True
 
 	#########################################
@@ -843,6 +850,7 @@ class Manager:
 	object the event was called from.
 	'''
 	_socketTimer = .2
+	_pingDelay = 15
 	def __init__(self, username, password, pm = False):
 		self.username = username
 		self.password = password
@@ -887,7 +895,8 @@ class Manager:
 	def _tick(self):
 		'''Call all tasks if scheduled'''
 		now = time.time()
-		for task in self.tasks:
+		#need a copy to iterate over
+		for task in list(self.tasks):
 			if task.target <= now:
 				task()
 
