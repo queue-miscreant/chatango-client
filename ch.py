@@ -18,8 +18,6 @@ import socket
 import select
 import urllib.request
 
-import client
-
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
 
@@ -309,7 +307,7 @@ class _Connection:
 	def digest(self, data):
 		'''Parse argument as data from the socket and call method'''
 		self._rbuff += data
-		commands = data.split(b"\x00")
+		commands = self._rbuff.split(b'\x00')
 		for command in commands[:-1]:
 			args = command.decode("utf_8").rstrip("\r\n").split(':')
 			try:
