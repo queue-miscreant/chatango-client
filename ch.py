@@ -18,6 +18,8 @@ import socket
 import select
 import urllib.request
 
+import client
+
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
 
@@ -434,7 +436,7 @@ class Group(_Connection):
 	def _recv_inited(self, args):
 		'''Command fired on room inited, after recent messages have sent'''
 		#TODO weed out null commands
-		self._sendCommand("g_participants", "start")
+		self._sendCommand("gparticipants")
 		self._sendCommand("getpremium", '1')
 		self._sendCommand("getbannedwords")
 		self._sendCommand("getratelimit")
@@ -443,17 +445,17 @@ class Group(_Connection):
 		self._history.clear()
 		self._lockWrite(False)
 
-	def _recv_g_participants(self, args):
+	def _recv_gparticipants(self, args):
 		'''Command that contains information of current room members'''
-		#g_participants splits people by ;
-		people = ':'.join(args).split(';')
+		#gparticipants splits people by ;
+		people = ':'.join(args[1:]).split(';')
 		for person in people:
 			person = person.split(':')
-			if person[-3] != "None" and person[-2] == "None":
-				self._users.append(person[-3].lower())
-				self._userSessions[person[-4]] = person[-3].lower()
+			if person[3] != "None" and person[4] == "None":
+				self._users.append(person[3].lower())
+				self._userSessions[person[2]] = person[3].lower()
 		self._callEvent("onParticipants")
-	
+
 	def _recv_participant(self, args):
 		'''Command fired on new member join'''
 		bit = args[0]
@@ -859,7 +861,7 @@ class Manager:
 		self.running = True
 		while self.running:
 			socks = [group.sock for group in self._groups if group.connected]
-			#don't write null strings
+			#don't write null strings (expends CPU)
 			wsocks = [group.sock for group in self._groups if group.connected and group.wbuff]
 			#select
 			read, write, err = select.select(socks,wsocks,[],self._socketTimer)
@@ -901,6 +903,12 @@ class Manager:
 
 	def leaveGroup(self, groupName):
 		'''Leave group `groupName`'''
+		if isinstance(groupName,Group):
+			for group in self._groups:
+				if group == groupName:
+					group.disconnect()
+					return
+			return
 		groupName = groupName.lower()
 		for group in self._groups:
 			if group.name == groupName:

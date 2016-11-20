@@ -141,11 +141,10 @@ class ChatBot(ch.Manager):
 	
 	def reconnect(self):
 		if not self.isinited: return
-		self.stop()
-		self._start()
+		self.leaveGroup(self.joinedGroup)
 	
 	def changeGroup(self,newgroup):
-		self.stop()
+		self.leaveGroup(self.joinedGroup)
 		self.creds["room"] = newgroup
 		self.joinGroup(newgroup)
 
@@ -177,7 +176,6 @@ class ChatBot(ch.Manager):
 	#on removal from a group
 	def onLeave(self,group):
 		#self.parent.unget()
-		client.dbmsg("")
 		self.stop()
 		
 	#on message
@@ -211,8 +209,8 @@ class ChatBot(ch.Manager):
 	def onFloodBanRepeat(self, group, secs):
 		self.mainOverlay.msgSystem("You are banned for %d seconds"%secs)
 	
-	def onParticipants(self,group):
-		self.members.extend(group.users)
+	def onParticipants(self, group):
+		self.members.extend(group.userlist)
 		self.mainOverlay.recolorlines()
 
 	def onUsercount(self, group):
@@ -228,8 +226,9 @@ class ChatBot(ch.Manager):
 		self.mainOverlay.parent.newBlurb("%s has left" % user)
 
 	def onConnectionLost(self, group):
+		#TODO add overlay
 		self.mainOverlay.msgSystem("Connection lost; attempting to reestablish")
-		group.connect()
+		group.reconnect()
 
 
 #OVERLAY EXTENSION--------------------------------------------------------------------------------------
