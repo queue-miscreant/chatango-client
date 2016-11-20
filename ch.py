@@ -466,7 +466,7 @@ class Group(_Connection):
 		bit = args[0]
 		if bit == '0':	#left
 			user = args[3].lower()
-			if args[3] != "None" and args[3].lower() in self.users:
+			if args[3] != "None" and user in self._users:
 				self._users.remove(user)
 				self._callEvent("onMemberLeave", user)
 			else:
