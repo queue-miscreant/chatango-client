@@ -40,7 +40,7 @@ def getServer(group):
 	return None
 
 AUTH_RE = re.compile("auth\.chatango\.com ?= ?(.*?);")
-POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([\\d]{2})?([0-9a-fA-F]{1,6})=\"([0-9a-zA-Z]*)\">)?")
+POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([0-9a-fA-F]{2,8})=\"([0-9a-zA-Z]*)\">)?")
 XML_TAG_RE = re.compile("(<.*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 
@@ -116,10 +116,10 @@ def _formatMsg(raw, bori):
 		,"ip":		raw[6]
 		,"channel":	0
 		,"post":	formatRaw(':'.join(raw[9:]))
-		,"nColor":	""
-		,"fSize":	""
-		,"fFace":	""
-		,"fColor":	'0'})
+		,"nColor":	"CCC"
+		,"fSize":	12
+		,"fFace":	0
+		,"fColor":	""})
 
 	if bori == 'b':
 		post.pnum = raw[5]
@@ -129,13 +129,18 @@ def _formatMsg(raw, bori):
 	tag = POST_TAG_RE.search(raw[9])
 	if tag:
 		post.nColor = tag.group(2) or post.nColor
-		post.fSize = tag.group(4) or post.fSize
-		post.fColor = tag.group(5) or post.fColor
-		post.fFace = tag.group(6) or post.fFace
+		sizeAndColor = tag.group(4)
+		if sizeAndColor is not None:
+			if len(sizeAndColor) % 3 == 2:	#color only
+				post.fSize = int(sizeAndColor[:2])
+				post.fColor = sizeAndColor[2:]
+			else:
+				post.fColor = sizeAndColor
+		post.fFace = int(tag.group(5)) or post.fFace
 	#user parsing
 	user = raw[1].lower()
 	if not user:
-		if raw[2] != '':
+		if raw[2] != "":
 			user = '#' + raw[2].lower()
 		else:
 			user = "!anon" + Generate.aid(post.nColor, post.uid)
@@ -607,7 +612,7 @@ class Group(_Connection):
 					post = post[self._maxLength:]
 					self.sendPost(sect, html = html)
 			return
-		self._sendCommand("bm","meme",str(channel),"<n{}/><f x{}{}=\"{}\">{}".format(self.nColor,
+		self._sendCommand("bm","meme",str(channel),"<n{}/><f x{:02d}{}=\"{}\">{}".format(self.nColor,
 			self.fSize, self.fColor, self.fFace, post))
 
 	def getMore(self, amt = 20):
