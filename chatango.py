@@ -142,6 +142,7 @@ class ChatBot(ch.Manager):
 		if not self.isinited: return
 		self.leaveGroup(self.joinedGroup)
 		self.mainOverlay.clear()
+		client.clearLinks()
 		self.onInit()
 	
 	def changeGroup(self,newgroup):
@@ -475,8 +476,9 @@ class ChatangoOverlay(client.MainOverlay):
 	def openlastlink(self):
 		'''Open last link'''
 		global visited_links
-		if not client.getLinks(): return
-		last = client.getLinks()[-1]
+		linksList = client.getLinks()
+		if not linksList: return
+		last = linksList[-1]
 		client.open_link(self.parent,last)
 		if last not in visited_links:
 			visited_links.append(last)

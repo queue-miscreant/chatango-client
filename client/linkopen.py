@@ -14,7 +14,8 @@ import subprocess
 from webbrowser import open_new_tab
 
 __all__ =	["LINK_RE","getLinks","recentLinks","getDefaults","parseLinks"
-			,"opener","open_link","daemonize","images","videos","browser"]
+			,"clearLinks","opener","open_link","daemonize","images","videos"
+			,"browser"]
 
 #canonical link regex
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)[`\\s]")
