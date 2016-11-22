@@ -324,8 +324,8 @@ class ChatangoOverlay(client.MainOverlay):
 		def select(me):
 			global visited_links
 			if not me.list: return
-			current = me.list[me.it].split(':')[0] #get the number selected, not the number by iterator
-			current = client.getLinks()[int(current)-1] #this enforces the wanted link is selected
+			linksList = client.getLinks()
+			current = linksList[len(me.list)-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			if current not in visited_links:
 				visited_links.append(current)
