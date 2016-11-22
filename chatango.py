@@ -314,19 +314,22 @@ class ChatangoOverlay(client.MainOverlay):
 				message = self.getselected()
 				msg,name = message[1][0].post, message[1][0].user
 				if name[0] in "!#": name = name[1:]
-				self.text.append("@{}: `{}`".format(name,msg.replace('`',"")))
+				if self.bot.me:
+					msg = msg.replace("@"+self.bot.me,"")
+				self.text.append("@{}: `{}`".format(name, msg.replace('`',"")))
 			except Exception as e: client.dbmsg(e)
 			return 
 		self.text.complete()
 
 	def linklist(self):
 		'''List accumulated links'''
+		linksList = client.getLinks()
+
 		#enter key
 		def select(me):
 			global visited_links
 			if not me.list: return
-			linksList = client.getLinks()
-			current = linksList[len(me.list)-me.it-1] #this enforces the wanted link is selected
+			current = linksList[-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			if current not in visited_links:
 				visited_links.append(current)
@@ -334,7 +337,14 @@ class ChatangoOverlay(client.MainOverlay):
 			#exit
 			return -1
 
-		box = client.ListOverlay(self.parent,client.recentLinks(),None,client.getDefaults())
+		def drawVisited(string,i):
+			linksList = client.getLinks()
+			current = linksList[-i-1] #this enforces the wanted link is selected
+			if current in visited_links:
+				string.insertColor(0,245)
+
+		box = client.ListOverlay(self.parent,[i.replace("https://","").replace("http://","")
+			for i in reversed(linksList)], drawVisited, client.getDefaults())
 		#TODO better function composition
 		box.addKeys({"enter":select
 					,"tab":lambda x: select(x) and 0})
@@ -368,7 +378,7 @@ class ChatangoOverlay(client.MainOverlay):
 			selected = dispList[i]
 			if selected.split(' ')[0] not in ignores: return
 			string[:-1]+'i'
-			string.insertColor(-1,3)
+			string.insertColor(-1,1)
 		
 		box = client.ListOverlay(self.parent,dispList,drawIgnored)
 		box.addKeys({
@@ -443,7 +453,7 @@ class ChatangoOverlay(client.MainOverlay):
 			self.redolines()
 		def drawActive(string,i):
 			if filtered_channels[i]: return
-			col = i and i+12 or 16
+			col = i and i+256 or 260
 			string.insertColor(-1,col)
 						
 		box = client.ListOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
@@ -499,62 +509,46 @@ class ChatangoOverlay(client.MainOverlay):
 		))
 
 	def colorizeMessage(self, msg, post, isreply, ishistory):
-		default = getColor(post.user)
+		nameColor = convertTo256(post.nColor)
+		fontColor = convertTo256(post.fColor)
 
 		#greentext, font color
-		textColor = lambda x: x[0] == ">" and 11 or default
+		textColor = lambda x: x[0] == ">" and 2 or fontColor
 		msg.colorByRegex(LINE_RE, textColor, group = 3)
 
 		#links in white
-		linkColor = lambda x: (x not in visited_links) and client.rawNum(0) or 17
-		msg.colorByRegex(client.LINK_RE, linkColor, default, 1)
-
-		#color group members
-		def check(group):
-			name = group.lower()[1:]
-			return (name in self.bot.members) and getColor(name) or default
-		msg.colorByRegex(REPLY_RE, check, default)
+		linkColor = lambda x: (x not in visited_links) and client.rawNum(0) or 245
+		msg.colorByRegex(client.LINK_RE, linkColor, fontColor, 1)
 
 		#underline quotes
 		msg.effectByRegex(QUOTE_RE,1)
 
 		#make sure we color the name right
-		msg.insertColor(1, default)
+		msg.insertColor(1, nameColor)
 		if isreply:   msg.addGlobalEffect(0,1)
 		if ishistory: msg.addGlobalEffect(1,1)
 		#channel
-		msg.insertColor(0,post.channel+12)
+		msg.insertColor(0,post.channel+256)
 
 LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
 REPLY_RE = re.compile(r"@\w+?\b")
 QUOTE_RE = re.compile(r"`[^`]+`")
 
-ordering = \
-	("blue"
-	,"cyan"
-	,"magenta"
-	,"red"
-	,"yellow")
-for i in range(10):
-	client.defColor(ordering[i%5],i//5,isdim = dim_for_intense) #0-10: user text
-del ordering
-client.defColor("green",True,				isdim = dim_for_intense)
-client.defColor("green",					isdim = dim_for_intense)	#11: >meme arrow
-client.defColor("none",False,"none",		isdim = dim_for_intense)	#12-15: channels
-client.defColor("red",False,"red",			isdim = dim_for_intense)
-client.defColor("blue",False,"blue",		isdim = dim_for_intense)
-client.defColor("magenta",False,"magenta",	isdim = dim_for_intense)
-client.defColor("white",False,"white",		isdim = dim_for_intense)	#16: extra drawing
-client.defColor(239)													#17: visited links
 
-#color by user's name
-def getColor(name,init = 6,split = 109,rot = 6):
-	if name[0] in "#!": name = name[1:]
-	total = init
-	for i in name:
-		n = ord(i)
-		total ^= (n > split) and n or ~n
-	return (total+rot)%11
+client.def256colors()				#0-255: regular colors
+client.defColor("none")				#256:	blank channel
+client.defColor("red","red")		#257:	red channel
+client.defColor("blue","blue")		#258:	blue channel
+client.defColor("magenta","magenta")#259:	both channel
+client.defColor("white","white")	#260:	blank channel, visible
+
+def convertTo256(string):
+	if string is None or len(string) < 3 or len(string) == 4:
+		return 245	#middling gray or pure white
+	partsLen = len(string)//3
+	in216 = [min(5,max(1,int(int(string[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))))
+		 for i in range(3)]
+	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
 
 #COMMANDS-----------------------------------------------------------------------------------------------
 @client.command("ignore")

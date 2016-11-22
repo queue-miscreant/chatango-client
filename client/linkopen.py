@@ -13,9 +13,8 @@ from threading import Thread
 import subprocess
 from webbrowser import open_new_tab
 
-__all__ =	["LINK_RE","getLinks","recentLinks","getDefaults","parseLinks"
-			,"clearLinks","opener","open_link","daemonize","images","videos"
-			,"browser"]
+__all__ =	["LINK_RE","getLinks","getDefaults","parseLinks","clearLinks"
+			,"opener","open_link","daemonize","images","videos","browser"]
 
 #canonical link regex
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)[`\\s]")
@@ -29,11 +28,6 @@ class LinkException(Exception):
 
 def getLinks():
 	return list(_lastlinks)
-
-def recentLinks():
-	'''Get links, but sans protocol and in reverse'''
-	return [i.replace("http://","").replace("https://","")\
-		 for i in reversed(_lastlinks)]
 
 def clearLinks():
 	'''Clear links'''

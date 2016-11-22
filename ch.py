@@ -40,7 +40,7 @@ def getServer(group):
 	return None
 
 AUTH_RE = re.compile("auth\.chatango\.com ?= ?(.*?);")
-POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([\d]{0}|[\d]{2})([0-9a-fA-F]{1,6})=\"([0-9a-zA-Z]*)\">)?")
+POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([\\d]{2})?([0-9a-fA-F]{1,6})=\"([0-9a-zA-Z]*)\">)?")
 XML_TAG_RE = re.compile("(<.*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 
@@ -128,10 +128,10 @@ def _formatMsg(raw, bori):
 
 	tag = POST_TAG_RE.search(raw[9])
 	if tag:
-		post.nColor = tag.group(2)
-		post.fSize = tag.group(4)
-		post.fColor = tag.group(5)
-		post.fFace = tag.group(6)
+		post.nColor = tag.group(2) or post.nColor
+		post.fSize = tag.group(4) or post.fSize
+		post.fColor = tag.group(5) or post.fColor
+		post.fFace = tag.group(6) or post.fFace
 	#user parsing
 	user = raw[1].lower()
 	if not user:

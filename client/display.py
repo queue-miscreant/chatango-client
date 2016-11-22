@@ -73,15 +73,14 @@ class DisplayException(Exception):
 	'''Exception for client.display'''
 	pass
 
-def defColor(fore, bold = False, back = "none", isdim = False):
+def defColor(fore, back = "none"):
 	'''Define a new foreground/background pair, with optional intense color'''
 	global _COLORS
 	pair = "\x1b[3"
 	if isinstance(fore,int):
 		pair += "8;5;%d" % fore;
 	else:
-		pair += "%d" % _COLOR_NAMES.index(fore);
-		pair += bold and (isdim and ";2" or ";1") or ";22"
+		pair += str(_COLOR_NAMES.index(fore));
 	if isinstance(back,int):
 		pair += ";48;5;%d" % back;
 	else:
@@ -95,6 +94,10 @@ def defEffect(on,off):
 	_EFFECTS.append((on,off))
 	_NUM_EFFECTS += 1
 	_EFFECTS_BITS = (_EFFECTS_BITS << 1) | 1
+
+def def256colors():
+	for i in range(256):
+		defColor(i)
 
 def getColor(c):
 	'''insertColor without position or coloring object'''
