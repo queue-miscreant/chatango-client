@@ -75,7 +75,7 @@ def readFromFile(readInto, filePath = SAVE_PATH):
 		for i,bit in creds_readwrite.items():
 			if bit&1:
 				readInto[i] = jsonData.get(i)
-			#write into safe credentials regardless
+			#read into safe credentials regardless
 			creds_entire[i] = jsonData.get(i)
 	except Exception:
 		raise IOError("Error reading creds! Aborting...")
@@ -323,9 +323,9 @@ class ChatangoOverlay(client.MainOverlay):
 		#enter key
 		def select(me):
 			global visited_links
-			if not client.getlinks(): return
+			if not me.list: return
 			current = me.list[me.it].split(':')[0] #get the number selected, not the number by iterator
-			current = client.getlinks()[int(current)-1] #this enforces the wanted link is selected
+			current = client.getLinks()[int(current)-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			if current not in visited_links:
 				visited_links.append(current)
@@ -333,7 +333,8 @@ class ChatangoOverlay(client.MainOverlay):
 			#exit
 			return -1
 
-		box = client.ListOverlay(self.parent,client.reverselinks(),None,client.getdefaults())
+		box = client.ListOverlay(self.parent,client.recentLinks(),None,client.getDefaults())
+		#TODO better function composition
 		box.addKeys({"enter":select
 					,"tab":lambda x: select(x) and 0})
 		box.add()
@@ -474,8 +475,8 @@ class ChatangoOverlay(client.MainOverlay):
 	def openlastlink(self):
 		'''Open last link'''
 		global visited_links
-		if not client.getlinks(): return
-		last = client.getlinks()[-1]
+		if not client.getLinks(): return
+		last = client.getLinks()[-1]
 		client.open_link(self.parent,last)
 		if last not in visited_links:
 			visited_links.append(last)

@@ -7,14 +7,13 @@ evaluation.
 Althought this does not import .display (or any other module in the package),
 open_link expects an instance of display.Main as its first argument.
 '''
-from .display import dbmsg
 import re
 import os #for stupid stdout/err hack
 from threading import Thread
 import subprocess
 from webbrowser import open_new_tab
 
-__all__ =	["LINK_RE","getlinks","reverselinks","getdefaults","parseLinks"
+__all__ =	["LINK_RE","getLinks","recentLinks","getDefaults","parseLinks"
 			,"opener","open_link","daemonize","images","videos","browser"]
 
 #canonical link regex
@@ -27,15 +26,19 @@ _lastlinks = []
 class LinkException(Exception):
 	'''Exception for errors in client.linkopen'''
 
-def getlinks():
-	return _lastlinks
+def getLinks():
+	return list(_lastlinks)
 
-def reverselinks():
+def recentLinks():
 	'''Get links, but sans protocol and in reverse'''
-	return ["%s: %s"%(len(_lastlinks)-i,j.replace("http://","").replace("https://",""))\
-		 for i,j in enumerate(reversed(_lastlinks))]
+	return [i.replace("http://","").replace("https://","")\
+		 for i in reversed(_lastlinks)]
 
-def getdefaults():
+def clearLinks():
+	'''Clear links'''
+	_lastlinks.clear()
+
+def getDefaults():
 	'''
 	Get the names of the default functions.
 	These are hopefully descriptive enough
@@ -98,26 +101,26 @@ class opener:
 	openers match a website, and lambdas open a link when a corresponding
 	callable returns true.
 	'''
-	type = "default"
 	def __init__(self,*args):
 		if len(args) == 1 and callable(args[0]):
+			self._type = "default"
 			self(args[0])
 			return
 		if args[0] not in ["default","extension","pattern","lambda"]:
 			raise LinkException("invalid first argument of linkopen.opener {}".format(args[0]))
-		self.type = args[0]
-		self.argument = args[1]
+		self._type = args[0]
+		self._argument = args[1]
 
 	def __call__(self,func):
 		#gross if statements
-		if self.type == "default":
+		if self._type == "default":
 			open_link._defaults.append(func)
-		elif self.type == "extension":
-			open_link._exts[self.argument] = func
-		elif self.type == "pattern":
-			open_link._sites[self.argument] = func
-		elif self.type == "lambda":
-			open_link.link_opener.lambdas.append(self.argument)
+		elif self._type == "extension":
+			open_link._exts[self._argument] = func
+		elif self._type == "pattern":
+			open_link._sites[self._argument] = func
+		elif self._type == "lambda":
+			open_link.link_opener.lambdas.append(self._argument)
 			open_link.link_opener.lambdalut.append(func)
 		#allow stacking wrappers
 		return func
@@ -125,7 +128,7 @@ class opener:
 def daemonize(func):
 	'''Build a function that starts a daemon thread over the given function'''
 	def ret(*args,**kwargs):
-		funcThread = Thread(target = func,args = args,kwargs = kwargs)
+		funcThread = Thread(target = func, args = args ,kwargs = kwargs)
 		funcThread.daemon = True
 		funcThread.start()
 	ret.__name__ = func.__name__
@@ -140,7 +143,7 @@ def daemonize(func):
 @opener("extension","png")
 @opener("extension","png:large")
 @daemonize
-def images(main,link,ext):
+def images(main, link, ext):
 	main.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
 	try:
@@ -153,7 +156,7 @@ def images(main,link,ext):
 @opener("extension","mp4")
 @opener("extension","gif")
 @daemonize
-def videos(main,link,ext):
+def videos(main, link, ext):
 	'''Start and daemonize mpv (or replaced video playing program)'''
 	main.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
@@ -164,7 +167,7 @@ def videos(main,link,ext):
 		main.newBlurb("No player %s found"%MPV_PATH)
 
 @opener
-def browser(main,link):
+def browser(main, link):
 	'''Open new tab'''
 	main.newBlurb("Opened new tab")
 	#magic code to output stderr to /dev/null
