@@ -116,7 +116,7 @@ def _formatMsg(raw, bori):
 		,"ip":		raw[6]
 		,"channel":	0
 		,"post":	formatRaw(':'.join(raw[9:]))
-		,"nColor":	"CCC"
+		,"nColor":	''
 		,"fSize":	12
 		,"fFace":	0
 		,"fColor":	""})
@@ -130,13 +130,13 @@ def _formatMsg(raw, bori):
 	if tag:
 		post.nColor = tag.group(2) or post.nColor
 		sizeAndColor = tag.group(4)
-		if sizeAndColor is not None:
+		if sizeAndColor:
 			if len(sizeAndColor) % 3 == 2:	#color only
 				post.fSize = int(sizeAndColor[:2])
 				post.fColor = sizeAndColor[2:]
 			else:
 				post.fColor = sizeAndColor
-		post.fFace = int(tag.group(5)) or post.fFace
+		post.fFace = int(tag.group(5) or post.fFace)
 	#user parsing
 	user = raw[1].lower()
 	if not user:
@@ -144,6 +144,7 @@ def _formatMsg(raw, bori):
 			user = '#' + raw[2].lower()
 		else:
 			user = "!anon" + Generate.aid(post.nColor, post.uid)
+		post.nColor = ''
 	post.user = user
 	channel = (int(raw[7]) >> 8) & 15		#TODO mod channel on 2**15
 	post.channel = channel&1|(channel&8)>>2

@@ -403,59 +403,6 @@ def columnslice(string,length):
 		escape = temp
 	return lentr + 1
 
-def breaklines(string,length,outdent=""):
-	'''
-	Break string (courteous of spaces) into a list of
-	column-length `length` substrings
-	'''
-	string = string.expandtabs(_TABLEN)
-	outdentLen = strlen(outdent)
-	TABSPACE = length - outdentLen
-	THRESHOLD = length/2
-
-	broken = []
-	form = ""
-	for i,line in enumerate(string.split('\n')):
-		start = 0
-		lastbreaking,lastcol = 0,0
-		color,effect = "",""
-		space = (i and TABSPACE) or length
-		escapestart = 0
-		for pos,j in enumerate(line):	#character by character, the old fashioned way
-			if escapestart:
-				if j.isalpha():
-					sequence = line[escapestart-1:pos+1]
-					if _LAST_COLOR_RE.match(sequence):
-						color = sequence
-					elif j == 'm':			#sequence ending in m that isn't a color is an effect
-						effect += sequence
-					escapestart = 0
-				continue
-			elif j == "\x1b":
-				escapestart = pos+1			#sequences at 0 are okay
-				continue
-
-			lenj = wcwidth(j)
-			space -= lenj
-			if j in _LINE_BREAKING:
-				lastbreaking = pos
-				lastcol = space
-			if space <= 0:			#time to break
-				if lastcol < THRESHOLD and lastbreaking > start:
-					broken.append("{}{}{}".format(form,line[start:lastbreaking],CLEAR_FORMATTING))
-					start = lastbreaking+1	#ignore whitespace
-					lenj += lastcol
-				else:
-					broken.append("{}{}{}".format(form,line[start:pos],CLEAR_FORMATTING))
-					start = pos
-				space = TABSPACE - lenj
-				form = outdent + color + effect
-
-		broken.append("{}{}{}".format(form,line[start:],CLEAR_FORMATTING))
-		form = outdent + color + effect
-
-	return broken,len(broken)
-
 class Scrollable:
 	'''Scrollable text input'''
 	def __init__(self,width,string=""):

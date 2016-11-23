@@ -544,8 +544,9 @@ client.defColor("white","white")	#260:	blank channel, visible
 
 def convertTo256(string):
 	if string is None or len(string) < 3 or len(string) == 4:
-		return 245	#middling gray or pure white
+		return client.rawNum(0)
 	partsLen = len(string)//3
+	#TODO on certain ranges, just return rawNum(0)
 	in216 = [min(5,max(1,int(int(string[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))))
 		 for i in range(3)]
 	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
