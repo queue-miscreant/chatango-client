@@ -27,7 +27,7 @@ from .display import *
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"InputOverlay","ConfirmOverlay","BlockingOverlay","MainOverlay"
-			,"onTrueFireMessage","onDone"]
+			,"onDone"]
 
 main_instance = None
 lasterr = None
@@ -1192,16 +1192,6 @@ def start(target,*args):
 		dbmsg("Error occurred during shutdown: ", e)
 	if lasterr is not None:
 		raise lasterr
-
-class onTrueFireMessage:
-	def __init__(self,message):
-		self.message = message
-	def __call__(self,other):
-		def inject(*args):
-			if main_instance:
-				if other(*args):
-					main_instance.newBlurb(self.message)
-		return inject
 
 #display list of defined commands
 @command("help")

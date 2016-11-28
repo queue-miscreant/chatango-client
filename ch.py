@@ -53,11 +53,12 @@ class Generate:
 		'''Generate anon ID'''
 		try:
 			n = n.rsplit('.', 1)[0]
-			n = int(n[-4:])
+			n = n[-4:]
+			int(n)	#insurance that n is int-able
 		except:
-			n = 3452
+			n = "3452"
 		return "".join(map(lambda i,v: str(int(i) + int(v))[-1],
-					   str(n), str(uid)[4:8]))
+					   n, str(uid)[4:8]))
 
 	def auth(user, password):
 		'''Generate auth token for PMs'''

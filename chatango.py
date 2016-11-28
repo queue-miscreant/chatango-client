@@ -525,6 +525,10 @@ class ChatangoOverlay(client.MainOverlay):
 
 		#make sure we color the name right
 		msg.insertColor(1, nameColor)
+		#insurance the @s before a > are colored right
+		msgStart = 1+len(post.user)+2
+		if not msg.coloredAt(msgStart):
+			msg.insertColor(msgStart,fontColor)
 		if isreply:   msg.addGlobalEffect(0,1)
 		if ishistory: msg.addGlobalEffect(1,1)
 		#channel
@@ -533,7 +537,6 @@ class ChatangoOverlay(client.MainOverlay):
 LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
 REPLY_RE = re.compile(r"@\w+?\b")
 QUOTE_RE = re.compile(r"`[^`]+`")
-
 
 client.def256colors()				#0-255: regular colors
 client.defColor("none")				#256:	blank channel
@@ -546,9 +549,10 @@ def convertTo256(string):
 	if string is None or len(string) < 3 or len(string) == 4:
 		return client.rawNum(0)
 	partsLen = len(string)//3
-	#TODO on certain ranges, just return rawNum(0)
-	in216 = [min(5,max(1,int(int(string[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))))
+	in216 = [int(int(string[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))
 		 for i in range(3)]
+	if sum(in216) < 2 or sum(in216) > 34:
+		return client.rawNum(0)
 	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
 
 #COMMANDS-----------------------------------------------------------------------------------------------

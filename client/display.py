@@ -170,6 +170,10 @@ class Coloring:
 		self._maxpos += len(other)
 		return self
 
+	def coloredAt(self,position):
+		'''return a bool that represents if that position is colored yet'''
+		return position in self._positions
+
 	def _insertColor(self,position,formatting):
 		'''insertColor backend that doesn't do sanity checking on formatting'''
 		if position > self._maxpos:
