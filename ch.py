@@ -11,13 +11,13 @@ fetching history messages among all other necessary functionalities.
 ################################
 #Python Imports
 ################################
+import os
 import time
 import random
 import re
 import socket
 import select
-import urllib.request
-import client
+import requests
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
@@ -25,26 +25,12 @@ BigMessage_Multiple = 1
 weights = [['5', 75], ['6', 75], ['7', 75], ['8', 75], ['16', 75], ['17', 75], ['18', 75], ['9', 95], ['11', 95], ['12', 95], ['13', 95], ['14', 95], ['15', 95], ['19', 110], ['23', 110], ['24', 110], ['25', 110], ['26', 110], ['28', 104], ['29', 104], ['30', 104], ['31', 104], ['32', 104], ['33', 104], ['35', 101], ['36', 101], ['37', 101], ['38', 101], ['39', 101], ['40', 101], ['41', 101], ['42', 101], ['43', 101], ['44', 101], ['45', 101], ['46', 101], ['47', 101], ['48', 101], ['49', 101], ['50', 101], ['52', 110], ['53', 110], ['55', 110], ['57', 110], ['58', 110], ['59', 110], ['60', 110], ['61', 110], ['62', 110], ['63', 110], ['64', 110], ['65', 110], ['66', 110], ['68', 95], ['71', 116], ['72', 116], ['73', 116], ['74', 116], ['75', 116], ['76', 116], ['77', 116], ['78', 116], ['79', 116], ['80', 116], ['81', 116], ['82', 116], ['83', 116], ['84', 116]]
 specials = {"de-livechat": 5, "ver-anime": 8, "watch-dragonball": 8, "narutowire": 10, "dbzepisodeorg": 10, "animelinkz": 20, "kiiiikiii": 21, "soccerjumbo": 21, "vipstand": 21, "cricket365live": 21, "pokemonepisodeorg": 22, "watchanimeonn": 22, "leeplarp": 27, "animeultimacom": 34, "rgsmotrisport": 51, "cricvid-hitcric-": 51, "tvtvanimefreak": 54, "stream2watch3": 56, "mitvcanal": 56, "sport24lt": 56, "ttvsports": 56, "eafangames": 56, "myfoxdfw": 67, "peliculas-flv": 69, "narutochatt": 70}
 
-def getServer(group):
-	'''Return server number'''
-	if group in specials.keys():
-		return specials[group]
-	group = re.sub("-|_", 'q', group)
-	wt, gw = sum([n[1] for n in weights]), 0
-	num1 = 1000 if len(group) < 7 else max(int(group[6:9], 36), 1000)
-	num2 = (int(group[:5],36) % num1) / num1
-	for i, v in weights:
-		gw += v / wt
-		if gw >= num2:
-			return i
-	return None
-
 AUTH_RE = re.compile("auth\.chatango\.com ?= ?(.*?);")
 POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([0-9a-fA-F]{2,8})=\"([0-9a-zA-Z]*)\">)?")
 XML_TAG_RE = re.compile("(<.*?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
 
-class Generate:
+class _Generate:
 	def uid():
 		'''Generate user ID'''
 		return str(int(random.randrange(10 ** 15, (10 ** 16) - 1)))
@@ -59,20 +45,20 @@ class Generate:
 			n = "3452"
 		return "".join(map(lambda i,v: str(int(i) + int(v))[-1],
 					   n, str(uid)[4:8]))
+	def serverNum(group):
+		'''Return server number'''
+		if group in specials.keys():
+			return specials[group]
+		group = re.sub("-|_", 'q', group)
+		wt, gw = sum([n[1] for n in weights]), 0
+		num1 = 1000 if len(group) < 7 else max(int(group[6:9], 36), 1000)
+		num2 = (int(group[:5],36) % num1) / num1
+		for i, v in weights:
+			gw += v / wt
+			if gw >= num2:
+				return i
+		return None
 
-	def auth(user, password):
-		'''Generate auth token for PMs'''
-		auth = urllib.request.urlopen("http://chatango.com/login",
-			urllib.parse.urlencode({
-			"user_id": user,
-			"password": password,
-			"storecookie": "on",
-			"checkerrors": "yes" }).encode()
-			).getheader("Set-Cookie")
-		try:
-			return re.search("auth.chatango.com=(.*?);", auth).group(1)
-		except:
-			return None
 
 HTML_CODES = [
 	("&#39;","'"),
@@ -144,7 +130,7 @@ def _formatMsg(raw, bori):
 		if raw[2] != "":
 			user = '#' + raw[2].lower()
 		else:
-			user = "!anon" + Generate.aid(post.nColor, post.uid)
+			user = "!anon" + _Generate.aid(post.nColor, post.uid)
 		post.nColor = ''
 	post.user = user
 	channel = (int(raw[7]) >> 8) & 15		#TODO mod channel on 2**15
@@ -219,9 +205,8 @@ class _Connection:
 		self._clearBuffers()
 
 		#account information
-		self._uid = Generate.uid()
+		self._uid = _Generate.uid()
 		self._anon = None
-		self._uid = Generate.uid()
 		self._premium = False
 		#formatting
 		self._nColor = None	
@@ -297,7 +282,7 @@ class _Connection:
 		self._reconnecting = True
 		if self.connected:
 			self._disconnect()
-		self._uid = Generate.uid()
+		self._uid = _Generate.uid()
 		self._connect()
 		self._reconnecting = False
 
@@ -362,7 +347,7 @@ class Group(_Connection):
 
 	def __init__(self, room, manager, port = None):
 		super(Group,self).__init__(manager, port or 443)
-		self._server = getServer(room)
+		self._server = _Generate.serverNum(room)
 		#user information
 		self._name = room
 		self._owner = None
@@ -428,7 +413,7 @@ class Group(_Connection):
 	def _recv_ok(self, args):
 		'''Acknowledgement from server that login succeeded'''
 		if args[2] == 'C' and (not self._manager.password) and (not self._manager.username):
-			self._anon = "!anon" + Generate.aid(args[4], args[1])
+			self._anon = "!anon" + _Generate.aid(args[4], args[1])
 			self._nColor = "CCC"
 		elif args[2] == 'C' and (not self._manager.password):
 			self._sendCommand("blogin", self._manager.username)
@@ -716,7 +701,7 @@ class PM(_Connection):
 	def _connect(self):
 		'''Connect to PM server'''
 		self._clearBuffers()
-		self._auid = Generate.auth(self._manager.username, self._manager.password)
+		self._auid = self._manager.pmAuth()
 		if self._auid == None:
 			self._callEvent("onLoginFail")
 			return
@@ -935,6 +920,42 @@ class Manager:
 		for group in self._groups:
 			if group.name == groupName:
 				return group
+
+	def uploadAvatar(self, path):
+		'''Upload an avatar with path `path`'''
+		try:
+			filepath = open(path,"br")
+			extension = path[path.rfind('.')+1:].lower()
+			if extension == "jpg": extension = "jpeg"
+			elif extension not in ["png","jpeg"]:
+				return False
+			requests.post('http://chatango.com/updateprofile', files={
+				 "u":		(None,self.username)
+				,"p":		(None,self.password)
+				,"auth":	(None,"pwd")
+				,"arch":	(None,"h5")
+				,"src":		(None,"group")
+				,"action":	(None,"fullpic")
+				,"Filedata":	(os.path.basename(path), filepath,
+					'image/%s'%extension,{})
+			})
+			return True
+		except FileNotFoundError:
+			return False
+
+	def pmAuth(self):
+		'''Request auth cookie for PMs'''
+		login = requests.post("http://chatango.com/login", data={
+			 "user_id": self.username
+			,"password": self.password
+			,"storecookie": "on"
+			,"checkerrors": "yes" 
+			})
+		try:
+			auth = login.headers.get("Set-Cookie")
+			return re.search("auth.chatango.com=(.*?);", auth).group(1)
+		except:
+			return None
 	
 	###################################
 	#	Events

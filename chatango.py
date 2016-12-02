@@ -583,12 +583,20 @@ def unignore(parent,person,*args):
 def listkeys(parent,*args):
 	'''Get list of the ChatangoOverlay's keys'''
 	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-	if chatOverlay:
-		keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
-		keysList.addKeys({
-			"enter": lambda x: -1
-		})
-		return keysList
+	if not chatOverlay: return
+	keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
+	keysList.addKeys({
+		"enter": lambda x: -1
+	})
+	return keysList
+
+@client.command("avatar")
+def avatar(parent,*args):
+	'''Upload the file as the user avatar'''
+	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+	if not chatOverlay: return
+	path = os.path.expanduser(' '.join(args))
+	client.dbmsg(chatOverlay[0].bot.uploadAvatar(path))
 
 #-------------------------------------------------------------------------------------------------------
 def runClient(main,creds):
