@@ -77,6 +77,8 @@ def readFromFile(readInto, filePath = SAVE_PATH):
 				readInto[i] = jsonData.get(i)
 			#read into safe credentials regardless
 			creds_entire[i] = jsonData.get(i)
+	except FileNotFoundError:
+		pass
 	except Exception:
 		raise IOError("Error reading creds! Aborting...")
 def sendToFile(writeFrom,filePath = SAVE_PATH):
