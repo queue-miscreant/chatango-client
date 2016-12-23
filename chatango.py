@@ -234,7 +234,7 @@ class ChatBot(ch.Manager):
 		def reconnect():
 			self.mainOverlay.msgDelete(message)
 			self.reconnect()
-		client.BlockingOverlay(self.mainOverlay.parent,reconnect).add()
+		client.BlockingOverlay(self.mainOverlay.parent,reconnect,"connect").add()
 
 
 #OVERLAY EXTENSION--------------------------------------------------------------------------------------
@@ -331,7 +331,7 @@ class ChatangoOverlay(client.MainOverlay):
 		def select(me):
 			global visited_links
 			if not me.list: return
-			current = linksList[-me.it-1] #this enforces the wanted link is selected
+			current = linksList[len(me.list)-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			if current not in visited_links:
 				visited_links.append(current)

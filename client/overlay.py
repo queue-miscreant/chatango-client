@@ -590,9 +590,17 @@ class ConfirmOverlay(OverlayBase):
 class BlockingOverlay(OverlayBase):
 	'''Block until any input is received'''
 	replace = False
-	def __init__(self,parent,confirmfunc):
+	def __init__(self,parent,confirmfunc,tag=""):
 		super(BlockingOverlay, self).__init__(parent)
-		self._keys.update({0: lambda x: confirmfunc() or self.parent.releaseBlurb() or -1})
+		self.tag = tag
+		self._keys.update({0: lambda x: confirmfunc() or -1})
+
+	def add(self):
+		if self.tag:
+			for i in getOverlaysByClassName(type(self)):
+				#don't add overlays with the same tag
+				if i.tag == self.tag: return
+		super(BlockingOverlay, self).__init__(parent)
 
 class MainOverlay(TextOverlay):
 	'''
