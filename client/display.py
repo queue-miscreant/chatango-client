@@ -73,7 +73,7 @@ class DisplayException(Exception):
 	'''Exception for client.display'''
 	pass
 
-def defColor(fore, back = "none"):
+def defColor(fore,bold = False,back = "none"):
 	'''Define a new foreground/background pair, with optional intense color'''
 	global _COLORS
 	pair = "\x1b[3"
@@ -81,6 +81,7 @@ def defColor(fore, back = "none"):
 		pair += "8;5;%d" % fore;
 	else:
 		pair += str(_COLOR_NAMES.index(fore));
+		pair += bold and ";1" or ";22"
 	if isinstance(back,int):
 		pair += ";48;5;%d" % back;
 	else:
@@ -271,7 +272,7 @@ class Coloring:
 		if isinstance(fallback, int):
 			getLast = True
 
-		for find in regex.finditer(self._str+' '):
+		for find in regex.finditer(self._str):
 			begin = find.start(group)
 			end = find.end(group)
 			#insert the color

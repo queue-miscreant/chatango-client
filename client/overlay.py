@@ -6,10 +6,9 @@ system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different stdout printing calls.
 '''
-#TODO	dbmsg that turns off cbreak mode and back on
-#TODO	overlay-specific lookup tables
-#TODO	on instantiation of Main, link it to all onTrueFireMessage
-#		This just means having a variable under the class
+#TODO	list of suggested colors (and color sliders) (HSV like in ?)
+#		https://puu.sh/tinO0/fdabcd7c43.png
+#TODO	tabs render improperly depending on cursor position
 try:
 	import curses
 except ImportError:
@@ -27,7 +26,7 @@ from .display import *
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"InputOverlay","ConfirmOverlay","BlockingOverlay","MainOverlay"
-			,"onDone"]
+			,"onDone","mouseState","override"]
 
 main_instance = None
 lasterr = None
@@ -68,6 +67,19 @@ for i in range(32):
 	_VALID_KEYNAMES["^%s"%chr(i+64).lower()] = i
 for i in range(32,256):
 	_VALID_KEYNAMES[chr(i)] = i
+
+#MOUSE BUTTONS
+_MOUSE_BUTTONS = {
+	"left":			curses.BUTTON1_PRESSED
+	,"middle":		curses.BUTTON2_PRESSED
+	,"right":		curses.BUTTON3_PRESSED
+	,"wheel-up":	curses.BUTTON4_PRESSED
+	,"wheel-down":	2097152
+}
+_MOUSE_MASK = 0
+for i in _MOUSE_BUTTONS.values():
+	_MOUSE_MASK |= i
+
 del i
 
 class KeyException(Exception):
@@ -82,6 +94,10 @@ def cloneKey(fro,to):
 			to = _VALID_KEYNAMES[to]
 	except: raise KeyException("%s or %s is an invalid key name"%(fro,to))
 	_KEY_LUT[fro] = to
+
+def mouseState(state):
+	'''Turn the mouse on or off'''
+	return curses.mousemask(state and _MOUSE_MASK)
 
 #EXTENDABLE CONTAINERS----------------------------------------------------------
 _commands = {}
@@ -145,14 +161,20 @@ def soundBell():
 	'''Sound console bell. Just runs `print("\a",end="")`'''
 	print("\a",end="")
 
-#please don't need these
 quitlambda = lambda x: -1
 def staticize(func,*args):
 	'''Staticizes a function and its arguments into a function with one argument.'''
-	def ret(garbage):			#garbage would be a list of characters
+	def ret(*garbage):			#garbage args
 		return func(*args)
 	ret.__doc__ = func.__doc__	#preserve documentation text
 	return ret
+def override(func,ret=0):
+	'''Create a new function that returns `ret`. Use to override firing _post'''
+	def retfunc(*args):
+		func(*args)
+		return ret
+	retfunc.__doc__ = func.__doc__	#preserve documentation text
+	return retfunc
 
 class Box:
 	'''
@@ -198,8 +220,10 @@ class OverlayBase:
 		self._keys = {
 			27:	self._callalt
 			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1
+			,curses.KEY_MOUSE:	self._callmouse
 		}
 		self._altkeys =	{None: lambda: -1}
+		self._mouse = {}
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
 		ret = []
@@ -221,6 +245,12 @@ class OverlayBase:
 	def _callalt(self,chars):
 		'''Run a alt-key's callback'''
 		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
+	def _callmouse(self,chars):
+		'''Run a mouse's callback'''
+		try:
+			_,x,y,_,state = curses.getmouse()
+			return state in self._mouse and self._mouse[state](x,y)
+		except curses.error: pass
 	def _post(self):
 		'''
 		Run after a keypress if the associated function returns boolean false
@@ -237,12 +267,13 @@ class OverlayBase:
 		try:
 			char = _KEY_LUT[chars[0]]
 		except: char = chars[0]
-		if char in self._keys:	#ignore the command character and trailing -1
+			
+		#ignore the command character and trailing -1
+		#second clause ignores heading newlines
+		if (char in self._keys) and (char == 27 or len(chars) <= 2 or char > 255):
 			return self._keys[char](chars[1:-1] or [None]) or self._post()
-		elif char in range(32,255) and -1 in self._keys:	#ignore the trailing -1
+		if -1 in self._keys and (char in (9,10,13) or char in range(32,255)):
 			return self._keys[-1](chars[:-1]) or self._post()
-		elif 0 in self._keys:
-			return self._keys[0](chars[:-1]) or self._post()
 	def resize(self,newx,newy):
 		'''Overridable function. On resize event, all added overlays have this called'''
 		pass
@@ -274,10 +305,20 @@ class OverlayBase:
 							self._altkeys[i] = lambda: j(self)
 						continue
 					else: raise KeyException("key alt-{} invalid".format(i))
+				elif not i.lower().find("mouse-"):
+					i = i[6:]
+					if i in _MOUSE_BUTTONS:
+						i = _MOUSE_BUTTONS[i]
+						if areMethods:
+							self._mouse[i] = j
+						else:
+							self._mouse[i] = lambda x,y: j(self,x,y)
+						continue
+					else: raise KeyException("key mouse-{} invalid".format(i))
 				else:
 					try:
 						i = _VALID_KEYNAMES[i]
-					except: raise KeyException("key {} not defined".format(i))
+					except: raise KeyException("key {} invalid".format(i))
 			if areMethods:
 				self._keys[i] = staticize(j)
 			else:
@@ -317,14 +358,14 @@ class TextOverlay(OverlayBase):
 		Add key definitions for standard controls for History `history`
 		and scrollable `scroll`
 		'''
-		nexthist = lambda x: scroll.setstr(history.nexthist())
-		prevhist = lambda x: scroll.setstr(history.prevhist())
+		nexthist = lambda: scroll.setstr(history.nexthist())
+		prevhist = lambda: scroll.setstr(history.prevhist())
 		#preserve docstrings for getKeynames
 		nexthist.__doc__ = history.nexthist.__doc__
 		prevhist.__doc__ = history.prevhist.__doc__
 		self._keys.update({
-			curses.KEY_UP:		nexthist
-			,curses.KEY_DOWN:	prevhist
+			curses.KEY_UP:		staticize(nexthist)
+			,curses.KEY_DOWN:	staticize(prevhist)
 		})
 
 class ListOverlay(OverlayBase,Box):
@@ -375,7 +416,7 @@ class ListOverlay(OverlayBase,Box):
 			row = (len(value) > maxx) and value[:max(half,1)] + "..." + value[min(-half+3,-1):] or value
 			row = Coloring(self.box_just(row))
 			if value and self._drawOther is not None:
-				self._drawOther(row,i+partition)
+				self._drawOther(row,i+partition,len(self.list))
 			if i+partition == self.it:
 				row.addGlobalEffect(0)
 			lines[i+1] = self.box_noform(format(row))
@@ -570,10 +611,11 @@ class EscapeOverlay(OverlayBase):
 		super(EscapeOverlay, self).__init__(parent)
 		self._keys.update({
 			-1:		quitlambda
-			,10:		quitlambda
-			,ord('n'):	lambda x: scroll.append('\n') or -1
-			,ord('\\'):	lambda x: scroll.append('\\') or -1
-			,ord('t'):	lambda x: scroll.append('\t') or -1
+			,9:		override(staticize(scroll.append,'\t'),-1)
+			,10:	override(staticize(scroll.append,'\n'),-1)
+			,ord('n'):	override(staticize(scroll.append,'\n'),-1)
+			,ord('\\'):	override(staticize(scroll.append,'\\'),-1)
+			,ord('t'):	override(staticize(scroll.append,'\t'),-1)
 		})
 
 class ConfirmOverlay(OverlayBase):
@@ -581,10 +623,13 @@ class ConfirmOverlay(OverlayBase):
 	replace = False
 	def __init__(self,parent,confirmfunc):
 		super(ConfirmOverlay, self).__init__(parent)
+		def confirmed(*args):
+			confirmfunc()
+			self.parent.releaseBlurb()
+			return -1
 		self._keys.update( #run these in order
-			#TODO remove hack
-			{ord('y'):	lambda x: confirmfunc() or self.parent.releaseBlurb() or -1
-			,ord('n'):	lambda x: self.parent.releaseBlurb() or -1
+			{ord('y'):	confirmed
+			,ord('n'):	override(staticize(self.parent.releaseBlurb),-1)
 		})
 
 class BlockingOverlay(OverlayBase):
@@ -593,14 +638,14 @@ class BlockingOverlay(OverlayBase):
 	def __init__(self,parent,confirmfunc,tag=""):
 		super(BlockingOverlay, self).__init__(parent)
 		self.tag = tag
-		self._keys.update({0: lambda x: confirmfunc() or -1})
+		self._keys.update({-1: override(staticize(confirmfunc),-1)})
 
 	def add(self):
 		if self.tag:
-			for i in getOverlaysByClassName(type(self)):
+			for i in self.parent.getOverlaysByClassName(type(self)):
 				#don't add overlays with the same tag
 				if i.tag == self.tag: return
-		super(BlockingOverlay, self).__init__(parent)
+		super(BlockingOverlay, self).add()
 
 class MainOverlay(TextOverlay):
 	'''
@@ -612,6 +657,7 @@ class MainOverlay(TextOverlay):
 	#sequence between messages to draw reversed
 	INDENT = "    "
 	_msgSplit = '\x1b' 
+	_monitors = {}
 	def __init__(self,parent,pushtimes = True):
 		super(MainOverlay, self).__init__(parent)
 		self.canselect = True
@@ -623,9 +669,18 @@ class MainOverlay(TextOverlay):
 			ord('\\'):		staticize(self._replaceback)
 		})
 		self._altkeys.update({
-			ord('k'):		self.selectup		#muh vim t. me
+			ord('k'):		self.selectup
 			,ord('j'):		self.selectdown
 		})
+		self._mouse.update({
+			_MOUSE_BUTTONS["wheel-up"]:		staticize(self.selectup)
+			,_MOUSE_BUTTONS["wheel-down"]:	staticize(self.selectdown)
+		})
+		examiners = self._monitors.get(type(self).__name__)
+		if examiners is not None:
+			self._examine = examiners
+		else:
+			self._examine = []
 	def __call__(self,lines):
 		'''Display messages'''
 		select = SELECT_AND_MOVE
@@ -704,10 +759,7 @@ class MainOverlay(TextOverlay):
 				self.msgTime(time.time())
 				i=0
 	def _replaceback(self):
-		'''
-		Add a newline if the next character is n, or a tab
-		if the next character is t
-		'''
+		'''Add a newline if the next character is n, or a tab if the next character is t'''
 		EscapeOverlay(self.parent,self.text).add()
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _getnextmessage(self,step):
@@ -779,6 +831,17 @@ class MainOverlay(TextOverlay):
 		'''
 		return False
 	#FRONTENDS--------------------------------------------------
+	@staticmethod
+	def examineMessage(className):
+		'''
+		Wrapper for a function that monitors messages. Such function may perform some
+		effect such as pushing a new message or alerting the user
+		'''
+		def wrap(func):
+			if MainOverlay._monitors.get(className) is None:
+				MainOverlay._monitors[className] = []
+			MainOverlay._monitors[className].append(func)
+		return wrap
 	def isselecting(self):
 		'''Whether a message is selected or not'''
 		return bool(self._selector)
@@ -845,7 +908,6 @@ class MainOverlay(TextOverlay):
 			nummsg += 1
 		self._lines = newlines
 		self.parent.display()
-
 	def msgSystem(self, base):
 		'''System message'''
 		base = Coloring(base)
@@ -857,14 +919,16 @@ class MainOverlay(TextOverlay):
 		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
 		self.msgSystem(predicate+dtime)
 	def msgPost(self,post,*args):
-		'''Parse a message and apply colorizeMessage'''
+		'''Parse a message, apply colorizeMessage, and append'''
 		post = Coloring(post)
 		self.colorizeMessage(post,*args)
 		ret = self._append(post,list(args))
+		for i in self._examine:
+			i(self,post,*args)
 		self.parent.display()
 		return ret
 	def msgPrepend(self,post,*args):
-		'''Parse a message and apply colorizeMessage'''
+		'''Parse a message, apply colorizeMessage, and prepend'''
 		post = Coloring(post)
 		self.colorizeMessage(post,*args)
 		ret = self._prepend(post,list(args))

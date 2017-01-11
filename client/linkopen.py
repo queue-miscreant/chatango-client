@@ -17,7 +17,7 @@ __all__ =	["LINK_RE","getLinks","getDefaults","parseLinks","clearLinks"
 			,"opener","open_link","daemonize","images","videos","browser"]
 
 #canonical link regex
-LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)[`\\s]")
+LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
 _POST_FORMAT_RE = re.compile(r"\.(\w+)[&/\?]?")
 IMG_PATH = "feh"
 MPV_PATH = "mpv"

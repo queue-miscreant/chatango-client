@@ -279,6 +279,7 @@ class _Connection:
 
 	def reconnect(self):
 		'''Reconnect'''
+		if self._reconnecting: return
 		self._reconnecting = True
 		if self.connected:
 			self._disconnect()
@@ -503,6 +504,8 @@ class Group(_Connection):
 	def _recv_i(self,args):
 		'''Command fired on historical message'''
 		post = _formatMsg(args, 'i')
+		if post.time > self._last:
+			self._last = post.time
 		self._history.append(post)
 
 	def _recv_gotmore(self, args):

@@ -15,7 +15,6 @@ Options:
 	-nc:			No custom script import
 	--help:			Display this page
 '''
-#TODO	Modifiable options like the threshold to ask to open links
 
 import ch
 import client
@@ -34,6 +33,9 @@ creds_readwrite = {
 	,"passwd":	3
 	,"room":	3
 	,"formatting":	3
+	,"options":	3
+	,"ignores":	1
+	,"filtered_channels":	3
 }
 SAVE_PATH = os.path.expanduser("~/.chatango_creds")
 #constants for chatango
@@ -48,61 +50,30 @@ FONT_FACES = \
 	,"Times New Roman"
 	,"Typewriter" ]
 FONT_SIZES = [9,10,11,12,13,14]
+OPTION_NAMES = \
+	["Mouse:"
+	,"Multiple link open warning threshold:"
+	,"Save ignore list:"
+	,"Console bell on reply:"
+	,"HTML colors:"
+	,"Colorize anon names:"]
+DEFAULT_OPTIONS = \
+	{"mouse": 		False
+	,"linkwarn":	2
+	,"ignoresave":	False
+	,"bell":		True
+	,"htmlcolor":	True
+	,"anoncolor":	False}
+
 DEFAULT_FORMATTING = \
 	["DD9211"	#font color
 	,"232323"	#name color
 	,"0"		#font face
 	,12]		#font size
 
-#ignore list
-#needed here so that commands can access it
-ignores = []
-filtered_channels = \
-	[0	#white
-	,0	#red
-	,0	#blue
-	,0] #both
-visited_links = []
-dim_for_intense = False
-
-def readFromFile(readInto, filePath = SAVE_PATH):
-	'''Read credentials from file'''
-	global creds_entire
-	try:
-		jsonInput = open(filePath)
-		jsonData = json.loads(jsonInput.read())
-		jsonInput.close()
-		for i,bit in creds_readwrite.items():
-			if bit&1:
-				readInto[i] = jsonData.get(i)
-			#read into safe credentials regardless
-			creds_entire[i] = jsonData.get(i)
-	except FileNotFoundError:
-		pass
-	except Exception:
-		raise IOError("Error reading creds! Aborting...")
-def sendToFile(writeFrom,filePath = SAVE_PATH):
-	'''Write credentials to file'''
-	global creds_entire
-	try:
-		if filePath == "": return
-		jsonData = {}
-		for i,bit in creds_readwrite.items():
-			if bit&2:
-				jsonData[i] = writeFrom[i]
-			else:	#"safe" credentials from last write
-				jsonData[i] = creds_entire[i]
-		encoder = json.JSONEncoder(ensure_ascii=False)
-		out = open(filePath,'w')
-		out.write(encoder.encode(jsonData)) 
-	except Exception:
-		raise IOError("Error writing creds! Aborting...")
-
 def parsePost(post, me, ishistory):
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
-	#sound bell
-	if isreply and not ishistory: client.soundBell()
 	#format as ' user: message' the space is for the channel
 	msg = " {}: {}".format(post.user,post.post)
 	#links
@@ -123,6 +94,12 @@ class ChatBot(ch.Manager):
 		self.joinedGroup = None
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
+		self.visited_links = []
+		#references
+		self.ignores = self.creds["ignores"]
+		self.filtered_channels = self.creds["filtered_channels"]
+		self.options = self.creds["options"]
+
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
 		client.Tokenize('@',self.members)
 	
@@ -159,8 +136,6 @@ class ChatBot(ch.Manager):
 		group.nColor = self.creds["formatting"][1]
 		group.fFace = self.creds["formatting"][2]
 		group.fSize = self.creds["formatting"][3]
-		
-		sendToFile(self.creds)
 	
 	def tryPost(self,text):
 		if self.joinedGroup is None: return
@@ -172,14 +147,13 @@ class ChatBot(ch.Manager):
 		self.setFormatting()
 		self.me = group.username
 		if self.me[0] in "!#": self.me = self.me[1:]
-		self.mainOverlay.parent.updateinfo(None,self.me)
+		self.mainOverlay.parent.updateinfo(None,"{}@{}".format(self.me,group.name))
 		#show last message time
 		self.mainOverlay.msgTime(group.last,"Last message at ")
 		self.mainOverlay.msgTime()
 
 	#on removal from a group
 	def onLeave(self,group):
-		#self.parent.unget()
 		self.stop()
 		
 	#on message
@@ -190,6 +164,9 @@ class ChatBot(ch.Manager):
 		if user not in self.members:
 			self.members.append(user.lower())
 		msg = parsePost(post, self.me, False)
+		#						  isreply		ishistory
+		if self.options["bell"] and msg[2] and not msg[3]:
+			client.soundBell()
 
 		self.members.promote(user.lower())
 		self.mainOverlay.msgPost(*msg)
@@ -237,7 +214,7 @@ class ChatBot(ch.Manager):
 		client.BlockingOverlay(self.mainOverlay.parent,reconnect,"connect").add()
 
 
-#OVERLAY EXTENSION--------------------------------------------------------------------------------------
+#OVERLAY EXTENSION--------------------------------------------------------------
 class ChatangoOverlay(client.MainOverlay):
 	def __init__(self,parent,bot):
 		super(ChatangoOverlay, self).__init__(parent)
@@ -250,10 +227,12 @@ class ChatangoOverlay(client.MainOverlay):
 						,"f3":		self.F3
 						,"f4":		self.F4
 						,"f5":		self.F5
+						,"f12":		self.options
 						,"btab":	self.addignore
 						,"^t":		self.joingroup
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
+#						,"^p":		lambda: client.dbmsg(repr(self.getselected()[0]))
 		},1)	#these are methods, so they're defined on __init__
 
 	def _maxselect(self):
@@ -266,7 +245,6 @@ class ChatangoOverlay(client.MainOverlay):
 			self.parent.newBlurb("Fetching more messages")
 	
 	def openSelectedLinks(self):
-		global visited_links
 		try:
 			message = self.getselected()
 			msg = message[1][0].post+' '
@@ -275,12 +253,12 @@ class ChatangoOverlay(client.MainOverlay):
 				recolor = False
 				for i in alllinks:
 					client.open_link(self.parent,i)
-					if i not in visited_links:
-						visited_links.append(i)
+					if i not in self.bot.visited_links:
+						self.bot.visited_links.append(i)
 						recolor = True
 				if recolor: self.recolorlines()
 					
-			if len(alllinks) > 1:
+			if len(alllinks) >= self.bot.options["linkwarn"]:
 				self.parent.holdBlurb(
 					"Really open {} links? (y/n)".format(len(alllinks)))
 				client.ConfirmOverlay(self.parent, openall).add()
@@ -329,27 +307,25 @@ class ChatangoOverlay(client.MainOverlay):
 
 		#enter key
 		def select(me):
-			global visited_links
 			if not me.list: return
 			current = linksList[len(me.list)-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
-			if current not in visited_links:
-				visited_links.append(current)
+			if current not in self.bot.visited_links:
+				self.bot.visited_links.append(current)
 				self.recolorlines()
 			#exit
 			return -1
 
-		def drawVisited(string,i):
+		def drawVisited(string,i,maxval):
 			linksList = client.getLinks()
-			current = linksList[-i-1] #this enforces the wanted link is selected
-			if current in visited_links:
+			current = linksList[maxval-i-1] #this enforces the wanted link is selected
+			if current in self.bot.visited_links:
 				string.insertColor(0,245)
 
 		box = client.ListOverlay(self.parent,[i.replace("https://","").replace("http://","")
 			for i in reversed(linksList)], drawVisited, client.getDefaults())
-		#TODO better function composition
 		box.addKeys({"enter":select
-					,"tab":lambda x: select(x) and 0})
+					,"tab": client.override(select)})
 		box.add()
 
 	def F3(self):
@@ -364,21 +340,21 @@ class ChatangoOverlay(client.MainOverlay):
 			self.text.append("@%s " % current)
 			return -1
 		def tab(me):
-			global ignores
 			current = me.list[me.it]
 			current = current.split(' ')[0]
-			if current not in ignores:
-				ignores.append(current)
+			if current not in self.bot.ignores:
+				self.bot.ignores.append(current)
 			else:
-				ignores.remove(current)
+
+				self.bot.ignores.remove(current)
 			self.redolines()
 
 		users = self.bot.joinedGroup.userlist
 		dispList = {i:users.count(i) for i in users}
 		dispList = sorted([i+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
-		def drawIgnored(string,i):
+		def drawIgnored(string,i,maxval):
 			selected = dispList[i]
-			if selected.split(' ')[0] not in ignores: return
+			if selected.split(' ')[0] not in self.bot.ignores: return
 			string[:-1]+'i'
 			string.insertColor(-1,1)
 		
@@ -449,12 +425,11 @@ class ChatangoOverlay(client.MainOverlay):
 			self.bot.channel = me.it
 			return -1
 		def ontab(me):
-			global filtered_channels
-			#space only
-			filtered_channels[me.it] = not filtered_channels[me.it]
+			self.bot.filtered_channels[me.it] = \
+				 not self.bot.filtered_channels[me.it]
 			self.redolines()
-		def drawActive(string,i):
-			if filtered_channels[i]: return
+		def drawActive(string,i,maxval):
+			if self.bot.filtered_channels[i]: return
 			col = i and i+256 or 260
 			string.insertColor(-1,col)
 						
@@ -466,16 +441,80 @@ class ChatangoOverlay(client.MainOverlay):
 		box.it = self.bot.channel
 		box.add()
 
+	def options(self):
+		'''Options'''
+		def select(me):
+			if me.it == 0:		#mouse
+				self.bot.options["mouse"] ^= 1
+				client.mouseState(self.bot.options["mouse"])
+				pass
+			elif me.it == 1:	#link opening
+				def update(entry):
+					try:
+						self.bot.options["linkwarn"] = int(entry)
+					except:	pass
+				furtherInput = client.InputOverlay(self.parent, "Warning threshold "+\
+					"for simultaneously opening links")
+				furtherInput.runOnDone(update)
+				furtherInput.add()
+			elif me.it == 2:	#save ignores
+				self.bot.options["ignoresave"] ^= 1
+				if self.bot.options["ignoresave"]:
+					creds_readwrite["ignores"] |= 2
+				else:
+					creds_readwrite["ignores"] &= ~2
+					creds_entire["ignores"].clear()
+			elif me.it == 3:	#bell on reply
+				self.bot.options["bell"] ^= 1
+			elif me.it == 4:	#html colors
+				self.bot.options["htmlcolor"] ^= 1
+				self.recolorlines()
+			elif me.it == 5:	#colored anons
+				self.bot.options["anoncolor"] ^= 1
+				self.recolorlines()
+			
+		def drawOptions(string,i,maxval):
+			if i == 0:		#mouse
+				string[:-1]+(self.bot.options["mouse"] and "y" or "n")
+				string.insertColor(-1,self.bot.options["mouse"] and 2 or 1)
+			elif i == 1:	#link opening
+				numlinks = str(self.bot.options["linkwarn"])
+				startpos = -len(numlinks)
+				string[:startpos]+numlinks
+				string.insertColor(startpos,3)
+			elif i == 2:	#save ignores
+				string[:-1]+(self.bot.options["ignoresave"] and "y" or "n")
+				string.insertColor(-1,self.bot.options["ignoresave"] and 2 or 1)
+			elif i == 3:	#bell on reply
+				string[:-1]+(self.bot.options["bell"] and "y" or "n")
+				string.insertColor(-1,self.bot.options["bell"] and 2 or 1)
+			elif i == 4:
+				string[:-1]+(self.bot.options["htmlcolor"] and "y" or "n")
+				string.insertColor(-1,self.bot.options["htmlcolor"] and 2 or 1)
+			elif i == 5:
+				string[:-1]+(self.bot.options["anoncolor"] and "y" or "n")
+				if (self.bot.options["htmlcolor"]):
+					string.insertColor(-1,self.bot.options["anoncolor"] and 2 or 1)
+				else:
+					string.insertColor(0,245)
+
+		box = client.ListOverlay(self.parent, OPTION_NAMES, drawOptions)
+		box.addKeys({
+			"enter":select
+			,"tab":	select
+			," ":	select
+		})
+		box.add()
+
 	def addignore(self):
 		if self.isselecting():
-			global ignores
 			try:
 				#allmessages contain the colored message and arguments
 				message = self.getselected()
 				name = message[1][0].user
 				if name[0] in "!#": name = name[1:]
-				if name in ignores: return
-				ignores.append(name)
+				if name in self.bot.ignores: return
+				self.bot.ignores.append(name)
 				self.redolines()
 			except: pass
 		return
@@ -487,13 +526,12 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def openlastlink(self):
 		'''Open last link'''
-		global visited_links
 		linksList = client.getLinks()
 		if not linksList: return
 		last = linksList[-1]
 		client.open_link(self.parent,last)
-		if last not in visited_links:
-			visited_links.append(last)
+		if last not in self.bot.visited_links:
+			self.bot.visited_links.append(last)
 			self.recolorlines()
 
 	def joingroup(self):
@@ -505,21 +543,25 @@ class ChatangoOverlay(client.MainOverlay):
 	def filterMessage(self, post, isreply, ishistory):
 		return any((
 				#filtered channels
-				filtered_channels[post.channel]
+				self.bot.filtered_channels[post.channel]
 				#ignored users
-				,post.user.lower() in ignores
+				,post.user.lower() in self.bot.ignores
 		))
 
 	def colorizeMessage(self, msg, post, isreply, ishistory):
 		nameColor = convertTo256(post.nColor)
 		fontColor = convertTo256(post.fColor)
+		if not self.bot.options["htmlcolor"] or \
+			(self.bot.options["anoncolor"] and post.user[0] in "#!"):
+			nameColor = getColor(post.user) + 261
+			fontColor = getColor(post.user) + 261
 
 		#greentext, font color
 		textColor = lambda x: x[0] == ">" and 2 or fontColor
 		msg.colorByRegex(LINE_RE, textColor, group = 3)
 
 		#links in white
-		linkColor = lambda x: (x not in visited_links) and client.rawNum(0) or 245
+		linkColor = lambda x: (x not in self.bot.visited_links) and client.rawNum(0) or 245
 		msg.colorByRegex(client.LINK_RE, linkColor, fontColor, 1)
 
 		#underline quotes
@@ -536,11 +578,11 @@ class ChatangoOverlay(client.MainOverlay):
 		#channel
 		msg.insertColor(0,post.channel+256)
 
-LINE_RE = re.compile(r"^( [!#]?\w+?: )?(@\w* )*(.+)$",re.MULTILINE)
+LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$",re.MULTILINE)
 REPLY_RE = re.compile(r"@\w+?\b")
 QUOTE_RE = re.compile(r"`[^`]+`")
 
-client.def256colors()				#0-255: regular colors
+client.def256colors()				#0-255: 256 colors
 client.defColor("none")				#256:	blank channel
 client.defColor("red","red")		#257:	red channel
 client.defColor("blue","blue")		#258:	blue channel
@@ -557,27 +599,54 @@ def convertTo256(string):
 		return client.rawNum(0)
 	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
 
-#COMMANDS-----------------------------------------------------------------------------------------------
+#Non-256 colors
+ordering = \
+	("blue"
+	,"cyan"
+	,"magenta"
+	,"red"
+	,"yellow")
+for i in range(10):
+	client.defColor(ordering[i%5],i//5) #261-273: legacy
+del ordering
+client.defColor("green",True)
+client.defColor("green")
+#color by user's name
+def getColor(name,init = 6,split = 109,rot = 6):
+	if name[0] in "#!": name = name[1:]
+	total = init
+	for i in name:
+		n = ord(i)
+		total ^= (n > split) and n or ~n
+	return (total+rot)%11
+
+#COMMANDS-----------------------------------------------------------------------
 @client.command("ignore")
 def ignore(parent,person,*args):
-	global ignores
+	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+	if not chatOverlay: return
+	chatbot = chatOverlay[-1].bot
+
 	if '@' == person[0]: person = person[1:]
-	if person in ignores: return
-	ignores.append(person)
+	if person in chatbot.ignores: return
+	chatbot.ignores.append(person)
 	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
 	if chatOverlay: chatOverlay[-1].redolines()
 
 @client.command("unignore")
 def unignore(parent,person,*args):
-	global ignores
+	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+	if not chatOverlay: return
+	chatbot = chatOverlay[-1].bot
+
 	if '@' == person[0]: person = person[1:]
 	if person == "all" or person == "everyone":
-		ignores.clear()
+		chatbot.ignores.clear()
 		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
 		if chatOverlay: chatOverlay[-1].redolines()
 		return
-	if person not in ignores: return
-	ignores.remove(person)
+	if person not in chatbot.ignores: return
+	chatbot.ignores.remove(person)
 	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
 	if chatOverlay: chatOverlay[-1].redolines()
 
@@ -586,6 +655,7 @@ def listkeys(parent,*args):
 	'''Get list of the ChatangoOverlay's keys'''
 	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
 	if not chatOverlay: return
+	client.dbmsg(dir(chatOverlay[-1]))
 	keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
 	keysList.addKeys({
 		"enter": lambda x: -1
@@ -598,9 +668,8 @@ def avatar(parent,*args):
 	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
 	if not chatOverlay: return
 	path = os.path.expanduser(' '.join(args))
-	client.dbmsg(chatOverlay[0].bot.uploadAvatar(path))
 
-#-------------------------------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 def runClient(main,creds):
 	#fill in credential holes
 	for num,i in enumerate(["user","passwd","room"]):
@@ -622,6 +691,21 @@ def runClient(main,creds):
 		for i in ["fc","nc","ff","fz"]:
 			new.append(creds["formatting"][i])
 		creds["formatting"] = new
+
+	#ignores hole
+	if creds.get("ignores") is None:
+		creds["ignores"] = []	#initialize it
+	#filtered streams
+	if creds.get("filtered_channels") is None:
+		creds["filtered_channels"] = [0,0,0,0]
+	#options
+	if creds.get("options") is None:
+		creds["options"] = {}
+	for i in DEFAULT_OPTIONS:
+		if creds["options"].get(i) is None:
+			creds["options"][i] = DEFAULT_OPTIONS[i]
+
+	client.mouseState(creds["options"]["mouse"])
 
 	#initialize chat bot
 	chatbot = ChatBot(creds,main)
@@ -683,7 +767,24 @@ if __name__ == "__main__":
 	if groupArgFlag:
 		raise Exception("Improper argument formatting: -g without argument")
 
-	readFromFile(newCreds)
+	try:
+		jsonInput = open(SAVE_PATH)
+		jsonData = json.loads(jsonInput.read())
+		jsonInput.close()
+		for i,bit in creds_readwrite.items():
+			if bit&1:
+				newCreds[i] = jsonData.get(i)
+			#read into safe credentials regardless
+			creds_entire[i] = jsonData.get(i)
+	except (FileNotFoundError, json.decoder.JSONDecodeError):
+		pass
+	except Exception as exc:
+		raise IOError("Error reading creds! Aborting...") from exc
+
+	#save ignores
+	if newCreds.get("options"):
+		if newCreds["options"]["ignoresave"]:
+			creds_readwrite["ignores"] |= 2
 
 	if importCustom:
 		try:
@@ -691,3 +792,19 @@ if __name__ == "__main__":
 		except ImportError as exc: pass
 	#start
 	client.start(runClient,newCreds)
+
+	#save
+	try:
+		jsonData = {}
+		for i,bit in creds_readwrite.items():
+			if bit&2:
+				jsonData[i] = newCreds[i]
+			else:	#"safe" credentials from last write
+				jsonData[i] = creds_entire[i]
+		encoder = json.JSONEncoder(ensure_ascii=False)
+		with open(SAVE_PATH,'w') as out:
+			out.write(encoder.encode(jsonData)) 
+	except KeyError:
+		pass
+	except Exception as exc:
+		raise IOError("Error writing creds!") from exc
