@@ -9,13 +9,14 @@ generic string containers.
 #		to fix, display must be from the right side,rather than the left
 #		we still have to accumulate string length...
 #		maybe just measure display as both distance and columns  <- this
+#TODO	tabs render improperly depending on cursor position
 import re
 from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
-			,"SELECT_AND_MOVE","dbmsg","rawNum","strlen","getColor"
-			,"Coloring","Scrollable","Tokenize"]
+			,"_COLORS","SELECT_AND_MOVE","dbmsg","def256colors","getColor","rawNum"
+			,"strlen","Coloring","Scrollable","Tokenize"]
 
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
@@ -73,7 +74,7 @@ class DisplayException(Exception):
 	'''Exception for client.display'''
 	pass
 
-def defColor(fore,bold = False,back = "none"):
+def defColor(fore,back = "none",intense = False):
 	'''Define a new foreground/background pair, with optional intense color'''
 	global _COLORS
 	pair = "\x1b[3"
@@ -81,7 +82,7 @@ def defColor(fore,bold = False,back = "none"):
 		pair += "8;5;%d" % fore;
 	else:
 		pair += str(_COLOR_NAMES.index(fore));
-		pair += bold and ";1" or ";22"
+		pair += intense and ";1" or ";22"
 	if isinstance(back,int):
 		pair += ";48;5;%d" % back;
 	else:
@@ -207,7 +208,11 @@ class Coloring:
 		Insert an effect at _str[start:end]
 		formatting must be a number corresponding to an effect
 		'''
+		if start < 0: start = len(self._str) + start
+		if end < 0: end = len(self._str) + end
+		if start > end and not end: end = len(self._str) #shortcut
 		if start >= end: return
+
 		effect = 1 << formatting
 		if start > self._maxpos:
 			self._positions.append(start)

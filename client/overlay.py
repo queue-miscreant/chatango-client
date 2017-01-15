@@ -6,9 +6,8 @@ system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different stdout printing calls.
 '''
-#TODO	list of suggested colors (and color sliders) (HSV like in ?)
-#		https://puu.sh/tinO0/fdabcd7c43.png
-#TODO	tabs render improperly depending on cursor position
+#TODO:	add mouse support for ListOverlay
+
 try:
 	import curses
 except ImportError:
@@ -25,8 +24,8 @@ from .display import *
 
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
-			,"InputOverlay","ConfirmOverlay","BlockingOverlay","MainOverlay"
-			,"onDone","mouseState","override"]
+			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
+			,"BlockingOverlay","MainOverlay","onDone","mouseState","override"]
 
 main_instance = None
 lasterr = None
@@ -432,7 +431,79 @@ class ListOverlay(OverlayBase,Box):
 		'''Move to mode amt over, with looparound'''
 		self.mode = (self.mode + amt) % self._nummodes
 
-class ColorOverlay(OverlayBase,Box):
+class ColorOverlay(ListOverlay,Box):
+	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
+	replace = True
+	_SELECTIONS = ["normal","shade","tint","grayscale"]
+	_COLOR_LIST = ["red","orange","yellow","light green","green","teal",
+		"cyan","turquoise","blue","purple","magenta","pink","color sliders"]
+
+	def __init__(self,parent,initcolor=None):
+		self._spectrum = self._genspectrum()
+		super(ColorOverlay, self).__init__(parent,self._COLOR_LIST,
+				self.drawColors, self._SELECTIONS)
+		#parse initcolor
+		self.initcolor = [127,127,127]
+		if type(initcolor) is str and len(initcolor) == 6:
+			initcolor = [int(initcolor[i*2:(i+1)*2],16) for i in range(3)]
+		if type(initcolor) is list and len(initcolor) == 3:
+			self.initcolor = initcolor
+			divs = [divmod(i*6/255,1) for i in initcolor]
+			#if each error is low enough to be looked for
+			if all([i[1] < .05 for i in divs]):
+				for i,j in enumerate(self._spectrum[:3]):
+					find = j.index([k[0] for k in divs])
+					if find+1:
+						self.it = find
+						self.mode = i
+						break
+				self.it = len(self._COLOR_LIST)-1
+			else:
+				self.it = len(self._COLOR_LIST)-1
+
+	def drawColors(self,string,i,maxval):
+		#4 is reserved for color sliders
+		if self.parent.two56 and i < 12:
+			color = None
+			which = self._spectrum[self.mode][i]
+			if self.mode == 3: #grayscale
+				color = (which * 2) + 232
+			else:
+				color = sum(map(lambda x,y:x*y,which,[36,6,1])) + 16
+			string.insertColor(-1,self.parent.two56start + color)
+			string.effectRange(-1,0,0)
+
+	def getColor(self,typ = str):
+		which = self._spectrum[self.mode][self.it]
+		color = [int(i*255/5) for i in which] 
+		if typ is str:
+			return ''.join(['%02x' % i for i in color])
+		return color
+
+	def openSliders(self,selectFunction):
+		furtherInput = ColorSliderOverlay(self.parent,self.initcolor)
+		furtherInput.addKeys({"enter": selectFunction})
+		furtherInput.add()
+
+	def _genspectrum(self):
+		init = [0,2]
+		final = [5,2]
+		rspec = [(5,g,0) for g in init]
+		yspec = [(r,5,0) for r in final]
+		cspec = [(0,5,b) for b in init]
+		bspec = [(0,g,5) for g in final]
+		ispec = [(r,0,5) for r in init]
+		mspec = [(5,0,b) for b in final]
+
+		spectrum = [item for i in [rspec,yspec,cspec,bspec,ispec,mspec] for item in i]
+
+		shade = [(max(0,i[0]-1),max(0,i[1]-1),max(0,i[2]-1)) for i in spectrum]
+		tint = [(min(5,i[0]+1),min(5,i[1]+1),min(5,i[2]+1)) for i in spectrum]
+		grayscale = range(12)
+
+		return [spectrum,tint,shade,grayscale]
+
+class ColorSliderOverlay(OverlayBase,Box):
 	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
 	replace = True
 	NAMES = ["Red","Green","Blue"]
@@ -442,7 +513,7 @@ class ColorOverlay(OverlayBase,Box):
 	#		  1	2     3	 4	5 6  7  8
 	setmins(17,8)
 	def __init__(self,parent,initcolor = [127,127,127]):
-		super(ColorOverlay, self).__init__(parent)
+		super(ColorSliderOverlay, self).__init__(parent)
 		#allow setting from hex value
 		if isinstance(initcolor,str):
 			self.setHex(initcolor)
@@ -1031,7 +1102,7 @@ class _Schedule:
 class Main:
 	'''Main class; handles all IO and defers to overlays'''
 	last = 0
-	def __init__(self):
+	def __init__(self,two56colors):
 		self._screen = curses.initscr()		#init screen
 		#sadly, I can't put this in main.loop to make it more readable
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
@@ -1043,6 +1114,15 @@ class Main:
 		#guessed terminal dimensions
 		self.x = 40
 		self.y = 70
+		#256 mode
+		if two56colors:
+			#the start of 256 color definitions
+			self._two56 = True
+			self.two56start = len(_COLORS) + rawNum(0)
+			def256colors()
+		else:
+			self._two56 = False
+		self.two56 = property(lambda: self._two56)
 		#input/display stack
 		self._ins = []
 		self._scrolls = []
@@ -1235,6 +1315,11 @@ class Main:
 		self.updateinput()
 		self.updateinfo()
 		self.display()
+	def toggle256(self,value):
+		self._two56 = value
+		if value and not hasattr(self,"two56start"): #not defined on startup
+			self.two56start = len(_COLORS) + rawNum(0)
+			def256colors()
 	def catcherr(self,func,*args):
 		'''Catch error and end client'''
 		def wrap():
@@ -1247,10 +1332,10 @@ class Main:
 				curses.ungetch('\x1b')
 		return wrap
 
-def start(target,*args):
+def start(target,*args,two56=False):
 	'''Start the client. Run this!'''
 	global main_instance
-	main_instance = Main()
+	main_instance = Main(two56)
 	main_instance.resize()
 	#daemonize functions bot_thread
 	bot_thread = Thread(target=main_instance.catcherr(target,main_instance,*args))

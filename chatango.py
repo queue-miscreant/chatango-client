@@ -15,6 +15,7 @@ Options:
 	-nc:			No custom script import
 	--help:			Display this page
 '''
+#TODO:	add mouse support for ChatangoOverlay
 
 import ch
 import client
@@ -55,6 +56,7 @@ OPTION_NAMES = \
 	,"Multiple link open warning threshold:"
 	,"Save ignore list:"
 	,"Console bell on reply:"
+	,"256 colors:"
 	,"HTML colors:"
 	,"Colorize anon names:"]
 DEFAULT_OPTIONS = \
@@ -62,6 +64,7 @@ DEFAULT_OPTIONS = \
 	,"linkwarn":	2
 	,"ignoresave":	False
 	,"bell":		True
+	,"256color":	True
 	,"htmlcolor":	True
 	,"anoncolor":	False}
 
@@ -127,6 +130,7 @@ class ChatBot(ch.Manager):
 	def changeGroup(self,newgroup):
 		self.leaveGroup(self.joinedGroup)
 		self.creds["room"] = newgroup
+		client.clearLinks()
 		self.joinGroup(newgroup)
 
 	def setFormatting(self):
@@ -319,8 +323,8 @@ class ChatangoOverlay(client.MainOverlay):
 		def drawVisited(string,i,maxval):
 			linksList = client.getLinks()
 			current = linksList[maxval-i-1] #this enforces the wanted link is selected
-			if current in self.bot.visited_links:
-				string.insertColor(0,245)
+			if current in self.bot.visited_links and self.parent.two56:
+				string.insertColor(0,245 + self.parent.two56start)
 
 		box = client.ListOverlay(self.parent,[i.replace("https://","").replace("http://","")
 			for i in reversed(linksList)], drawVisited, client.getDefaults())
@@ -356,7 +360,7 @@ class ChatangoOverlay(client.MainOverlay):
 			selected = dispList[i]
 			if selected.split(' ')[0] not in self.bot.ignores: return
 			string[:-1]+'i'
-			string.insertColor(-1,1)
+			string.insertColor(-1,3)
 		
 		box = client.ListOverlay(self.parent,dispList,drawIgnored)
 		box.addKeys({
@@ -373,19 +377,35 @@ class ChatangoOverlay(client.MainOverlay):
 			furtherInput = None
 			#ask for font color
 			if me.it == 0:
-				def enter(me):
-					formatting[0] = me.getHex()	#this is still by reference
+				def selectSlide(me):
+					formatting[0] = me.getHex()		#this is still by reference
 					self.bot.setFormatting()
 					return -1
+					
+				def enter(me):
+					if me.it < 12:
+						formatting[0] = me.getColor()
+						self.bot.setFormatting()
+						return -1
+					else:
+						me.openSliders(selectSlide)
 
 				furtherInput = client.ColorOverlay(self.parent,formatting[0])
 				furtherInput.addKeys({"enter":enter})
 			#ask for name color
 			elif me.it == 1:
-				def enter(me):
-					formatting[1] = me.getHex()
+				def selectSlide(me):
+					formatting[1] = me.getHex()		#this is still by reference
 					self.bot.setFormatting()
 					return -1
+					
+				def enter(me):
+					if me.it < 12:
+						formatting[1] = me.getColor()
+						self.bot.setFormatting()
+						return -1
+					else:
+						me.openSliders(selectSlide)
 			
 				furtherInput = client.ColorOverlay(self.parent,formatting[1])
 				furtherInput.addKeys({"enter":enter})
@@ -430,7 +450,7 @@ class ChatangoOverlay(client.MainOverlay):
 			self.redolines()
 		def drawActive(string,i,maxval):
 			if self.bot.filtered_channels[i]: return
-			col = i and i+256 or 260
+			col = i and i+12 or 16
 			string.insertColor(-1,col)
 						
 		box = client.ListOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
@@ -466,37 +486,48 @@ class ChatangoOverlay(client.MainOverlay):
 					creds_entire["ignores"].clear()
 			elif me.it == 3:	#bell on reply
 				self.bot.options["bell"] ^= 1
-			elif me.it == 4:	#html colors
+			elif me.it == 4:	#256 colors
+				self.bot.options["256color"] ^= 1
+				self.parent.toggle256(self.bot.options["256color"])
+				self.recolorlines()
+			elif me.it == 5:	#html colors
 				self.bot.options["htmlcolor"] ^= 1
 				self.recolorlines()
-			elif me.it == 5:	#colored anons
+			elif me.it == 6:	#colored anons
 				self.bot.options["anoncolor"] ^= 1
 				self.recolorlines()
 			
 		def drawOptions(string,i,maxval):
+			base256 = self.parent.two56start
 			if i == 0:		#mouse
 				string[:-1]+(self.bot.options["mouse"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["mouse"] and 2 or 1)
+				string.insertColor(-1,self.bot.options["mouse"] and 11 or 3)
 			elif i == 1:	#link opening
 				numlinks = str(self.bot.options["linkwarn"])
 				startpos = -len(numlinks)
 				string[:startpos]+numlinks
-				string.insertColor(startpos,3)
+				string.insertColor(startpos,4)
 			elif i == 2:	#save ignores
 				string[:-1]+(self.bot.options["ignoresave"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["ignoresave"] and 2 or 1)
+				string.insertColor(-1,self.bot.options["ignoresave"] and 11 or 3)
 			elif i == 3:	#bell on reply
 				string[:-1]+(self.bot.options["bell"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["bell"] and 2 or 1)
+				string.insertColor(-1,self.bot.options["bell"] and 11 or 3)
 			elif i == 4:
-				string[:-1]+(self.bot.options["htmlcolor"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["htmlcolor"] and 2 or 1)
+				string[:-1]+(self.bot.options["256color"] and "y" or "n")
+				string.insertColor(-1,self.bot.options["256color"] and 11 or 3)
 			elif i == 5:
+				string[:-1]+(self.bot.options["htmlcolor"] and "y" or "n")
+				if (self.bot.options["256color"]):
+					string.insertColor(-1,self.bot.options["htmlcolor"] and 11 or 3)
+				elif self.parent.two56:
+					string.insertColor(0,245 + base256)
+			elif i == 6:
 				string[:-1]+(self.bot.options["anoncolor"] and "y" or "n")
-				if (self.bot.options["htmlcolor"]):
-					string.insertColor(-1,self.bot.options["anoncolor"] and 2 or 1)
-				else:
-					string.insertColor(0,245)
+				if self.bot.options["256color"] and self.bot.options["htmlcolor"]:
+					string.insertColor(-1,self.bot.options["anoncolor"] and 11 or 3)
+				elif self.parent.two56:
+					string.insertColor(0,245 + base256)
 
 		box = client.ListOverlay(self.parent, OPTION_NAMES, drawOptions)
 		box.addKeys({
@@ -549,20 +580,23 @@ class ChatangoOverlay(client.MainOverlay):
 		))
 
 	def colorizeMessage(self, msg, post, isreply, ishistory):
-		nameColor = convertTo256(post.nColor)
-		fontColor = convertTo256(post.fColor)
-		if not self.bot.options["htmlcolor"] or \
+		base256 = self.parent.two56start
+		nameColor = convertTo256(post.nColor) + base256
+		fontColor = convertTo256(post.fColor) + base256
+		if not self.parent.two56 or not self.bot.options["htmlcolor"] or \
 			(self.bot.options["anoncolor"] and post.user[0] in "#!"):
-			nameColor = getColor(post.user) + 261
-			fontColor = getColor(post.user) + 261
+			nameColor = getColor(post.user)
+			fontColor = getColor(post.user)
 
 		#greentext, font color
-		textColor = lambda x: x[0] == ">" and 2 or fontColor
+		textColor = lambda x: x[0] == '>' and 11 or fontColor
 		msg.colorByRegex(LINE_RE, textColor, group = 3)
 
-		#links in white
-		linkColor = lambda x: (x not in self.bot.visited_links) and client.rawNum(0) or 245
-		msg.colorByRegex(client.LINK_RE, linkColor, fontColor, 1)
+		if self.parent.two56:
+			#links in white
+			linkColor = lambda x: (x in self.bot.visited_links and \
+				 self.parent.two56) and (245 + base256) or client.rawNum(0)
+			msg.colorByRegex(client.LINK_RE, linkColor, fontColor, 1)
 
 		#underline quotes
 		msg.effectByRegex(QUOTE_RE,1)
@@ -576,18 +610,38 @@ class ChatangoOverlay(client.MainOverlay):
 		if isreply:   msg.addGlobalEffect(0,1)
 		if ishistory: msg.addGlobalEffect(1,1)
 		#channel
-		msg.insertColor(0,post.channel+256)
+		msg.insertColor(0,post.channel + 12)
 
 LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$",re.MULTILINE)
 REPLY_RE = re.compile(r"@\w+?\b")
-QUOTE_RE = re.compile(r"`[^`]+`")
+QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
 
-client.def256colors()				#0-255: 256 colors
-client.defColor("none")				#256:	blank channel
-client.defColor("red","red")		#257:	red channel
-client.defColor("blue","blue")		#258:	blue channel
-client.defColor("magenta","magenta")#259:	both channel
-client.defColor("white","white")	#260:	blank channel, visible
+#Non-256 colors
+ordering = \
+	("blue"
+	,"cyan"
+	,"magenta"
+	,"red"
+	,"yellow")
+for i in range(10):
+	client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
+del ordering
+client.defColor("green",intense=True)
+client.defColor("green")			#11:	>
+client.defColor("none")				#12:	blank channel
+client.defColor("red","red")		#13:	red channel
+client.defColor("blue","blue")		#14:	blue channel
+client.defColor("magenta","magenta")#15:	both channel
+client.defColor("white","white")	#16:	blank channel, visible
+
+#color by user's name
+def getColor(name,init = 6,split = 109,rot = 6):
+	if name[0] in "#!": name = name[1:]
+	total = init
+	for i in name:
+		n = ord(i)
+		total ^= (n > split) and n or ~n
+	return (total+rot)%11
 
 def convertTo256(string):
 	if string is None or len(string) < 3 or len(string) == 4:
@@ -598,27 +652,6 @@ def convertTo256(string):
 	if sum(in216) < 2 or sum(in216) > 34:
 		return client.rawNum(0)
 	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
-
-#Non-256 colors
-ordering = \
-	("blue"
-	,"cyan"
-	,"magenta"
-	,"red"
-	,"yellow")
-for i in range(10):
-	client.defColor(ordering[i%5],i//5) #261-273: legacy
-del ordering
-client.defColor("green",True)
-client.defColor("green")
-#color by user's name
-def getColor(name,init = 6,split = 109,rot = 6):
-	if name[0] in "#!": name = name[1:]
-	total = init
-	for i in name:
-		n = ord(i)
-		total ^= (n > split) and n or ~n
-	return (total+rot)%11
 
 #COMMANDS-----------------------------------------------------------------------
 @client.command("ignore")
@@ -781,17 +814,20 @@ if __name__ == "__main__":
 	except Exception as exc:
 		raise IOError("Error reading creds! Aborting...") from exc
 
-	#save ignores
+	#options
+	two56colors = DEFAULT_OPTIONS["256color"]
 	if newCreds.get("options"):
 		if newCreds["options"]["ignoresave"]:
 			creds_readwrite["ignores"] |= 2
+		if newCreds["options"].get("256color") == False:
+			two56colors = False
 
 	if importCustom:
 		try:
 			import custom #custom plugins
 		except ImportError as exc: pass
 	#start
-	client.start(runClient,newCreds)
+	client.start(runClient,newCreds,two56=two56colors)
 
 	#save
 	try:

@@ -7,6 +7,9 @@ fetching history messages among all other necessary functionalities.
 '''
 #TODO	better modtools
 #TODO	property docstrings
+#TODO	I have no idea why, but PMs are failing in all implementations.
+#		Attempts to connect via websockets in a browser console also failed
+#		abandoning attempts to fix for a while
 
 ################################
 #Python Imports
@@ -595,12 +598,12 @@ class Group(_Connection):
 			post = post.replace('\n',"<br/>")
 		if len(post) > self._maxLength:
 			if self._tooBigMessage == BigMessage_Cut:
-				self.sendPost(post[:self._maxLength], html = html)
+				self.sendPost(post[:self._maxLength], channel = channel, html = True)
 			elif self._tooBigMessage == BigMessage_Multiple:
 				while len(post) > 0:
 					sect = post[:self._maxLength]
 					post = post[self._maxLength:]
-					self.sendPost(sect, html = html)
+					self.sendPost(sect, channel, html = True)
 			return
 		self._sendCommand("bm","meme",str(channel),"<n{}/><f x{:02d}{}=\"{}\">{}".format(self.nColor,
 			self.fSize, self.fColor, self.fFace, post))
@@ -708,11 +711,14 @@ class PM(_Connection):
 		if self._auid == None:
 			self._callEvent("onLoginFail")
 			return
-		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.sock.connect((self._PMHost, self._port))
-		self.sock.setblocking(False)
+		try:
+			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			self.sock.connect((self._PMHost, self._port))
+			self.sock.setblocking(False)
+		except socket.gaierror:
+			self._callEvent("onConnectionLost")
 
-		self._sendCommand("tlogin", self._auid, '2')
+		self._sendCommand("tlogin", self._auid, '2', self._uid, firstcmd = True)
 		self._lockWrite(True)
 
 		self._pingTask = Task.addInterval(self._manager, self._manager._pingDelay, self.ping)
