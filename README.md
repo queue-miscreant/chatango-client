@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.2831
+Version 6.28318
 --------------------------
 
 A CLI application written in python with curses input and ANSI escape-colored output.   
@@ -26,13 +26,14 @@ FEATURES:
 * Terminal-resize compatible
 * Tracking images and links posted (F2)
 * View members of a certain room (F3)
-* Alter formatting sent to the chatango (F4)
+* Alter formatting sent to the chatango group (F4)
 * Change channel (F5)
 	* Supports white, red, and blue channels (and the apparently forgotten "both" channel)
 * Colorized output
 	* Color text matching a regex or so
 * Client commands
 	* Type \`help while the input box is empty to display a list of commands implemented
+* Mouse support
 * Chat filters based on message attributes
 
 DEPENDENCIES
@@ -45,6 +46,20 @@ DEPENDENCIES
 
 CHANGELOG
 =========================
+## v6.28318	*2016/1/16*
+* Added mouse support again
+	* Clicking on links in main interface
+	* Automatically supported in ListOverlays
+* Added new color picker
+* Fixed slight error when newlines would begin with an @(member)
+* Moved 256 colors to client/overlay.py so that non-256 mode is supported
+* Added options menu
+	* Turn on mouse, anon colors, link warning threshold, etc
+* Added function to override return value
+	* can be used so that post functions in overlays won't fire
+* Slightly changed how functions are looked up for special keys
+	* Pasting in characters begining with \t or \n should work now
+
 ## v6.2831	*2016/10/16*
 * Reformatted docstrings
 * Objects are now TitleCased

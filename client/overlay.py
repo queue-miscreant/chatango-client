@@ -6,7 +6,6 @@ system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different stdout printing calls.
 '''
-#TODO:	add mouse support for ListOverlay
 
 try:
 	import curses
@@ -25,7 +24,7 @@ from .display import *
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
-			,"BlockingOverlay","MainOverlay","onDone","mouseState","override"]
+			,"BlockingOverlay","MainOverlay","onDone","override"]
 
 main_instance = None
 lasterr = None
@@ -93,10 +92,6 @@ def cloneKey(fro,to):
 			to = _VALID_KEYNAMES[to]
 	except: raise KeyException("%s or %s is an invalid key name"%(fro,to))
 	_KEY_LUT[fro] = to
-
-def mouseState(state):
-	'''Turn the mouse on or off'''
-	return curses.mousemask(state and _MOUSE_MASK)
 
 #EXTENDABLE CONTAINERS----------------------------------------------------------
 _commands = {}
@@ -230,9 +225,11 @@ class OverlayBase:
 			#ignore named characters and escape, they're not verbose
 			if i in ("^[","^i","^j",chr(127)): continue	
 			if j in self._keys:
-				ret.append("{}: {}".format(i,self._keys[j].__doc__))
+				ret.append("{}: {}".format(i,self._keys[j].__doc__.replace(
+					'\n',"").replace('\t',""))
 			if j in self._altkeys:
-				ret.append("a-{}: {}".format(i,self._altkeys[j].__doc__))
+				ret.append("a-{}: {}".format(i,self._altkeys[j].__doc__.replace(
+					'\n',"").replace('\t',""))
 		ret.sort()
 		return ret
 	def __call__(self,lines):
@@ -384,8 +381,8 @@ class ListOverlay(OverlayBase,Box):
 		self._modes = modes
 		self._nummodes = len(modes)
 		self._numentries = len(self.list)
-		self._keys.update({
-			ord('j'):	staticize(self.increment,1) #V I M
+		self._keys.update(
+			{ord('j'):	staticize(self.increment,1) #V I M
 			,ord('k'):	staticize(self.increment,-1)
 			,ord('l'):	staticize(self.chmode,1)
 			,ord('h'):	staticize(self.chmode,-1)
@@ -394,6 +391,27 @@ class ListOverlay(OverlayBase,Box):
 			,curses.KEY_UP:		staticize(self.increment,-1)
 			,curses.KEY_RIGHT:	staticize(self.chmode,1)
 			,curses.KEY_LEFT:	staticize(self.chmode,-1)
+		})
+		def tryEnter():
+			'''Try to run the function bound to enter'''
+			selectFun = self._keys.get(10)
+			if selectFun:
+				try:
+					return selectFun()
+				except TypeError: pass
+		def click(_,y):
+			'''Manipulate self.it and tryEnter'''
+			#y in the list
+			size = self.parent.y - 2
+			if not y in range(1,size+1): return
+			position = (self.it//size)*size + (y - 1)
+			return tryEnter()
+		self._mouse.update(
+			{_MOUSE_BUTTONS["left"]:		click
+			,_MOUSE_BUTTONS["right"]:		override(click)
+			,_MOUSE_BUTTONS["middle"]:		staticize(tryEnter)
+			,_MOUSE_BUTTONS["wheel-up"]:	staticize(self.increment,1)
+			,_MOUSE_BUTTONS["wheel-down"]:	staticize(self.increment,-1)
 		})
 	def __call__(self,lines):
 		'''
@@ -713,7 +731,7 @@ class BlockingOverlay(OverlayBase):
 
 	def add(self):
 		if self.tag:
-			for i in self.parent.getOverlaysByClassName(type(self)):
+			for i in self.parent.getOverlaysByClassName(type(self).__name__):
 				#don't add overlays with the same tag
 				if i.tag == self.tag: return
 		super(BlockingOverlay, self).add()
@@ -923,6 +941,29 @@ class MainOverlay(TextOverlay):
 		and how many lines it occupies
 		'''
 		return self._allMessages[-self._selector]
+	def clickMessage(self,x,y):
+		'''Get the message `height` messages from the top'''
+		if y >= self.parent.y-1: return
+		direction = -1
+		msgNo = -1
+		height = 0
+		if self._linesup-self._unfiltup >= self.parent.y:
+			direction = 1
+			msgNo = -self._selector
+		else:
+			#"height" from the top
+			y = self.parent.y - y
+
+		while height < (y+direction):
+			height += self._allMessages[msgNo][2]
+			msgNo += direction
+		msg = self._allMessages[msgNo-direction]
+		pos = 0
+		#height - y should be indicative of lines deep into the message
+		for i in range(height - y): 
+			pos += self.parent.x - (i and len(self.INDENT))
+		return msg,pos+x
+
 	def redolines(self, width = None, height = None):
 		'''
 		Redo lines, if current lines does not represent the unfiltered messages
@@ -1316,10 +1357,14 @@ class Main:
 		self.updateinfo()
 		self.display()
 	def toggle256(self,value):
+		'''Turn the mode to 256 colors, and if undefined, define colors'''
 		self._two56 = value
 		if value and not hasattr(self,"two56start"): #not defined on startup
 			self.two56start = len(_COLORS) + rawNum(0)
 			def256colors()
+	def toggleMouse(self,state):
+		'''Turn the mouse on or off'''
+		return curses.mousemask(state and _MOUSE_MASK)
 	def catcherr(self,func,*args):
 		'''Catch error and end client'''
 		def wrap():

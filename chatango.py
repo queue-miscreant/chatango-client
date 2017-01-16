@@ -14,6 +14,17 @@ Options:
 	-r:				Relog
 	-nc:			No custom script import
 	--help:			Display this page
+
+Useful Key Bindings:
+	F2:		Link accumulator
+	F3:		List current group members
+	F4:		Chat formatting menu
+	F5:		Channels and filtering
+	F12:	Options menu
+
+	^G:		Open most recent link
+	^R:		Refresh current group
+	^T:		Switch to new group
 '''
 #TODO:	add mouse support for ChatangoOverlay
 
@@ -212,6 +223,7 @@ class ChatBot(ch.Manager):
 
 	def onConnectionLost(self, group):
 		message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
+		@client.daemonize
 		def reconnect():
 			self.mainOverlay.msgDelete(message)
 			self.reconnect()
@@ -236,7 +248,8 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^t":		self.joingroup
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
-#						,"^p":		lambda: client.dbmsg(repr(self.getselected()[0]))
+				,"mouse-left":		self.clickOnLink
+				,"mouse-middle":	override(staticize(self.openSelectedLinks),1)
 		},1)	#these are methods, so they're defined on __init__
 
 	def _maxselect(self):
@@ -249,26 +262,42 @@ class ChatangoOverlay(client.MainOverlay):
 			self.parent.newBlurb("Fetching more messages")
 	
 	def openSelectedLinks(self):
-		try:
-			message = self.getselected()
-			msg = message[1][0].post+' '
-			alllinks = client.LINK_RE.findall(msg)
-			def openall():
-				recolor = False
-				for i in alllinks:
-					client.open_link(self.parent,i)
-					if i not in self.bot.visited_links:
-						self.bot.visited_links.append(i)
-						recolor = True
-				if recolor: self.recolorlines()
-					
-			if len(alllinks) >= self.bot.options["linkwarn"]:
-				self.parent.holdBlurb(
-					"Really open {} links? (y/n)".format(len(alllinks)))
-				client.ConfirmOverlay(self.parent, openall).add()
-			else:
-				openall()
-		except Exception as exc: client.dbmsg(exc)
+		message = self.getselected()
+		msg = message[1][0].post+' '
+		alllinks = client.LINK_RE.findall(msg)
+		def openall():
+			recolor = False
+			for i in alllinks:
+				client.open_link(self.parent,i)
+				if i not in self.bot.visited_links:
+					self.bot.visited_links.append(i)
+					recolor = True
+			if recolor: self.recolorlines()
+				
+		if len(alllinks) >= self.bot.options["linkwarn"]:
+			self.parent.holdBlurb(
+				"Really open {} links? (y/n)".format(len(alllinks)))
+			client.ConfirmOverlay(self.parent, openall).add()
+		else:
+			openall()
+
+	def clickOnLink(self,x,y):
+		msg = self.clickMessage(x,y)
+		if not msg: return 1
+		msg, pos = msg
+		link = ""
+		smallest = -1
+		for i in client.LINK_RE.finditer(str(msg[0])):
+			linkpos = (i.start() + i.end()) // 2
+			distance = abs(linkpos - pos)
+			if distance < smallest or smallest == -1:
+				smallest = distance
+				link = i.group()
+		if link:
+			client.open_link(self.parent,link)
+			self.bot.visited_links.append(link)
+			self.recolorlines()
+		return 1
 
 	def onenter(self):
 		'''Open selected message's links or send message'''
@@ -466,7 +495,7 @@ class ChatangoOverlay(client.MainOverlay):
 		def select(me):
 			if me.it == 0:		#mouse
 				self.bot.options["mouse"] ^= 1
-				client.mouseState(self.bot.options["mouse"])
+				self.parent.toggleMouse(self.bot.options["mouse"])
 				pass
 			elif me.it == 1:	#link opening
 				def update(entry):
@@ -738,7 +767,7 @@ def runClient(main,creds):
 		if creds["options"].get(i) is None:
 			creds["options"][i] = DEFAULT_OPTIONS[i]
 
-	client.mouseState(creds["options"]["mouse"])
+	main.toggleMouse(creds["options"]["mouse"])
 
 	#initialize chat bot
 	chatbot = ChatBot(creds,main)
