@@ -24,7 +24,7 @@ from .display import *
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
-			,"BlockingOverlay","MainOverlay","onDone","override"]
+			,"BlockingOverlay","MainOverlay","onDone","override","staticize"]
 
 main_instance = None
 lasterr = None
@@ -226,10 +226,10 @@ class OverlayBase:
 			if i in ("^[","^i","^j",chr(127)): continue	
 			if j in self._keys:
 				ret.append("{}: {}".format(i,self._keys[j].__doc__.replace(
-					'\n',"").replace('\t',""))
+					'\n',"").replace('\t',"")))
 			if j in self._altkeys:
 				ret.append("a-{}: {}".format(i,self._altkeys[j].__doc__.replace(
-					'\n',"").replace('\t',""))
+					'\n',"").replace('\t',"")))
 		ret.sort()
 		return ret
 	def __call__(self,lines):

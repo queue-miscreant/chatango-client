@@ -249,7 +249,7 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
 				,"mouse-left":		self.clickOnLink
-				,"mouse-middle":	override(staticize(self.openSelectedLinks),1)
+				,"mouse-middle":	client.override(client.staticize(self.openSelectedLinks),1)
 		},1)	#these are methods, so they're defined on __init__
 
 	def _maxselect(self):
