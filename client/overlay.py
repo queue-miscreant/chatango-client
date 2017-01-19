@@ -245,7 +245,10 @@ class OverlayBase:
 		'''Run a mouse's callback'''
 		try:
 			_,x,y,_,state = curses.getmouse()
-			return state in self._mouse and self._mouse[state](x,y)
+			ret = state in self._mouse and self._mouse[state](x,y)
+			if chars[0] != -1:
+				return ret or self.runkey([i for i in chars if i != curses.CHAR_MOUSE])
+			return ret
 		except curses.error: pass
 	def _post(self):
 		'''
@@ -267,7 +270,7 @@ class OverlayBase:
 		#ignore the command character and trailing -1
 		#second clause ignores heading newlines
 		if (char in self._keys) and (char == 27 or len(chars) <= 2 or char > 255):
-			return self._keys[char](chars[1:-1] or [None]) or self._post()
+			return self._keys[char](chars[1:] or [-1]) or self._post()
 		if -1 in self._keys and (char in (9,10,13) or char in range(32,255)):
 			return self._keys[-1](chars[:-1]) or self._post()
 	def resize(self,newx,newy):
@@ -688,6 +691,8 @@ class CommandOverlay(TextOverlay):
 				self.swap(add)
 				return
 		except Exception as exc:
+			self.parent.newBlurb(
+				'an error while running command {}'.format(args[0]))
 			dbmsg('{} occurred in command {}: {}'.format(
 				type(exc).__name__,args[0], exc))
 		except KeyboardInterrupt: pass
@@ -944,6 +949,7 @@ class MainOverlay(TextOverlay):
 	def clickMessage(self,x,y):
 		'''Get the message `height` messages from the top'''
 		if y >= self.parent.y-1: return
+		#go up or down
 		direction = -1
 		msgNo = -1
 		height = 0
@@ -953,16 +959,26 @@ class MainOverlay(TextOverlay):
 		else:
 			#"height" from the top
 			y = self.parent.y - y
-
+		#find message until we exceed the height
 		while height < (y+direction):
 			height += self._allMessages[msgNo][2]
 			msgNo += direction
 		msg = self._allMessages[msgNo-direction]
-		pos = 0
-		#height - y should be indicative of lines deep into the message
-		for i in range(height - y): 
-			pos += self.parent.x - (i and len(self.INDENT))
-		return msg,pos+x
+
+		#do some logic for finding the line clicked
+		linesDeep = (y-height)*direction + 1
+		firstLine = (height * direction) + msgNo + 1
+		if direction + 1:
+			firstLine -= msg[2] + self._linesup - self._selector + 2
+			linesDeep += msg[2] - 1
+		#adjust the position
+		pos = x 
+		for i in range(linesDeep):
+			pos += strlen(self._lines[i+firstLine]) - len(self.INDENT)
+		if x < len(self.INDENT):
+			pos += len(self.INDENT) - x
+
+		return msg,pos
 
 	def redolines(self, width = None, height = None):
 		'''
@@ -1001,7 +1017,8 @@ class MainOverlay(TextOverlay):
 		height = self.parent.y
 		newlines = []
 		numup,nummsg = 0,1
-		while (numup < height or nummsg <= self._selector) and nummsg <= len(self._allMessages):
+		while (numup < height or nummsg <= self._selector) and \
+			nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
 			if not i[3]:	#don't decolor system messages
 				i[0].clear()
@@ -1391,7 +1408,7 @@ def start(target,*args,two56=False):
 		for i in _afterDone:
 			i()
 	except Exception as e:
-		dbmsg("Error occurred during shutdown: ", e)
+		print("Error occurred during shutdown: ", e)
 	if lasterr is not None:
 		raise lasterr
 

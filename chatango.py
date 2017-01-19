@@ -26,7 +26,6 @@ Useful Key Bindings:
 	^R:		Refresh current group
 	^T:		Switch to new group
 '''
-#TODO:	add mouse support for ChatangoOverlay
 
 import ch
 import client
@@ -856,20 +855,21 @@ if __name__ == "__main__":
 			import custom #custom plugins
 		except ImportError as exc: pass
 	#start
-	client.start(runClient,newCreds,two56=two56colors)
-
-	#save
 	try:
-		jsonData = {}
-		for i,bit in creds_readwrite.items():
-			if bit&2:
-				jsonData[i] = newCreds[i]
-			else:	#"safe" credentials from last write
-				jsonData[i] = creds_entire[i]
-		encoder = json.JSONEncoder(ensure_ascii=False)
-		with open(SAVE_PATH,'w') as out:
-			out.write(encoder.encode(jsonData)) 
-	except KeyError:
-		pass
-	except Exception as exc:
-		raise IOError("Error writing creds!") from exc
+		client.start(runClient,newCreds,two56=two56colors)
+	finally:
+		#save
+		try:
+			jsonData = {}
+			for i,bit in creds_readwrite.items():
+				if bit&2:
+					jsonData[i] = newCreds[i]
+				else:	#"safe" credentials from last write
+					jsonData[i] = creds_entire[i]
+			encoder = json.JSONEncoder(ensure_ascii=False)
+			with open(SAVE_PATH,'w') as out:
+				out.write(encoder.encode(jsonData)) 
+		except KeyError:
+			pass
+		except Exception as exc:
+			raise IOError("Error writing creds!") from exc
