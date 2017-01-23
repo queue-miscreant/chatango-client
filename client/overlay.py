@@ -246,14 +246,15 @@ class OverlayBase:
 		try:
 			_,x,y,_,state = curses.getmouse()
 			ret = state in self._mouse and self._mouse[state](x,y)
+			chars = [i for i in chars if i != curses.KEY_MOUSE]
 			if chars[0] != -1:
-				return ret or self.runkey([i for i in chars if i != curses.CHAR_MOUSE])
+				return ret or self.runkey(chars)
 			return ret
 		except curses.error: pass
 	def _post(self):
 		'''
 		Run after a keypress if the associated function returns boolean false
-		If either the keypress or this return boolean true, the overlay's
+		If either the keypress or this returns boolean true, the overlay's
 		parent redraws
 		'''
 		return 1
@@ -413,8 +414,8 @@ class ListOverlay(OverlayBase,Box):
 			{_MOUSE_BUTTONS["left"]:		click
 			,_MOUSE_BUTTONS["right"]:		override(click)
 			,_MOUSE_BUTTONS["middle"]:		staticize(tryEnter)
-			,_MOUSE_BUTTONS["wheel-up"]:	staticize(self.increment,1)
-			,_MOUSE_BUTTONS["wheel-down"]:	staticize(self.increment,-1)
+			,_MOUSE_BUTTONS["wheel-up"]:	staticize(self.increment,-1)
+			,_MOUSE_BUTTONS["wheel-down"]:	staticize(self.increment,1)
 		})
 	def __call__(self,lines):
 		'''
