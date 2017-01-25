@@ -311,7 +311,7 @@ class _Connection:
 			args = command.decode("utf_8").rstrip("\r\n").split(':')
 			try:
 				if command == b"":
-					getattr(self, "_recv_ping")()
+					self._recv_ping()
 				getattr(self, "_recv_"+args[0])(args[1:])
 			except AttributeError: pass
 		self._rbuff = commands[-1]
@@ -395,13 +395,13 @@ class Group(_Connection):
 
 	def _connect(self):
 		'''Connect to the server. Fires onConnectionLost when this fails'''
+		self._clearBuffers()
 		try:
 			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			self.sock.connect(("s{}.chatango.com".format(self._server), self._port))
 			self.sock.setblocking(False)
 		except socket.gaierror:
-			self._callEvent("onConnectionLost")
-		self._clearBuffers()
+			return self._callEvent("onConnectionLost")
 		#authenticate
 		self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password, firstcmd = True)
 
@@ -709,14 +709,13 @@ class PM(_Connection):
 		self._clearBuffers()
 		self._auid = self._manager.pmAuth()
 		if self._auid == None:
-			self._callEvent("onLoginFail")
-			return
+			return self._callEvent("onLoginFail")
 		try:
 			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			self.sock.connect((self._PMHost, self._port))
 			self.sock.setblocking(False)
 		except socket.gaierror:
-			self._callEvent("onConnectionLost")
+			return self._callEvent("onConnectionLost")
 
 		self._sendCommand("tlogin", self._auid, '2', self._uid, firstcmd = True)
 		self._lockWrite(True)
