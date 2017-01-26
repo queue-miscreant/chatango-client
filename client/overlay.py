@@ -408,7 +408,7 @@ class ListOverlay(OverlayBase,Box):
 			#y in the list
 			size = self.parent.y - 2
 			if not y in range(1,size+1): return
-			position = (self.it//size)*size + (y - 1)
+			self.it = (self.it//size)*size + (y - 1)
 			return tryEnter()
 		self._mouse.update(
 			{_MOUSE_BUTTONS["left"]:		click
