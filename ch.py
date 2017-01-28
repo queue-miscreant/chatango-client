@@ -20,7 +20,7 @@ import random
 import re
 import socket
 import select
-import requests
+import urllib.request
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
@@ -62,6 +62,46 @@ class _Generate:
 				return i
 		return None
 
+class _Multipart(urllib.request.Request):
+	'''Simplified version of requests.post for multipart/form-data'''
+	#code adapted from http://code.activestate.com/recipes/146306/
+	MULTI_BOUNDARY = '---------------iM-in-Ur-pr07oc01'
+	DISPOSITION = "Content-Disposition: form-data; name=\"%s\""
+
+	def __init__(self, url, data, headers = {}):
+		multiform = []
+		for k,v in data.items():
+			multiform.append("--" + self.MULTI_BOUNDARY) #add boundary
+			data = v
+			#the next part can have a (mime type, file) tuple
+			if isinstance(v,(tuple, list)):
+				if len(v) != 2:
+					raise ValueError("improper multipart file tuple formatting")
+				try:
+					#try to read the file first
+					data = v[1].read()
+					v[1].close()
+					#then set the filename to filename
+					multiform.append((self.DISPOSITION % k) + \
+						"; filename=\"%s\"" % os.path.basename(v[1].name))
+					multiform.append("Content-Type: %s" % v[0])
+				except AttributeError as ae:
+					raise ValueError("expected file-like object") from ae
+			else:
+				#no mime type supplied
+				multiform.append(self.DISPOSITION % k)
+			multiform.append("")
+			multiform.append(data)
+		multiform.append("--" + self.MULTI_BOUNDARY + "--")
+		#encode multiform
+		request_body = (b"\r\n").join([isinstance(i,bytes) and i or i.encode() \
+			for i in multiform])
+		
+		headers.update(	{"content-length":	str(len(request_body))
+						,"content-type":	"multipart/form-data; boundary=%s"%\
+							self.MULTI_BOUNDARY})
+
+		super(_Multipart, self).__init__(url, data = request_body, headers = headers)
 
 HTML_CODES = [
 	("&#39;","'"),
@@ -686,8 +726,9 @@ class Group(_Connection):
 
 class PM(_Connection):
 	_PMHost =  "c1.chatango.com"
+
 	def __init__(self, manager, port = None):
-		super(PM,self).__init__(manager, port or 5222)
+		super(PM,self).__init__(manager, port or 8080)
 		self._auid = None
 		self._contacts = []
 		self._blocklist = set()
@@ -931,39 +972,38 @@ class Manager:
 
 	def uploadAvatar(self, path):
 		'''Upload an avatar with path `path`'''
+		extension = path[path.rfind('.')+1:].lower()
+		if extension == "jpg": extension = "jpeg"
+		elif extension not in ["png","jpeg"]:
+			return False
+
 		try:
-			filepath = open(path,"br")
-			extension = path[path.rfind('.')+1:].lower()
-			if extension == "jpg": extension = "jpeg"
-			elif extension not in ["png","jpeg"]:
-				return False
-			requests.post('http://chatango.com/updateprofile', files={
-				 "u":		(None,self.username)
-				,"p":		(None,self.password)
-				,"auth":	(None,"pwd")
-				,"arch":	(None,"h5")
-				,"src":		(None,"group")
-				,"action":	(None,"fullpic")
-				,"Filedata":	(os.path.basename(path), filepath,
-					'image/%s'%extension,{})
-			})
+			urllib.request.urlopen(_Multipart('http://chatango.com/updateprofile',
+				data = {'u':		self.username
+					,'p':			self.password
+					,"auth":		"pwd"
+					,"arch":		"h5"
+					,"src":			"group"
+					,"action":		"fullpic"
+					,"Filedata":	("image/%s" % extension, open(path,"br"))
+				}))
 			return True
 		except FileNotFoundError:
 			return False
 
 	def pmAuth(self):
 		'''Request auth cookie for PMs'''
-		login = requests.post("http://chatango.com/login", data={
-			 "user_id": self.username
-			,"password": self.password
-			,"storecookie": "on"
-			,"checkerrors": "yes" 
-			})
-		try:
-			auth = login.headers.get("Set-Cookie")
-			return re.search("auth.chatango.com=(.*?);", auth).group(1)
-		except:
-			return None
+		login = urllib.request.urlopen("http://chatango.com/login",
+			  data = urllib.parse.urlencode({
+				 "user_id":		self.username
+				,"password":	self.password
+				,"storecookie":	"on"
+				,"checkerrors":	"yes" 
+				}).encode())
+		for i in login.headers.get_all("Set-Cookie"):
+			search = re.search("auth.chatango.com=(.*?);", i)
+			if search:
+				return search.group(1)
 	
 	###################################
 	#	Events
