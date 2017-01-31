@@ -259,7 +259,7 @@ class _Connection:
 
 		self._pingTask = None
 		self._canPing = False
-		self._connected = False
+		self.connected = False
 		self._reconnecting = False
 
 	####################################
@@ -348,7 +348,7 @@ class _Connection:
 		self._rbuff += data
 		commands = self._rbuff.split(b'\x00')
 		for command in commands[:-1]:
-			args = command.decode("utf-8").rstrip("\r\n").split(':')
+			args = command.decode("utf_8").rstrip("\r\n").split(':')
 			try:
 				if command == b"":
 					self._recv_ping()
@@ -762,7 +762,7 @@ class PM(_Connection):
 		self._lockWrite(True)
 
 		self._pingTask = Task.addInterval(self._manager, self._manager._pingDelay, self.ping)
-		self._connected = True
+		if not self._reconnecting: self.connected = True
 
 	#########################################
 	#	Received command backends
