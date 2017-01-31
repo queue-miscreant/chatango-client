@@ -87,7 +87,7 @@ DEFAULT_FORMATTING = \
 def parsePost(post, me, ishistory):
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
-	#format as ' user: message' the space is for the channel
+	#format as ' user: message'; the space is for the channel
 	msg = " {}: {}".format(post.user,post.post)
 	#links
 	client.parseLinks(post.post, ishistory)
@@ -566,6 +566,7 @@ class ChatangoOverlay(client.MainOverlay):
 		box.add()
 
 	def addignore(self):
+		'''Add ignore from selected message'''
 		if self.isselecting():
 			try:
 				#allmessages contain the colored message and arguments
@@ -714,9 +715,9 @@ def unignore(parent,person,*args):
 @client.command("keys")
 def listkeys(parent,*args):
 	'''Get list of the ChatangoOverlay's keys'''
+	#keys are instanced at runtime
 	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
 	if not chatOverlay: return
-	client.dbmsg(dir(chatOverlay[-1]))
 	keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
 	keysList.addKeys({
 		"enter": lambda x: -1

@@ -6,6 +6,7 @@ system of overlays, pulling input from the topmost
 one. Output is done not with curses display, but various
 different stdout printing calls.
 '''
+#TODO get rid of setmins, use actual errors
 
 try:
 	import curses
@@ -26,7 +27,6 @@ __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
 			,"BlockingOverlay","MainOverlay","onDone","override","staticize"]
 
-main_instance = None
 lasterr = None
 #break if smaller than these
 RESERVE_LINES = 3
@@ -57,7 +57,11 @@ _KEY_LUT = {
 for i in dir(curses):
 	if "KEY_" in i:
 		name = i[4:].lower()
-		if name not in _VALID_KEYNAMES: #don't map KEY_BACKSPACE or KEY_ENTER
+		#better name
+		if name == "dc": name = "delete"
+		if name == "resize":
+			continue
+		elif name not in _VALID_KEYNAMES: #don't map KEY_BACKSPACE or KEY_ENTER
 			_VALID_KEYNAMES[name] = getattr(curses,i)
 #simplicity's sake
 for i in range(32):
@@ -224,12 +228,21 @@ class OverlayBase:
 		for i,j in _VALID_KEYNAMES.items():
 			#ignore named characters and escape, they're not verbose
 			if i in ("^[","^i","^j",chr(127)): continue	
+			docstring = ""
+			formatString = ""
 			if j in self._keys:
-				ret.append("{}: {}".format(i,self._keys[j].__doc__.replace(
-					'\n',"").replace('\t',"")))
-			if j in self._altkeys:
-				ret.append("a-{}: {}".format(i,self._altkeys[j].__doc__.replace(
-					'\n',"").replace('\t',"")))
+				docstring = self._keys[j].__doc__
+				formatString = "{}: {}"
+			elif j in self._altkeys:
+				docstring = self._altkeys[j].__doc__
+				formatString = "a-{}: {}"
+			else: continue
+
+			if docstring:
+				docstring = docstring.replace('\n',"").replace('\t',"")
+			else:
+				docstring = "No documentation found"
+			ret.append(formatString.format(i,docstring))
 		ret.sort()
 		return ret
 	def __call__(self,lines):
@@ -329,6 +342,8 @@ class TextOverlay(OverlayBase):
 	def __init__(self,parent = None):
 		super(TextOverlay, self).__init__(parent)
 		self.text = parent.addScrollable()
+		#ASCII code of sentinel char
+		self._sentinel = 0
 		self._keys.update({
 			-1:				self._input
 			,9:				staticize(self.text.complete)
@@ -340,12 +355,26 @@ class TextOverlay(OverlayBase):
 			,curses.KEY_HOME:	staticize(self.text.home)
 			,curses.KEY_END:	staticize(self.text.end)
 		})
+		self._keys[curses.KEY_LEFT].__doc__ = "Move cursor left"
+		self._keys[curses.KEY_RIGHT].__doc__ = "Move cursor right"
 		self._altkeys.update({
 			127:			self.text.delword
 		})
 	def _input(self,chars):
-		'''Safe appending to scrollable. Takes out invalid ASCII (chars above 256) that might get pushed by curses'''
+		'''
+		Safe appending to scrollable. Takes out invalid ASCII (chars above 256)
+		that might get pushed by curses. If self.sentinel is not empty, the
+		text contained is empty, and it's the sentinel character alone, fire
+		_onSentinel 
+		'''
+		if self._sentinel and not str(self.text) and len(chars) == 1 and \
+			chars[0] == self._sentinel:
+			return self._onSentinel()
+		#allow unicode input with the bytes().decode()
 		return self.text.append(bytes([i for i in chars if i<256]).decode())
+	def _onSentinel(self):
+		'''Function run when sentinel character is typed at the beginning of the line'''
+		pass
 	def resize(self,newx,newy):
 		'''Adjust scrollable on resize'''
 		self.text.setwidth(newx)
@@ -433,8 +462,10 @@ class ListOverlay(OverlayBase,Box):
 		#display lines
 		for i,value in enumerate(subList):
 			half = maxx//2
-			#add an elipsis in the middle of the string if it can't be displayed; also, right justify
-			row = (len(value) > maxx) and value[:max(half,1)] + "..." + value[min(-half+3,-1):] or value
+			#add an elipsis in the middle of the string if it 
+			#can't be displayed and, right justify
+			row = (len(value) > maxx) and value[:max(half,1)] + \
+				"..." + value[min(-half+3,-1):] or value
 			row = Coloring(self.box_just(row))
 			if value and self._drawOther is not None:
 				self._drawOther(row,i+partition,len(self.list))
@@ -523,7 +554,7 @@ class ColorOverlay(ListOverlay,Box):
 		tint = [(min(5,i[0]+1),min(5,i[1]+1),min(5,i[2]+1)) for i in spectrum]
 		grayscale = range(12)
 
-		return [spectrum,tint,shade,grayscale]
+		return [spectrum,shade,tint,grayscale]
 
 class ColorSliderOverlay(OverlayBase,Box):
 	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
@@ -660,8 +691,9 @@ class CommandOverlay(TextOverlay):
 	'''Overlay to run commands. Commands are run in separate threads'''
 	replace = False
 	history = History()	#global command history
-	def __init__(self,parent = None):
-		super(CommandOverlay, self).__init__(parent)
+	def __init__(self,parent):
+		super(CommandOverlay,self).__init__(parent)
+		self._sentinel = ord(CHAR_COMMAND)
 		self.text.setnonscroll(CHAR_COMMAND)
 		self.controlHistory(self.history,self.text)
 		self._keys.update({
@@ -673,6 +705,13 @@ class CommandOverlay(TextOverlay):
 		})
 	def __call__(self,lines):
 		lines[-1] = "COMMAND"
+	def _onSentinel(self):
+		main = self.parent.getOverlaysByClassName("MainOverlay")
+		if main:
+			#get the highest mainOverlay
+			main = main[-1]
+			main.text.append(CHAR_COMMAND)
+		return -1
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
@@ -693,7 +732,7 @@ class CommandOverlay(TextOverlay):
 				return
 		except Exception as exc:
 			self.parent.newBlurb(
-				'an error while running command {}'.format(args[0]))
+				'an error occurred while running command {}'.format(args[0]))
 			dbmsg('{} occurred in command {}: {}'.format(
 				type(exc).__name__,args[0], exc))
 		except KeyboardInterrupt: pass
@@ -755,6 +794,7 @@ class MainOverlay(TextOverlay):
 	_monitors = {}
 	def __init__(self,parent,pushtimes = True):
 		super(MainOverlay, self).__init__(parent)
+		self._sentinel = ord(CHAR_COMMAND)
 		self.canselect = True
 		self._pushtimes = pushtimes
 		self.history = History()
@@ -803,14 +843,9 @@ class MainOverlay(TextOverlay):
 			linetraverse += direction
 		lines[-1] = Box.CHAR_HSPACE*self.parent.x
 	#method overloading---------------------------------------------------------
-	def _input(self,chars):
-		'''Input some text, or enter CommandOverlay'''
-		if not str(self.text) and len(chars) == 1 and \
-		chars[0] == ord(CHAR_COMMAND):
-			CommandOverlay(self.parent).add()
-			return
-		#allow unicode input
-		return TextOverlay._input(self,chars)
+	def _onSentinel(self):
+		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''
+		CommandOverlay(self.parent).add()
 	def _post(self):
 		'''Stop selecting'''
 		if self._selector:
@@ -1299,15 +1334,24 @@ class Main:
 		if len(self._ins) and index < len(self._ins):
 			return self._ins[index]
 		return None
-	def getOverlaysByClassName(self,name):
+	def getOverlaysByClassName(self,name,highest=0):
 		'''
-		Like getElementByClassName in a browser.
+		Like getElementsByClassName in a browser.
 		Returns a list of Overlays with the class name `name`
 		'''
+		#use string __name__s in case scripts can't get access to the method
+		if type(name) == type:
+			name = name.__name__
+		#limit the highest index
+		if not highest:
+			highest = len(self._ins)
+
 		ret = []
-		for i in self._ins:
-			if type(i).__name__ == name:
-				ret.append(i)
+		for i in range(highest):
+			overlay = self._ins[i]
+			#respect inheritence
+			if name in [j.__name__ for j in type(overlay).mro()]:
+				ret.append(overlay)
 		return ret
 	def addScrollable(self):
 		'''Add a new scrollable and return it'''
@@ -1397,7 +1441,6 @@ class Main:
 
 def start(target,*args,two56=False):
 	'''Start the client. Run this!'''
-	global main_instance
 	main_instance = Main(two56)
 	main_instance.resize()
 	#daemonize functions bot_thread

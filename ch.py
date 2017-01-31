@@ -348,7 +348,7 @@ class _Connection:
 		self._rbuff += data
 		commands = self._rbuff.split(b'\x00')
 		for command in commands[:-1]:
-			args = command.decode("utf_8").rstrip("\r\n").split(':')
+			args = command.decode("utf-8").rstrip("\r\n").split(':')
 			try:
 				if command == b"":
 					self._recv_ping()
