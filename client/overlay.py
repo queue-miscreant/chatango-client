@@ -3,21 +3,23 @@
 '''
 Client module with single-byte curses input uses a
 system of overlays, pulling input from the topmost
-one. Output is done not with curses display, but various
+one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
 #TODO get rid of setmins, use actual errors
+#TODO redolines doesn't run when selecting, and thus resizing while selecting is broken
+#TODO scrolling should be bidirectional
 
 try:
 	import curses
 except ImportError:
 	raise ImportError("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 import sys
-from os import environ
+import os
 if not (sys.stdin.isatty() and sys.stdout.isatty()): #check if terminal
 	raise IOError("This script is not intended to be piped")
 #escape has delay typically
-environ.setdefault("ESCDELAY", "25")
+os.environ.setdefault("ESCDELAY", "25")
 import time
 from threading import Thread
 from .display import *
@@ -76,7 +78,7 @@ _MOUSE_BUTTONS = {
 	,"middle":		curses.BUTTON2_PRESSED
 	,"right":		curses.BUTTON3_PRESSED
 	,"wheel-up":	curses.BUTTON4_PRESSED
-	,"wheel-down":	2097152
+	,"wheel-down":	2**21
 }
 _MOUSE_MASK = 0
 for i in _MOUSE_BUTTONS.values():
@@ -112,8 +114,7 @@ def onDone(func):
 	return func
 
 #OVERLAY HELPERS------------------------------------------------------------------
-CHAR_COMMAND = "`"
-Tokenize(CHAR_COMMAND,_commands)
+CHAR_COMMAND = '`'
 
 def centered(string,width):
 	'''Center some text'''
@@ -217,7 +218,8 @@ class OverlayBase:
 		self.index = None			#index in the stack
 		self._keys = {
 			27:	self._callalt
-			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1
+									#don't run post
+			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1 
 			,curses.KEY_MOUSE:	self._callmouse
 		}
 		self._altkeys =	{None: lambda: -1}
@@ -348,17 +350,21 @@ class TextOverlay(OverlayBase):
 			-1:				self._input
 			,9:				staticize(self.text.complete)
 			,127:			staticize(self.text.backspace)
+			,curses.KEY_BTAB:	staticize(self.text.backcomplete)
 			,curses.KEY_DC:		staticize(self.text.delchar)
 			,curses.KEY_SHOME:	staticize(self.text.clear)
 			,curses.KEY_RIGHT:	staticize(self.text.movepos,1)
 			,curses.KEY_LEFT:	staticize(self.text.movepos,-1)
 			,curses.KEY_HOME:	staticize(self.text.home)
 			,curses.KEY_END:	staticize(self.text.end)
+			,520:				staticize(self.text.delwordback)
 		})
 		self._keys[curses.KEY_LEFT].__doc__ = "Move cursor left"
 		self._keys[curses.KEY_RIGHT].__doc__ = "Move cursor right"
 		self._altkeys.update({
-			127:			self.text.delword
+			ord('h'):		self.text.wordback
+			,ord('l'):		self.text.wordnext
+			,127:			self.text.delword
 		})
 	def _input(self,chars):
 		'''
@@ -687,6 +693,20 @@ class InputOverlay(TextOverlay,Box):
 		'''Set function to run after valid poll'''
 		self.ondone = func
 
+def tabFile(path):
+	path = os.path.sep + path
+	findpart = path.rfind(os.path.sep)
+	initpath,search = path[:findpart+1], path[findpart+1:]
+	ls = os.listdir(initpath)
+	suggestions = []
+	if search: #we need to iterate over what we were given
+		suggestions = sorted([i for i in ls if not i.find(search)])
+	else: #otherwise ignore hidden files
+		suggestions = sorted([i for i in ls if i.find('.')])
+	if not suggestions:
+		return [],0
+	return suggestions,len(path)-len(initpath)
+
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands. Commands are run in separate threads'''
 	replace = False
@@ -695,6 +715,8 @@ class CommandOverlay(TextOverlay):
 		super(CommandOverlay,self).__init__(parent)
 		self._sentinel = ord(CHAR_COMMAND)
 		self.text.setnonscroll(CHAR_COMMAND)
+		self.text.completer.addComplete(CHAR_COMMAND,_commands)
+		self.text.completer.addComplete(os.path.sep,tabFile)
 		self.controlHistory(self.history,self.text)
 		self._keys.update({
 			10:		staticize(self._run)
@@ -1149,7 +1171,7 @@ class MainOverlay(TextOverlay):
 			self._unfiltup += 1
 		return msg[4]
 
-class _NScrollable(Scrollable):
+class _NScrollable(ScrollSuggest):
 	'''
 	A scrollable that expects a Main object as parent so that it 
 	can run Main.updateinput()
@@ -1159,6 +1181,7 @@ class _NScrollable(Scrollable):
 		self.parent = parent
 		self.index = index
 	def _onchanged(self):
+		super(_NScrollable, self)._onchanged()
 		self.parent.updateinput()
 
 #MAIN CLIENT--------------------------------------------------------------------

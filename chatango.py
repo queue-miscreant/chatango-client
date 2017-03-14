@@ -243,7 +243,7 @@ class ChatangoOverlay(client.MainOverlay):
 						,"f4":		self.F4
 						,"f5":		self.F5
 						,"f12":		self.options
-						,"btab":	self.addignore
+						,"^n":		self.addignore
 						,"^t":		self.joingroup
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
@@ -262,16 +262,17 @@ class ChatangoOverlay(client.MainOverlay):
 	
 	def openSelectedLinks(self):
 		message = self.getselected()
-		msg = message[1][0].post+' '
+		try:	#don't bother if it's a system message (or one with no "post")
+			msg = message[1][0].post
+		except: return
 		alllinks = client.LINK_RE.findall(msg)
 		def openall():
-			recolor = False
 			for i in alllinks:
 				client.open_link(self.parent,i)
 				if i not in self.bot.visited_links:
 					self.bot.visited_links.append(i)
-					recolor = True
-			if recolor: self.recolorlines()
+			#don't recolor if the list is empty
+			if alllinks: self.recolorlines()
 				
 		if len(alllinks) >= self.bot.options["linkwarn"]:
 			self.parent.holdBlurb(

@@ -5,23 +5,19 @@ Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.
 '''
-#TODO fix format() in Scrollable
-#		to fix, display must be from the right side,rather than the left
-#		we still have to accumulate string length...
-#		maybe just measure display as both distance and columns  <- this
-#TODO	tabs render improperly depending on cursor position
 import re
 from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
 			,"_COLORS","SELECT_AND_MOVE","dbmsg","def256colors","getColor","rawNum"
-			,"strlen","Coloring","Scrollable","Tokenize"]
+			,"strlen","Coloring","Scrollable","Tokenize","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
 _LAST_COLOR_RE =	re.compile('\x1b'+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
+_NEXT_WORD_RE =	re.compile("([{0}]*[^{0}]+)".format(_SANE_TEXTBOX))	#sane textbox word-delete
 _LINE_BREAKING = "- 　"	#line breaking characters
 #valid color names to add
 _COLOR_NAMES =	["black"
@@ -133,7 +129,8 @@ class Coloring:
 		self._formatting.clear()
 	def __repr__(self):
 		'''Get the string contained'''
-		return "Coloring({}, positions = {}, formatting = {})".format(repr(self._str),self._positions,self._formatting)
+		return "Coloring({}, positions = {}, formatting = {})".format(
+			repr(self._str),self._positions,self._formatting)
 	def __str__(self):
 		return self._str
 	def __format__(self,*args):
@@ -413,187 +410,6 @@ def columnslice(string,length):
 		escape = temp
 	return lentr + 1
 
-class Scrollable:
-	'''Scrollable text input'''
-	def __init__(self,width,string=""):
-		self._str = string
-		self._width = width
-		self._pos = len(string)
-		self._disp = max(0,len(string)-width)
-		#nonscrolling characters
-		self._nonscroll = ""
-		self._nonscroll_width = 0
-		self.password = False;
-	def __repr__(self):
-		return repr(self._str)
-	def __str__(self):
-		'''Return the raw text contained'''
-		return self._str
-	def __getitem__(self,sliced):
-		'''Get a slice up to the cursor'''
-		newstop = sliced.stop
-		if not sliced.stop: newstop = self._pos
-		else: newstop = min(newstop,self._pos)
-		return self._str[slice(sliced.start,newstop,sliced.step)]
-	def __format__(self,*args):
-		'''Display text contained with cursor'''
-		#original string injections
-		text = ""
-		if self.password:
-			text = '*'*(self._pos) + CHAR_CURSOR + '*'*(len(self._str)-self._pos)
-		else:
-			text = self._str[:self._pos] + CHAR_CURSOR + self._str[self._pos:]
-	
-		text = text[self._disp:self._disp+self._width+len(CHAR_CURSOR)] #worst case
-		text = text.replace("\n",r"\n").expandtabs(_TABLEN)
-		#TIME TO ITERATE
-		escape,canbreak= 0,0
-		#initial position, column num, position in string
-		init,width,pos= 0,self._nonscroll_width,0
-		#_disp is never greater than _pos, and it's impossible for 
-		#"s" to not be in a control sequence, so this should be sound
-		while pos < len(text) or not canbreak:
-			i = text[pos]
-			temp = (i == '\x1b') or escape
-			if not temp:
-				width += wcwidth(i)
-				if width >= self._width:
-					if canbreak: #don't go too far
-						break
-					init += 1
-			elif i.isalpha():	#is escaped and i is alpha
-				if i == 's':	#\x1b[s is save cursor position; if we go past it, great
-					canbreak = True
-				temp = False
-			pos += 1
-			escape = temp
-		return self._nonscroll+text[init:pos]
-	#str-like frontends
-	def find(self,string,start=0,end=None):
-		'''Find up to cursor position'''
-		if end is None:
-			end = self._pos
-		return self._str.find(string,start,end)
-	def rfind(self,string,start=0,end=None):
-		'''Right find up to cursor position'''
-		if end is None:
-			end = self._pos
-		return self._str.rfind(string,start,end)
-	def complete(self):
-		'''Complete the last word before the cursor'''
-		lastSpace = self._str.rfind(" ",0,self._pos)
-		#if there is no lastspace, settle for 0
-		search = self._str[lastSpace+1:self._pos]
-		if lastSpace == -1: search = self._nonscroll + search
-		ret = Tokenize.complete(search)
-		if ret:
-			self.append(ret + " ")
-		
-	#-----------------
-	def _onchanged(self):
-		'''
-		Since this class is meant to take a 'good' slice of a string,
-		it's useful to have this method when that slice is updated
-		'''
-		pass
-	def setstr(self,new):
-		'''Set content of scrollable'''
-		self._str = new
-		self.end()
-	def setnonscroll(self,new):
-		'''Set nonscrolling characters of scrollable'''
-		check = strlen(new)
-		if check > MAX_NONSCROLL_WIDTH:
-			new = new[:columnslice(new,MAX_NONSCROLL_WIDTH)]
-		self._nonscroll = new
-		self._nonscroll_width = min(check,MAX_NONSCROLL_WIDTH)
-		self._onchanged()
-	def setwidth(self,new):
-		if new is None: return
-		if new <= 0:
-			raise DisplayException()
-		self._width = new
-		self._onchanged()
-	def movepos(self,dist):
-		'''Move cursor by distance (can be negative). Adjusts display position'''
-		if not len(self._str):
-			self._pos,self._disp = 0,0
-			self._onchanged()
-			return
-		self._pos = max(0,min(len(self._str),self._pos+dist))
-		curspos = self._pos - self._disp
-		if curspos <= 0: #left hand side
-			self._disp = max(0,self._disp+dist)
-		elif (curspos+1) >= self._width: #right hand side
-			self._disp = min(self._pos-self._width+1,self._disp+dist)
-		self._onchanged()
-			
-	def append(self,new):
-		'''Append string at cursor'''
-		self._str = self._str[:self._pos] + new + self._str[self._pos:]
-		self.movepos(len(new))
-	def backspace(self):
-		'''Backspace one char at cursor'''
-		if not self._pos: return #don't backspace at the beginning of the line
-		self._str = self._str[:self._pos-1] + self._str[self._pos:]
-		self.movepos(-1)
-	def delchar(self):
-		'''Delete one char ahead of cursor'''
-		self._str = self._str[:self._pos] + self._str[self._pos+1:]
-		self._onchanged()
-	def delword(self):
-		'''Delete word behind cursor, like in sane text boxes'''
-		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
-		if pos and not self.password:
-			#we started with a space
-			span = pos.span(1)[1] - 1
-			#how far we went
-			self._str = self._str[:span] + self._str[self._pos:]
-			self.movepos(span-self._pos)
-		else:
-			self._str = self._str[self._pos:]
-			self._disp = 0
-			self._pos = 0
-			self._onchanged()
-	def clear(self):
-		'''Clear cursor and string'''
-		self._str = ""
-		self.home()
-	def home(self):
-		'''Return to the beginning'''
-		self._pos = 0
-		self._disp = 0
-		self._onchanged()
-	def end(self):
-		'''Move to the end'''
-		self._pos = 0
-		self._disp = 0
-		self.movepos(len(self._str))
-
-class Tokenize:
-	'''Class for holding new tab-completers'''
-	prefixes = []			#list of prefixes to search for
-	suggestionlists = []	#list of (references to) lists for each prefix paradigm
-	def __init__(self,newPrefix,newList,ignore=None):
-		'''Add a new tabbing method'''
-		self.prefixes.append(newPrefix)
-		self.suggestionlists.append(newList)
-	
-	def complete(incomplete):
-		'''Find rest of a name in a list'''
-		#O(|prefixes|*|suggestionlists|), so n**2
-		for pno,prefix in enumerate(Tokenize.prefixes):
-			preflen = len(prefix)
-			if (incomplete[:preflen] == prefix):
-				search = incomplete[preflen:]
-				#search for the transformed search
-				for complete in list(Tokenize.suggestionlists[pno]):
-					#run the transforming lambda
-					if not complete.find(search):	#in is bad practice
-						return complete[len(incomplete)-1:]
-				return ""
-		return ""
-
 class PromoteSet:
 	'''Set with ordering like a list, whose elements can be promoted to the front'''
 	def __init__(self,iterable = None):
@@ -642,3 +458,280 @@ class PromoteSet:
 			self._list[-i-1] = self._list[-i]
 			self._list[-i] = temp
 			i += 1
+
+class Scrollable:
+	'''Scrollable text input'''
+	def __init__(self,width,string=""):
+		if width <= _TABLEN:
+			raise DisplayException("Cannot create Scrollable smaller "+\
+				" or equal to tab width %d"%_TABLEN)
+		self._str = string
+		self._width = width
+		#position of the cursor and display column of the cursor
+		self._pos = len(string)
+		self._disp = max(0,strlen(string)-width)
+		#nonscrolling characters
+		self._nonscroll = ""
+		self._nonscroll_width = 0
+		self.password = False
+	def __repr__(self):
+		return repr(self._str)
+	def __str__(self):
+		'''Return the raw text contained'''
+		return self._str
+	def __format__(self,*args):
+		'''Display text contained with cursor'''
+		#iteration variables
+		start, end, width = self._disp, self._disp, self._nonscroll_width
+		#handle the first test already, +1 for truth values
+		endwidth = (end == self._pos) and width+1
+		lentext = len(self._str)
+		#adjust the tail
+		while not endwidth or (width < self._width and end < lentext):
+			char = self._str[end]
+			if char == '\t':
+				width += _TABLEN
+			elif char == '\n' or char == '\r':
+				width += 2	#for \n
+			elif ord(char) > 32:
+				width += wcwidth(char)
+			end += 1
+			if end == self._pos:
+				endwidth = width+1
+		#adjust the head
+		while width >= self._width:
+			char = self._str[start]
+			if char == '\t':
+				width -= _TABLEN
+			elif char == '\n' or char == '\r':
+				width -= 2	#for \n
+			elif ord(char) > 32:
+				width -= wcwidth(char)
+			start += 1
+		if self.password:
+			if not endwidth: #cursor is at the end
+				endwidth = self._width
+			else:
+				endwidth -= 1
+			return "%s%s%s%s"%(self._nonscroll,'*'*endwidth,CHAR_CURSOR,
+				'*'*(self._width-endwidth))
+		text = "%s%s%s%s"%(self._nonscroll,self._str[start:self._pos],
+			CHAR_CURSOR,self._str[self._pos:end])
+		#actually replace the lengths I asserted earlier
+		return text.replace('\n','\\n').replace('\r',
+			'\\r').replace('\t',' '*_TABLEN)
+	#SET METHODS----------------------------------------------------------------
+	def _onchanged(self):
+		'''
+		Since this class is meant to take a 'good' slice of a string,
+		it's useful to have this method when that slice is updated
+		'''
+		pass
+	def setstr(self,new):
+		'''Set content of scrollable'''
+		self._str = new
+		self.end()
+	def setnonscroll(self,new):
+		'''Set nonscrolling characters of scrollable'''
+		check = strlen(new)
+		if check > MAX_NONSCROLL_WIDTH:
+			new = new[:columnslice(new,MAX_NONSCROLL_WIDTH)]
+		self._nonscroll = new
+		self._nonscroll_width = min(check,MAX_NONSCROLL_WIDTH)
+		self._onchanged()
+	def setwidth(self,new):
+		'''Set width of the scrollable'''
+		if new <= 0:
+			raise DisplayException()
+		self._width = new
+		self._onchanged()
+	def movepos(self,dist):
+		'''Move cursor by distance (can be negative). Adjusts display position'''
+		if not len(self._str):
+			self._pos,self._disp = 0,0
+			self._onchanged()
+			return
+		self._pos = max(0,min(len(self._str),self._pos+dist))
+		curspos = self._pos - self._disp
+		if curspos <= 0: #left hand side
+			self._disp = max(0,self._disp+dist)
+		elif (curspos+1) >= self._width: #right hand side
+			self._disp = min(self._pos-self._width+1,self._disp+dist)
+		self._onchanged()
+	def home(self):
+		'''Return to the beginning'''
+		self._pos = 0
+		self._disp = 0
+		self._onchanged()
+	def end(self):
+		'''Move to the end'''
+		self._pos = 0
+		self._disp = 0
+		self.movepos(len(self._str))
+	def wordback(self):
+		'''Go back to the last word'''
+		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
+		if pos and not self.password:
+			#we started with a space
+			span = (lambda x: x[1] - x[0])(pos.span(1))
+			#how far we went
+			self.movepos(-span)
+		else:
+			self.home()
+	def wordnext(self):
+		'''Advance to the next word'''
+		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
+		if pos and not self.password:
+			span = (lambda x: x[1] - x[0])(pos.span(1))
+			self.movepos(span)
+		else:
+			self.end()
+	#CHARACTER INSERTION--------------------------------------------------------
+	def append(self,new):
+		'''Append string at cursor'''
+		self._str = self._str[:self._pos] + new + self._str[self._pos:]
+		self.movepos(len(new))
+	#CHARACTER DELETION METHODS-------------------------------------------------
+	def backspace(self):
+		'''Backspace one char at cursor'''
+		if not self._pos: return #don't backspace at the beginning of the line
+		self._str = self._str[:self._pos-1] + self._str[self._pos:]
+		self.movepos(-1)
+	def delchar(self):
+		'''Delete one char ahead of cursor'''
+		self._str = self._str[:self._pos] + self._str[self._pos+1:]
+		self._onchanged()
+	def delword(self):
+		'''Delete word behind cursor, like in sane text boxes'''
+		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
+		if pos and not self.password:
+			#we started with a space
+			span = pos.end(1)- 1
+			#how far we went
+			self._str = self._str[:span] + self._str[self._pos:]
+			self.movepos(span-self._pos)
+		else:
+			self._str = self._str[self._pos:]
+			self._disp = 0
+			self._pos = 0
+			self._onchanged()
+	def delwordback(self):
+		'''Delete word behind cursor, like in sane text boxes'''
+		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
+		if pos and not self.password:
+			span = pos.end(1)
+			#how far we went
+			self._str = self._str[:self._pos] + self._str[span:]
+		else:
+			self._str = self._str[:self._pos]
+		self._onchanged()
+	def clear(self):
+		'''Clear cursor and string'''
+		self._str = ""
+		self.home()
+
+class Tokenize:
+	'''Class for holding new tab-completers'''
+	prefixes = []		#list of prefixes to search for
+	suggestions = []	#list of (references to) lists for each prefix paradigm
+	def __init__(self,newPrefix=None,newSuggest=None):
+		'''Add a new tabbing method'''
+		if newPrefix is None and newSuggest is None:
+			self.localPrefix = []
+			self.localSuggest = []
+			self.complete = lambda x: Tokenize.complete(x,self)
+			return
+		elif newPrefix is None or newSuggest is None:
+			raise DisplayException("Invalid number of arguments for Tokenize. "+\
+				"Must be 0 args for instance, or 2 args for global class")
+		self.prefixes.append(newPrefix)
+		self.suggestions.append(newSuggest)
+
+	def addComplete(self,newPrefix,newSuggest):
+		'''Add new completion token to the class'''
+		self.localPrefix.append(newPrefix)
+		self.localSuggest.append(newSuggest)
+	
+	@classmethod
+	def complete(cls,incomplete,self=None):
+		'''Find rest of a name in a list'''
+		if isinstance(self,cls):
+			#go through the local lists first
+			ret = cls._complete(incomplete,self.localPrefix,self.localSuggest)
+			if ret:	#don't cut off all completions
+				return ret
+		return cls._complete(incomplete,cls.prefixes,cls.suggestions)
+
+	@staticmethod
+	def _complete(incomplete,prefixes,suggestions):
+		'''Backend for complete'''
+		#O(|prefixes|*|suggestionlists|), so n**2
+		for pno,prefix in enumerate(prefixes):
+			preflen = len(prefix)
+			if (incomplete[:preflen] == prefix):
+				search = incomplete[preflen:]
+				cut = len(search)
+				if callable(suggestions[pno]):
+					suggest,cut = suggestions[pno](search)
+				else:
+					suggest = [i for i in list(suggestions[pno])
+								if not i.find(search)]
+					if len(suggest) <= 1:
+						return [i[cut:]+' ' for i in suggest]
+					return [i[cut:] for i in suggest]
+				return []
+		return []
+
+class ScrollSuggest(Scrollable):
+	def __init__(self,width,string=""):
+		super(ScrollSuggest,self).__init__(width,string)
+		#completer
+		self.completer = Tokenize()
+		self._suggestList = []
+		self._suggestNum = 0
+		self._keepSuggest = False
+		#storage vars
+		self._lastdisp = None
+		self._lastpos = None
+	def complete(self):
+		'''Complete the last word before the cursor'''
+		if not self._suggestList:
+			lastSpace = self._str.rfind(" ",0,self._pos)
+			#if there is no lastspace, settle for 0
+			search = self._str[lastSpace+1:self._pos]
+			if lastSpace == -1: search = self._nonscroll + search
+			self._suggestList = self.completer.complete(search)
+		if self._suggestList:
+			self._suggestNum = (self._suggestNum+1)%len(self._suggestList)
+			suggestion = self._suggestList[self._suggestNum]
+			self._keepSuggest = True
+			if self._lastpos is None:
+				self._lastpos,self._lastdisp = self._pos,self._disp
+			else:
+				self._str = self._str[:self._lastpos] + self._str[self._pos:]
+				self._pos,self._disp = self._lastpos,self._lastdisp
+			dbmsg(suggestion,self._suggestList)
+			self.append(suggestion)
+			return True
+	def backcomplete(self):
+		'''Complete, but backwards. Assumes already generated list'''
+		if self._suggestList:
+			self._suggestNum = (self._suggestNum-1)%len(self._suggestList)
+			suggestion = self._suggestList[self._suggestNum]
+			self._keepSuggest = True
+			if self._lastpos is None:
+				self._lastpos,self._lastdisp = self._pos,self._disp
+			else:
+				self._str = self._str[:self._lastpos] + self._str[self._pos:]
+				self._pos,self._disp = self._lastpos,self._lastdisp
+			self.append(suggestion)
+			return True
+	def _onchanged(self):
+		'''Get rid of stored suggestions'''
+		if not self._keepSuggest:
+			self._suggestNum = -1
+			self._suggestList.clear()
+			self._lastpos,self._lastdisp = None,None
+		self._keepSuggest = False
+
+#Consideration to bear in mind: filenames with spaces in them. Don't forget to scan for \
