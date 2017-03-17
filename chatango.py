@@ -31,7 +31,6 @@ import ch
 import client
 import sys
 import os
-import time
 import re
 import json
 
@@ -839,7 +838,7 @@ if __name__ == "__main__":
 				newCreds[i] = jsonData.get(i)
 			#read into safe credentials regardless
 			creds_entire[i] = jsonData.get(i)
-	except (FileNotFoundError, json.decoder.JSONDecodeError):
+	except (FileNotFoundError, ValueError):
 		pass
 	except Exception as exc:
 		raise IOError("Error reading creds! Aborting...") from exc
@@ -864,7 +863,7 @@ if __name__ == "__main__":
 		try:
 			jsonData = {}
 			for i,bit in creds_readwrite.items():
-				if bit&2:
+				if bit&2 or i not in creds_entire:
 					jsonData[i] = newCreds[i]
 				else:	#"safe" credentials from last write
 					jsonData[i] = creds_entire[i]

@@ -2,7 +2,6 @@ Ultra-Meme Chatango CLIent
 ==========================
 Version 6.28318
 --------------------------
-
 A CLI application written in python with curses input and ANSI escape-colored output.   
 Used to implement a client for chatango, an online chatting service.   
 Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.  
@@ -18,9 +17,8 @@ these, seriously consider installing them
 
 If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
 
-If you run windows, check out [this fork](https://gitgud.io/JJXB/chatango-client/tree/master)
 
-FEATURES:
+Features:
 --------------------------
 * Tab completion
 * Terminal-resize compatible
@@ -30,13 +28,14 @@ FEATURES:
 * Change channel (F5)
 	* Supports white, red, and blue channels (and the apparently forgotten "both" channel)
 * Colorized output
-	* Color text matching a regex or so
+	* Color text matching a regex
 * Client commands
 	* Type \`help while the input box is empty to display a list of commands implemented
 * Mouse support
 * Chat filters based on message attributes
 
-DEPENDENCIES
+
+Dependencies:
 --------------------------
 * Python 3
 * Python ncurses (included on most distros)
@@ -44,7 +43,47 @@ DEPENDENCIES
 * Feh image viewer
 * MPV
 
-CHANGELOG
+
+Changing default openers:
+--------------------------
+If you want to use some other program like ImageMagick to open images,
+you'll have to do the following in custom.py
+```
+import client.linkopen
+client.linkopen.IMG_PATH = "animate"
+```
+And similarly for replacing mpv.
+
+
+Windows (Cygwin):
+-----------------
+If you have python installed in cygwin, then drawing and sending messages work
+fine in MinTTY, the cygwin default terminal emulator.
+The following terminals are NOT supported:
+* Console2 (256 color mode; ANSI escapes don't render correctly)
+* cmd.exe (Doesn't support ANSI escapes)
+* Powershell (Same as cmd.exe)
+
+Links in browser WILL NOT open correctly by default. There are two solutions: 
+* adding the browser to the Windows PATH environment variable, or
+* specifying a BROWSER environment variable (as in `BROWSER=chrome chatango.py`)
+The latter implies that there is a link to the executable in /usr/bin in cygwin.
+This can be created with `ln -s /cygdrive/c/Program\ Files/.../[browser executable].exe /usr/bin`
+To preserve the value of BROWSER, write a line in ~/.bashrc like `BROWSER=chrome`
+If python detects cygwin (that is, if `sys.platform` is `cygwin`), then linkopen.py
+assumes Firefox and Chrome if BROWSER is null.
+
+There are few good image viewers in windows that support command line args,
+and fewer if any that support opening links from command line. By default,
+the image viewer will redirect opening the browser. To do the same thing with
+videos, change `client.linkopen.MPV_PATH` (as shown above) to `""`.
+
+The comment about symlinking to /usr/local/bin still works.
+
+[This fork](https://gitgud.io/JJXB/chatango-client/tree/master) has more information
+
+
+Changelog
 =========================
 ## v6.28318	*2016/1/16*
 * Added mouse support again

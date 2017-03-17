@@ -7,11 +7,26 @@ evaluation.
 Althought this does not import .display (or any other module in the package),
 open_link expects an instance of display.Main as its first argument.
 '''
+#TODO add commandline arguments to IMG_PATH and MPV_PATH
+#		like (IMG_PATH, args)
+
 import re
 import os #for stupid stdout/err hack
+import sys #cygwin
 from threading import Thread
 import subprocess
-from webbrowser import open_new_tab
+
+#from what I can tell, there are no good command line image viewers
+#that can handle links in windows, so I'm defaulting this to browser
+#vlc and mpv exist for windows though, so just change client.linkopen.MPV_PATH
+IMG_PATH = "feh"
+MPV_PATH = "mpv"
+if sys.platform == "cygwin":
+	IMG_PATH = ""
+	if os.environ.get("BROWSER") is not None:
+		os.environ["BROWSER"] = os.path.pathsep.join(["chrome","firefox"])
+
+import webbrowser
 
 __all__ =	["LINK_RE","getLinks","getDefaults","parseLinks","clearLinks"
 			,"opener","open_link","daemonize","images","videos","browser"]
@@ -19,8 +34,6 @@ __all__ =	["LINK_RE","getLinks","getDefaults","parseLinks","clearLinks"
 #canonical link regex
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
 _POST_FORMAT_RE = re.compile(r"\.(\w+)[&/\?]?")
-IMG_PATH = "feh"
-MPV_PATH = "mpv"
 _lastlinks = []
 
 class LinkException(Exception):
@@ -49,7 +62,7 @@ def parseLinks(raw,prepend = False):
 	newLinks = []
 	#look for whole word links starting with http:// or https://
 	#don't add the same link twice
-	for i in LINK_RE.findall(raw+" "):
+	for i in LINK_RE.findall(raw+' '):
 		if i not in newLinks:
 			newLinks.append(i)
 	if prepend:
@@ -130,7 +143,7 @@ def daemonize(func):
 	ret.__doc__ = func.__doc__
 	return ret
 
-#PREDEFINED OPENERS-------------------------------------------------------------------------------------
+#PREDEFINED OPENERS-------------------------------------------------------------
 #start and daemonize feh (or replaced image viewing program)
 @opener("extension","jpeg")
 @opener("extension","jpg")
@@ -139,13 +152,15 @@ def daemonize(func):
 @opener("extension","png:large")
 @daemonize
 def images(main, link, ext):
+	if not IMG_PATH:
+		browser(main,link)
 	main.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 		displayProcess.communicate()
 	except:
-		main.newBlurb("No viewer %s found"%FEH_PATH)
+		main.newBlurb("No viewer %s found"%IMG_PATH)
 	
 @opener("extension","webm")
 @opener("extension","mp4")
@@ -153,6 +168,8 @@ def images(main, link, ext):
 @daemonize
 def videos(main, link, ext):
 	'''Start and daemonize mpv (or replaced video playing program)'''
+	if not MPV_PATH:
+		browser(main,link)
 	main.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
 	try:
@@ -172,7 +189,7 @@ def browser(main, link):
 	os.close(2)
 	os.open(os.devnull, os.O_RDWR)	#open devnull for writing
 	try:
-		open_new_tab(link)	#do thing
+		webbrowser.open_new_tab(link)	#do thing
 	finally:
 		os.dup2(savout, 1)	#reopen stdout
 		os.dup2(saverr, 2)
