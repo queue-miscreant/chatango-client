@@ -96,6 +96,13 @@ def parsePost(post, me, ishistory):
 class ChatBot(ch.Manager):
 	'''Bot for interacting with the chat'''
 	members = client.PromoteSet()
+	#event hookup
+	_events = \
+		{"onMemberJoin": None
+		,"onMemberLeave": None
+		,"onFloodBan": None
+		,"onFloodBanRepeat": None
+		,"onFloodWarning": None}
 
 	def __init__(self,creds,parent):
 		self.creds = creds
@@ -114,6 +121,11 @@ class ChatBot(ch.Manager):
 
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
 		client.Tokenize('@',self.members)
+
+	def _runEvent(self,event,*args):
+		try:
+			self._events[event](self,*args)
+		except TypeError: pass
 	
 	def onInit(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
@@ -167,10 +179,12 @@ class ChatBot(ch.Manager):
 
 	#on removal from a group
 	def onLeave(self,group):
+		'''On leave. No event because you can just use onDone'''
 		self.stop()
 		
 	#on message
 	def onMessage(self, group, post):
+		'''On message. No event because you can just use ExamineMessage'''
 		#double check for anons
 		user = post.user
 		if user[0] in '#!': user = user[1:]
@@ -185,6 +199,7 @@ class ChatBot(ch.Manager):
 		self.mainOverlay.msgPost(*msg)
 
 	def onHistoryDone(self, group, history):
+		'''On retrieved initial history. No event because this is run on successful connect'''
 		for post in history:
 			user = post.user
 			if user[0] in '#!': user = user[1:]
@@ -196,18 +211,23 @@ class ChatBot(ch.Manager):
 
 	def onFloodWarning(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
+		self._runEvent("onFloodWarning",group)
 
 	def onFloodBan(self, group, secs):
 		self.onFloodBanRepeat(group, secs)
+		self._runEvent("onFloodBan",group,secs)
 
 	def onFloodBanRepeat(self, group, secs):
 		self.mainOverlay.msgSystem("You are banned for %d seconds"%secs)
+		self._runEvent("onFloodRepeat",group,secs)
 	
 	def onParticipants(self, group):
+		'''On received joined members. No event because this is run on successful connect'''
 		self.members.extend(group.userlist)
 		self.mainOverlay.recolorlines()
 
 	def onUsercount(self, group):
+		'''On user count changed. No event because this is run on member join/leave'''
 		self.mainOverlay.parent.updateinfo(str(group.usercount))
 
 	def onMemberJoin(self, group, user):
@@ -215,9 +235,11 @@ class ChatBot(ch.Manager):
 			self.members.append(user)
 		#notifications
 		self.mainOverlay.parent.newBlurb("%s has joined" % user)
+		self._runEvent("onMemberJoin",group,user)
 
 	def onMemberLeave(self, group, user):
 		self.mainOverlay.parent.newBlurb("%s has left" % user)
+		self._runEvent("onMemberLeave",group,user)
 
 	def onConnectionLost(self, group):
 		message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
@@ -645,24 +667,6 @@ LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$",re.MULTILINE)
 REPLY_RE = re.compile(r"@\w+?\b")
 QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
 
-#Non-256 colors
-ordering = \
-	("blue"
-	,"cyan"
-	,"magenta"
-	,"red"
-	,"yellow")
-for i in range(10):
-	client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
-del ordering
-client.defColor("green",intense=True)
-client.defColor("green")			#11:	>
-client.defColor("none")				#12:	blank channel
-client.defColor("red","red")		#13:	red channel
-client.defColor("blue","blue")		#14:	blue channel
-client.defColor("magenta","magenta")#15:	both channel
-client.defColor("white","white")	#16:	blank channel, visible
-
 #color by user's name
 def getColor(name,init = 6,split = 109,rot = 6):
 	if name[0] in "#!": name = name[1:]
@@ -682,120 +686,140 @@ def convertTo256(string):
 		return client.rawNum(0)
 	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
 
-#COMMANDS-----------------------------------------------------------------------
-@client.command("ignore")
-def ignore(parent,person,*args):
-	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-	if not chatOverlay: return
-	chatbot = chatOverlay[-1].bot
-
-	if '@' == person[0]: person = person[1:]
-	if person in chatbot.ignores: return
-	chatbot.ignores.append(person)
-	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-	if chatOverlay: chatOverlay[-1].redolines()
-
-@client.command("unignore")
-def unignore(parent,person,*args):
-	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-	if not chatOverlay: return
-	chatbot = chatOverlay[-1].bot
-
-	if '@' == person[0]: person = person[1:]
-	if person == "all" or person == "everyone":
-		chatbot.ignores.clear()
-		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-		if chatOverlay: chatOverlay[-1].redolines()
-		return
-	if person not in chatbot.ignores: return
-	chatbot.ignores.remove(person)
-	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-	if chatOverlay: chatOverlay[-1].redolines()
-
-@client.command("keys")
-def listkeys(parent,*args):
-	'''Get list of the ChatangoOverlay's keys'''
-	#keys are instanced at runtime
-	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-	if not chatOverlay: return
-	keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
-	keysList.addKeys({
-		"enter": lambda x: -1
-	})
-	return keysList
-
-def tabFile(path):
-	findpart = path.rfind(os.path.sep)
-	initpath,search = path[:findpart+1], path[findpart+1:]
-	if not path or "~/" not in path[0]: #try to generate full path
-		newpath = os.getcwd()+os.path.sep+path[:findpart+1].replace("\ ",' ')
-		ls = os.listdir(newpath)
-	else:
-		ls = os.listdir(os.path.expanduser(initpath))
-		
-	suggestions = []
-	if search: #we need to iterate over what we were given
-		#insert \ for the suggestion parser
-		suggestions = sorted([i.replace(' ',"\ ")  for i in ls
-			if not i.find(search)])
-	else: #otherwise ignore hidden files
-		suggestions = sorted([i.replace(' ',"\ ") for i in ls if i.find('.')])
-
-	if not suggestions:
-		return [],0
-	return suggestions,len(path)-len(initpath)
-
-@client.command("avatar",tabFile)
-def avatar(parent,*args):
-	'''Upload the file as the user avatar'''
-	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-	if not chatOverlay: return
-	path = os.path.expanduser(' '.join(args))
-
-#-------------------------------------------------------------------------------
-def runClient(main,creds):
-	#fill in credential holes
-	for num,i in enumerate(["user","passwd","room"]):
-		#skip if supplied
-		if creds.get(i) is not None: continue
-		inp = client.InputOverlay(main,"Enter your " + \
-			 ["username","password","room name"][num], num == 1,True)
-		inp.add()
-		creds[i] = inp.waitForInput()
-		if not main.active: return
-	#fill in formatting hole
-	if creds.get("formatting") is None:
-		#letting the program write into the constant would be stupid
-		creds["formatting"] = []
-		for i in DEFAULT_FORMATTING:
-			creds["formatting"].append(i)
-	elif isinstance(creds["formatting"],dict):	#backward compatible
-		new = []
-		for i in ["fc","nc","ff","fz"]:
-			new.append(creds["formatting"][i])
-		creds["formatting"] = new
-
-	#ignores hole
-	if creds.get("ignores") is None:
-		creds["ignores"] = []	#initialize it
-	#filtered streams
-	if creds.get("filtered_channels") is None:
-		creds["filtered_channels"] = [0,0,0,0]
-	#options
-	if creds.get("options") is None:
-		creds["options"] = {}
-	for i in DEFAULT_OPTIONS:
-		if creds["options"].get(i) is None:
-			creds["options"][i] = DEFAULT_OPTIONS[i]
-
-	main.toggleMouse(creds["options"]["mouse"])
-
-	#initialize chat bot
-	chatbot = ChatBot(creds,main)
-	client.onDone(chatbot.stop)
-	chatbot.main()
+#Non-256 colors
+ordering = \
+	("blue"
+	,"cyan"
+	,"magenta"
+	,"red"
+	,"yellow")
+for i in range(10):
+	client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
+del ordering
+client.defColor("green",intense=True)
+client.defColor("green")			#11:	>
+client.defColor("none")				#12:	blank channel
+client.defColor("red","red")		#13:	red channel
+client.defColor("blue","blue")		#14:	blue channel
+client.defColor("magenta","magenta")#15:	both channel
+client.defColor("white","white")	#16:	blank channel, visible
 
 if __name__ == "__main__":
+	#only define these once
+	#COMMANDS-------------------------------------------------------------------
+	@client.command("ignore")
+	def ignore(parent,person,*args):
+		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+		if not chatOverlay: return
+		chatbot = chatOverlay[-1].bot
+
+		if '@' == person[0]: person = person[1:]
+		if person in chatbot.ignores: return
+		chatbot.ignores.append(person)
+		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+		if chatOverlay: chatOverlay[-1].redolines()
+
+	@client.command("unignore")
+	def unignore(parent,person,*args):
+		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+		if not chatOverlay: return
+		chatbot = chatOverlay[-1].bot
+
+		if '@' == person[0]: person = person[1:]
+		if person == "all" or person == "everyone":
+			chatbot.ignores.clear()
+			chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+			if chatOverlay: chatOverlay[-1].redolines()
+			return
+		if person not in chatbot.ignores: return
+		chatbot.ignores.remove(person)
+		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+		if chatOverlay: chatOverlay[-1].redolines()
+
+	@client.command("keys")
+	def listkeys(parent,*args):
+		'''Get list of the ChatangoOverlay's keys'''
+		#keys are instanced at runtime
+		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+		if not chatOverlay: return
+		keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
+		keysList.addKeys({
+			"enter": lambda x: -1
+		})
+		return keysList
+
+	def tabFile(path):
+		findpart = path.rfind(os.path.sep)
+		initpath,search = path[:findpart+1], path[findpart+1:]
+		if not path or "~/" not in path[0]: #try to generate full path
+			newpath = os.getcwd()+os.path.sep+path[:findpart+1].replace("\ ",' ')
+			ls = os.listdir(newpath)
+		else:
+			ls = os.listdir(os.path.expanduser(initpath))
+			
+		suggestions = []
+		if search: #we need to iterate over what we were given
+			#insert \ for the suggestion parser
+			suggestions = sorted([i.replace(' ',"\ ")  for i in ls
+				if not i.find(search)])
+		else: #otherwise ignore hidden files
+			suggestions = sorted([i.replace(' ',"\ ") for i in ls if i.find('.')])
+
+		if not suggestions:
+			return [],0
+		return suggestions,len(path)-len(initpath)
+
+	@client.command("avatar",tabFile)
+	def avatar(parent,*args):
+		'''Upload the file as the user avatar'''
+		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+		if not chatOverlay: return
+		path = os.path.expanduser(' '.join(args))
+
+	#---------------------------------------------------------------------------
+	def runClient(main,creds):
+		#fill in credential holes
+		for num,i in enumerate(["user","passwd","room"]):
+			#skip if supplied
+			if creds.get(i) is not None: continue
+			inp = client.InputOverlay(main,"Enter your " + \
+				 ["username","password","room name"][num], num == 1,True)
+			inp.add()
+			creds[i] = inp.waitForInput()
+			if not main.active: return
+		#fill in formatting hole
+		if creds.get("formatting") is None:
+			#letting the program write into the constant would be stupid
+			creds["formatting"] = []
+			for i in DEFAULT_FORMATTING:
+				creds["formatting"].append(i)
+		elif isinstance(creds["formatting"],dict):	#backward compatible
+			new = []
+			for i in ["fc","nc","ff","fz"]:
+				new.append(creds["formatting"][i])
+			creds["formatting"] = new
+
+		#ignores hole
+		if creds.get("ignores") is None:
+			creds["ignores"] = []	#initialize it
+		#filtered streams
+		if creds.get("filtered_channels") is None:
+			creds["filtered_channels"] = [0,0,0,0]
+		#options
+		if creds.get("options") is None:
+			creds["options"] = {}
+		for i in DEFAULT_OPTIONS:
+			if creds["options"].get(i) is None:
+				creds["options"][i] = DEFAULT_OPTIONS[i]
+
+		main.toggleMouse(creds["options"]["mouse"])
+
+		#initialize chat bot
+		chatbot = ChatBot(creds,main)
+		client.onDone(chatbot.stop)
+		chatbot.main()
+
+	#start everything up now
 	newCreds = {}
 	readCredsFlag = True
 	importCustom = True

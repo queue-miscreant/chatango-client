@@ -105,8 +105,8 @@ def command(commandname,complete=[]):
 			_commandComplete[commandname] = complete
 			
 	return wrapper
-def onDone(func):
-	_afterDone.append(func)
+def onDone(func,*args):
+	_afterDone.append((func,*args))
 	return func
 
 #OVERLAY HELPERS------------------------------------------------------------------
@@ -1461,8 +1461,8 @@ def start(target,*args,two56=False):
 	bot_thread.start()
 	main_instance.loop()	#main program loop
 	try:
-		for i in _afterDone:
-			i()
+		for i,j in _afterDone:
+			i(*j)
 	except Exception as e:
 		print("Error occurred during shutdown: ", e)
 	if lasterr is not None:
