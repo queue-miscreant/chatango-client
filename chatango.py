@@ -724,7 +724,28 @@ def listkeys(parent,*args):
 	})
 	return keysList
 
-@client.command("avatar")
+def tabFile(path):
+	findpart = path.rfind(os.path.sep)
+	initpath,search = path[:findpart+1], path[findpart+1:]
+	if not path or "~/" not in path[0]: #try to generate full path
+		newpath = os.getcwd()+os.path.sep+path[:findpart+1].replace("\ ",' ')
+		ls = os.listdir(newpath)
+	else:
+		ls = os.listdir(os.path.expanduser(initpath))
+		
+	suggestions = []
+	if search: #we need to iterate over what we were given
+		#insert \ for the suggestion parser
+		suggestions = sorted([i.replace(' ',"\ ")  for i in ls
+			if not i.find(search)])
+	else: #otherwise ignore hidden files
+		suggestions = sorted([i.replace(' ',"\ ") for i in ls if i.find('.')])
+
+	if not suggestions:
+		return [],0
+	return suggestions,len(path)-len(initpath)
+
+@client.command("avatar",tabFile)
 def avatar(parent,*args):
 	'''Upload the file as the user avatar'''
 	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')

@@ -6,9 +6,7 @@ system of overlays, pulling input from the topmost
 one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
-#TODO get rid of setmins, use actual errors
-#TODO redolines doesn't run when selecting, and thus resizing while selecting is broken
-#TODO scrolling should be bidirectional
+#TODO scrolling should let you scroll up from long messages
 
 try:
 	import curses
@@ -16,8 +14,6 @@ except ImportError:
 	raise ImportError("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
 import sys
 import os
-if not (sys.stdin.isatty() and sys.stdout.isatty()): #check if terminal
-	raise IOError("This script is not intended to be piped")
 #escape has delay typically
 os.environ.setdefault("ESCDELAY", "25")
 import time
@@ -30,15 +26,7 @@ __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"BlockingOverlay","MainOverlay","onDone","override","staticize"]
 
 lasterr = None
-#break if smaller than these
 RESERVE_LINES = 3
-_MIN_X = 0
-_MIN_Y = 0
-def setmins(newx,newy):
-	'''Set minimum width/height'''
-	global _MIN_X,_MIN_Y
-	_MIN_X=max(_MIN_X,newx)
-	_MIN_Y=max(_MIN_Y,newy)
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -101,13 +89,21 @@ def cloneKey(fro,to):
 
 #EXTENDABLE CONTAINERS----------------------------------------------------------
 _commands = {}
+_commandComplete = {}
 _afterDone = []
 
 #decorators for containers
-def command(commandname):
-	'''Add function as a command `commandname`'''
+def command(commandname,complete=[]):
+	'''
+	Add function as a command `commandname` with argument suggestion `complete`
+	`complete` may either be a list or a function returning a list and a number
+	that specifies where to start the suggestion from
+	'''
 	def wrapper(func):
 		_commands[commandname] = func
+		if complete:
+			_commandComplete[commandname] = complete
+			
 	return wrapper
 def onDone(func):
 	_afterDone.append(func)
@@ -217,12 +213,11 @@ class OverlayBase:
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
 		self._keys = {
-			27:	self._callalt
-									#don't run post
+			27:	self._callalt		 #don't run post
 			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1 
 			,curses.KEY_MOUSE:	self._callmouse
 		}
-		self._altkeys =	{None: lambda: -1}
+		self._altkeys =	{-1: lambda: -1}
 		self._mouse = {}
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
@@ -406,11 +401,6 @@ class TextOverlay(OverlayBase):
 class ListOverlay(OverlayBase,Box):
 	'''Display a list of objects, optionally drawing something additional'''
 	replace = True
-	#worst case column: |(value[0])...(value[1])|
-	#				    1    2     345  6	    7
-	#worst case rows: |(list member)|(RESERVED)
-	#				  1	2			3
-	setmins(7,3)
 	def __init__(self,parent,outList,drawOther = None,modes = [""]):
 		super(ListOverlay, self).__init__(parent)
 		self.it = 0
@@ -460,6 +450,12 @@ class ListOverlay(OverlayBase,Box):
 		lines[0] = self.box_top()
 		size = self.parent.y-2
 		maxx = self.parent.x-2
+		#worst case column: |(value[0])...(value[-1])|
+		#				    1    2     345  6	     7
+		#worst case rows: |(list member)|(RESERVED)
+		#				  1	2			3
+		if size < 1 or maxx < 5:
+			raise SizeException()
 		#which portion of the list is currently displaced
 		partition = (self.it//size)*size
 		#get the partition of the list we're at, pad the list
@@ -544,7 +540,8 @@ class ColorOverlay(ListOverlay,Box):
 		furtherInput.addKeys({"enter": selectFunction})
 		furtherInput.add()
 
-	def _genspectrum(self):
+	@staticmethod
+	def _genspectrum():
 		init = [0,2]
 		final = [5,2]
 		rspec = [(5,g,0) for g in init]
@@ -566,11 +563,6 @@ class ColorSliderOverlay(OverlayBase,Box):
 	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
 	replace = True
 	NAMES = ["Red","Green","Blue"]
-	#worst case column: |Red  GreenBlue |
-	#		  			123456789ABCDEFGH = 17
-	#worst case rows: |(color row) (name)(val) (hex)|(RESERVED)
-	#		  1	2     3	 4	5 6  7  8
-	setmins(17,8)
 	def __init__(self,parent,initcolor = [127,127,127]):
 		super(ColorSliderOverlay, self).__init__(parent)
 		#allow setting from hex value
@@ -598,6 +590,8 @@ class ColorSliderOverlay(OverlayBase,Box):
 		'''Display 3 bars, their names, values, and string in hex'''
 		wide = (self.parent.x-2)//3 - 1
 		space = self.parent.y-7
+		if space < 1 or wide < 5: #green is the longest name
+			raise SizeException()
 		lines[0] = self.box_top()
 		for i in range(space):
 			string = ""
@@ -693,20 +687,6 @@ class InputOverlay(TextOverlay,Box):
 		'''Set function to run after valid poll'''
 		self.ondone = func
 
-def tabFile(path):
-	path = os.path.sep + path
-	findpart = path.rfind(os.path.sep)
-	initpath,search = path[:findpart+1], path[findpart+1:]
-	ls = os.listdir(initpath)
-	suggestions = []
-	if search: #we need to iterate over what we were given
-		suggestions = sorted([i for i in ls if not i.find(search)])
-	else: #otherwise ignore hidden files
-		suggestions = sorted([i for i in ls if i.find('.')])
-	if not suggestions:
-		return [],0
-	return suggestions,len(path)-len(initpath)
-
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands. Commands are run in separate threads'''
 	replace = False
@@ -716,7 +696,8 @@ class CommandOverlay(TextOverlay):
 		self._sentinel = ord(CHAR_COMMAND)
 		self.text.setnonscroll(CHAR_COMMAND)
 		self.text.completer.addComplete(CHAR_COMMAND,_commands)
-		self.text.completer.addComplete(os.path.sep,tabFile)
+		for i,j in _commandComplete.items():
+			self.text.addCommand(i,j)
 		self.controlHistory(self.history,self.text)
 		self._keys.update({
 			10:		staticize(self._run)
@@ -1043,22 +1024,24 @@ class MainOverlay(TextOverlay):
 		Redo lines, if current lines does not represent the unfiltered messages
 		or if the width has changed
 		'''
-		if self.isselecting():
-			self._redoScheduled = True
-			return
 		if width is None: width = self.parent.x
 		if height is None: height = self.parent.y
 		newlines = []
 		numup,nummsg = 0,1
+		filtered = 0
 
 		#while there are still messages to add (to the current height)
-		while numup < height and (nummsg <= len(self._allMessages)):
+		#feels dirty and slow, but this will also resize all messages below
+		#the selection
+		while (nummsg <= self._selector or numup < height) and \
+			nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
 			#if a filter fails, then the message should be drawn, as it's likely a system message
 			try:
 				if (not i[3]) and self.filterMessage(*i[1]):
 					i[2] = 0
 					nummsg += 1
+					filtered += 1
 					continue
 			except: pass
 			a,b = i[0].breaklines(width,self.INDENT)
@@ -1066,6 +1049,8 @@ class MainOverlay(TextOverlay):
 			newlines = a + newlines
 			i[2] = b
 			numup += b
+			if nummsg == self._selector: #invalid = self._selector = 0
+				self._linesup = numup + self._unfiltup
 			nummsg += 1
 		self._lines = newlines
 		self.canselect = True
@@ -1255,8 +1240,12 @@ class Main:
 		#justify number of lines
 		lines = ["" for i in range(self.y)]
 		#start with the last "replacing" overlay, then draw all overlays afterward
-		for start in range(self._lastReplace,len(self._ins)):
-			self._ins[start](lines)
+		try:
+			for start in range(self._lastReplace,len(self._ins)):
+				self._ins[start](lines)
+		except SizeException:
+			self.candisplay = 0
+			return
 		#main display method: move to top of screen
 		_moveCursor()
 		curses.curs_set(0)
@@ -1428,8 +1417,6 @@ class Main:
 		newy, newx = self._screen.getmaxyx()
 		newy -= RESERVE_LINES
 		try:
-			if newy < _MIN_Y or newx < _MIN_X:
-				raise SizeException()
 			for i in self._ins:
 				i.resize(newx,newy)
 		except SizeException:
@@ -1464,6 +1451,8 @@ class Main:
 
 def start(target,*args,two56=False):
 	'''Start the client. Run this!'''
+	if not (sys.stdin.isatty() and sys.stdout.isatty()): #check if terminal
+		raise IOError("This script is not intended to be piped")
 	main_instance = Main(two56)
 	main_instance.resize()
 	#daemonize functions bot_thread

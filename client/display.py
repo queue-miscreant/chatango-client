@@ -5,6 +5,8 @@ Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.
 '''
+#TODO make space ignoring better for argument tab (/TODO for it)
+
 import re
 from .wcwidth import wcwidth
 
@@ -670,21 +672,29 @@ class Tokenize:
 			preflen = len(prefix)
 			if (incomplete[:preflen] == prefix):
 				search = incomplete[preflen:]
-				cut = len(search)
-				if callable(suggestions[pno]):
-					suggest,cut = suggestions[pno](search)
-				else:
-					suggest = [i for i in list(suggestions[pno])
-								if not i.find(search)]
-					if len(suggest) <= 1:
-						return [i[cut:]+' ' for i in suggest]
-					return [i[cut:] for i in suggest]
-				return []
+				return Tokenize.collapseSugestion(search,suggestions[pno])
 		return []
+
+	@staticmethod
+	def collapseSugestion(search,suggestion):
+		'''
+		When a list of suggestions (or a callable that generates them) has
+		been found, cut the list down based on the length of the search
+		'''
+		cut = len(search)
+		if callable(suggestion):
+			suggest,cut = suggestion(search)
+		else:
+			suggest = [i for i in list(suggestion) if not i.find(search)]
+			if len(suggest) <= 1:
+				return [i[cut:]+' ' for i in suggest]
+		return [i[cut:] for i in suggest]
+			
 
 class ScrollSuggest(Scrollable):
 	def __init__(self,width,string=""):
 		super(ScrollSuggest,self).__init__(width,string)
+		self._argumentComplete = {}
 		#completer
 		self.completer = Tokenize()
 		self._suggestList = []
@@ -693,24 +703,46 @@ class ScrollSuggest(Scrollable):
 		#storage vars
 		self._lastdisp = None
 		self._lastpos = None
+	def addCommand(self,command,suggestion):
+		self._argumentComplete[command] = suggestion
 	def complete(self):
 		'''Complete the last word before the cursor'''
+		#need to generate list
 		if not self._suggestList:
-			lastSpace = self._str.rfind(" ",0,self._pos)
-			#if there is no lastspace, settle for 0
-			search = self._str[lastSpace+1:self._pos]
-			if lastSpace == -1: search = self._nonscroll + search
-			self._suggestList = self.completer.complete(search)
+			spaceSplit = self._str[:self._pos].split(' ')
+			numSpaces = len(spaceSplit)
+			#argument-styled completion if we have it
+			if numSpaces > 1 and self._argumentComplete:
+				verb = spaceSplit[0]
+				if verb in self._argumentComplete:
+					complete = self._argumentComplete[verb]
+					#iterate to not care about \ before a space
+					#TODO consider "", escaped escapes
+					suggest = spaceSplit[-1]
+					splitNo = 2
+					while splitNo < numSpaces and spaceSplit[-splitNo][-1] == '\\':
+						suggest = spaceSplit[-splitNo] + ' ' + suggest
+						splitNo += 1
+					self._suggestList = Tokenize.collapseSugestion(suggest,complete)
+			#just use a prefix
+			if not self._suggestList:
+				search = spaceSplit[-1]
+				#if there is no lastspace, settle for 0
+				if len(spaceSplit) == 1: search = self._nonscroll + search
+				self._suggestList = self.completer.complete(search)
+
+		#if there's a list or we generated one
 		if self._suggestList:
 			self._suggestNum = (self._suggestNum+1)%len(self._suggestList)
 			suggestion = self._suggestList[self._suggestNum]
-			self._keepSuggest = True
-			if self._lastpos is None:
-				self._lastpos,self._lastdisp = self._pos,self._disp
-			else:
-				self._str = self._str[:self._lastpos] + self._str[self._pos:]
-				self._pos,self._disp = self._lastpos,self._lastdisp
-			dbmsg(suggestion,self._suggestList)
+			#no need to tab through a single one
+			if len(self._suggestList) > 1:
+				self._keepSuggest = True
+				if self._lastpos is None:
+					self._lastpos,self._lastdisp = self._pos,self._disp
+				else:
+					self._str = self._str[:self._lastpos] + self._str[self._pos:]
+					self._pos,self._disp = self._lastpos,self._lastdisp
 			self.append(suggestion)
 			return True
 	def backcomplete(self):
@@ -733,5 +765,3 @@ class ScrollSuggest(Scrollable):
 			self._suggestList.clear()
 			self._lastpos,self._lastdisp = None,None
 		self._keepSuggest = False
-
-#Consideration to bear in mind: filenames with spaces in them. Don't forget to scan for \
