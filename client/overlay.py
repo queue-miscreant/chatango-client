@@ -1249,12 +1249,11 @@ class Main:
 			return
 		#main display method: move to top of screen
 		_moveCursor()
-		curses.curs_set(0)
+		print("\x1b[?25l",end="")
 		#draw each line in lines, deleting the rest of the garbage on the line
 		for i in lines:
 			print(i,end="\x1b[K\n\r") 
-		curses.curs_set(1)
-		print(CHAR_RETURN_CURSOR,end="")
+		print(CHAR_RETURN_CURSOR,end="\x1b[?25h")
 	def _updateinput(self):
 		'''Input display backend'''
 		if not (self.active and self.candisplay): return
