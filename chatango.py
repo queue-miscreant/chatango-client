@@ -126,6 +126,11 @@ class ChatBot(ch.Manager):
 		try:
 			self._events[event](self,*args)
 		except TypeError: pass
+	@classmethod
+	def addEvent(cls,eventname,func):
+		if eventname in cls._events:
+			cls._events[eventname] = func
+			client.dbmsg(eventname,func)
 	
 	def onInit(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
@@ -686,26 +691,47 @@ def convertTo256(string):
 		return client.rawNum(0)
 	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
 
-#Non-256 colors
-ordering = \
-	("blue"
-	,"cyan"
-	,"magenta"
-	,"red"
-	,"yellow")
-for i in range(10):
-	client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
-del ordering
-client.defColor("green",intense=True)
-client.defColor("green")			#11:	>
-client.defColor("none")				#12:	blank channel
-client.defColor("red","red")		#13:	red channel
-client.defColor("blue","blue")		#14:	blue channel
-client.defColor("magenta","magenta")#15:	both channel
-client.defColor("white","white")	#16:	blank channel, visible
+def tabFile(path):
+	findpart = path.rfind(os.path.sep)
+	initpath,search = path[:findpart+1], path[findpart+1:]
+	if not path or "~/" not in path[0]: #try to generate full path
+		newpath = os.getcwd()+os.path.sep+path[:findpart+1].replace("\ ",' ')
+		ls = os.listdir(newpath)
+	else:
+		ls = os.listdir(os.path.expanduser(initpath))
+		
+	suggestions = []
+	if search: #we need to iterate over what we were given
+		#insert \ for the suggestion parser
+		suggestions = sorted([i.replace(' ',"\ ")  for i in ls
+			if not i.find(search)])
+	else: #otherwise ignore hidden files
+		suggestions = sorted([i.replace(' ',"\ ") for i in ls if i.find('.')])
+
+	if not suggestions:
+		return [],0
+	return suggestions,len(path)-len(initpath)
 
 if __name__ == "__main__":
 	#only define these once
+	#Non-256 colors
+	ordering = \
+		("blue"
+		,"cyan"
+		,"magenta"
+		,"red"
+		,"yellow")
+	for i in range(10):
+		client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
+	del ordering
+	client.defColor("green",intense=True)
+	client.defColor("green")			#11:	>
+	client.defColor("none")				#12:	blank channel
+	client.defColor("red","red")		#13:	red channel
+	client.defColor("blue","blue")		#14:	blue channel
+	client.defColor("magenta","magenta")#15:	both channel
+	client.defColor("white","white")	#16:	blank channel, visible
+
 	#COMMANDS-------------------------------------------------------------------
 	@client.command("ignore")
 	def ignore(parent,person,*args):
@@ -747,27 +773,6 @@ if __name__ == "__main__":
 			"enter": lambda x: -1
 		})
 		return keysList
-
-	def tabFile(path):
-		findpart = path.rfind(os.path.sep)
-		initpath,search = path[:findpart+1], path[findpart+1:]
-		if not path or "~/" not in path[0]: #try to generate full path
-			newpath = os.getcwd()+os.path.sep+path[:findpart+1].replace("\ ",' ')
-			ls = os.listdir(newpath)
-		else:
-			ls = os.listdir(os.path.expanduser(initpath))
-			
-		suggestions = []
-		if search: #we need to iterate over what we were given
-			#insert \ for the suggestion parser
-			suggestions = sorted([i.replace(' ',"\ ")  for i in ls
-				if not i.find(search)])
-		else: #otherwise ignore hidden files
-			suggestions = sorted([i.replace(' ',"\ ") for i in ls if i.find('.')])
-
-		if not suggestions:
-			return [],0
-		return suggestions,len(path)-len(initpath)
 
 	@client.command("avatar",tabFile)
 	def avatar(parent,*args):

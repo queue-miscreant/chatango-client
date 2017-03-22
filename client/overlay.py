@@ -106,7 +106,7 @@ def command(commandname,complete=[]):
 			
 	return wrapper
 def onDone(func,*args):
-	_afterDone.append((func,*args))
+	_afterDone.append((func,args))
 	return func
 
 #OVERLAY HELPERS------------------------------------------------------------------
@@ -1204,6 +1204,7 @@ class _Schedule:
 class Main:
 	'''Main class; handles all IO and defers to overlays'''
 	last = 0
+	_onAdded = []
 	def __init__(self,two56colors):
 		self._screen = curses.initscr()		#init screen
 		#sadly, I can't put this in main.loop to make it more readable
@@ -1321,6 +1322,7 @@ class Main:
 	def addOverlay(self,new):
 		'''Add overlay'''
 		if not isinstance(new,OverlayBase): return
+		for i in self._onAdded: i(self,new)
 		new.index = len(self._ins)
 		self._ins.append(new)
 		if new.replace: self._lastReplace = new.index
@@ -1434,6 +1436,9 @@ class Main:
 		if value and not hasattr(self,"two56start"): #not defined on startup
 			self.two56start = len(_COLORS) + rawNum(0)
 			def256colors()
+	@classmethod
+	def onOverlayAdded(cls,function):
+		cls._onAdded.append(function)
 	def toggleMouse(self,state):
 		'''Turn the mouse on or off'''
 		return curses.mousemask(state and _MOUSE_MASK)
@@ -1464,7 +1469,7 @@ def start(target,*args,two56=False):
 		for i,j in _afterDone:
 			i(*j)
 	except Exception as e:
-		print("Error occurred during shutdown: ", e)
+		raise Exception("Error occurred during shutdown") from e
 	if lasterr is not None:
 		raise lasterr
 
