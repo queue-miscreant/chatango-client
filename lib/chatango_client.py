@@ -11,6 +11,8 @@ from . import client
 import os
 import re
 
+__all__ = ["ChatBot","ChatangoOverlay","tabFile","convertTo256","getColor"]
+
 #constants for chatango
 FONT_FACES = \
 	["Arial"
@@ -31,6 +33,7 @@ OPTION_NAMES = \
 	,"256 colors:"
 	,"HTML colors:"
 	,"Colorize anon names:"]
+ONLY_ONCE = True
 
 def parsePost(post, me, ishistory):
 	#and is short-circuited
@@ -662,3 +665,74 @@ def tabFile(path):
 	if not suggestions:
 		return [],0
 	return suggestions,len(path)-len(initpath)
+
+#what it says on the tin
+if ONLY_ONCE:
+	#colors in this file because ChatangoOverlay depends on it directly
+	#Non-256 colors
+	ordering = \
+		("blue"
+		,"cyan"
+		,"magenta"
+		,"red"
+		,"yellow")
+	for i in range(10):
+		client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
+	client.defColor("green",intense=True)
+	client.defColor("green")			#11:	>
+	client.defColor("none")				#12:	blank channel
+	client.defColor("red","red")		#13:	red channel
+	client.defColor("blue","blue")		#14:	blue channel
+	client.defColor("magenta","magenta")#15:	both channel
+	client.defColor("white","white")	#16:	blank channel, visible
+
+	#COMMANDS-------------------------------------------------------------------
+	@client.command("ignore")
+	def ignore(parent,person,*args):
+		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+		if not chatOverlay: return
+		chatbot = chatOverlay[-1].bot
+
+		if '@' == person[0]: person = person[1:]
+		if person in chatbot.ignores: return
+		chatbot.ignores.append(person)
+		if chatOverlay: chatOverlay[-1].redolines()
+
+	@client.command("unignore")
+	def unignore(parent,person,*args):
+		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+		if not chatOverlay: return
+		chatbot = chatOverlay[-1].bot
+
+		if '@' == person[0]: person = person[1:]
+		if person == "all" or person == "everyone":
+			chatbot.ignores.clear()
+			if chatOverlay: chatOverlay[-1].redolines()
+			return
+		if person not in chatbot.ignores: return
+		chatbot.ignores.remove(person)
+		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
+		if chatOverlay: chatOverlay[-1].redolines()
+
+	@client.command("keys")
+	def listkeys(parent,*args):
+		'''Get list of the ChatangoOverlay's keys'''
+		#keys are instanced at runtime
+		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+		if not chatOverlay: return
+		keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
+		keysList.addKeys({
+			"enter": lambda x: -1
+		})
+		return keysList
+
+	@client.command("avatar",tabFile)
+	def avatar(parent,*args):
+		'''Upload the file as the user avatar'''
+		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
+		if not chatOverlay: return
+		path = os.path.expanduser(' '.join(args))
+		path = os.path.replace("\ ",' ')
+		chatOverlay.bot.uploadAvatar(path)
+
+	ONLY_ONCE = False

@@ -81,132 +81,6 @@ DEFAULT_FORMATTING = \
 	,"0"		#font face
 	,12]		#font size
 
-def defineColors():
-	#Non-256 colors
-	ordering = \
-		("blue"
-		,"cyan"
-		,"magenta"
-		,"red"
-		,"yellow")
-	for i in range(10):
-		client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
-	del ordering
-	client.defColor("green",intense=True)
-	client.defColor("green")			#11:	>
-	client.defColor("none")				#12:	blank channel
-	client.defColor("red","red")		#13:	red channel
-	client.defColor("blue","blue")		#14:	blue channel
-	client.defColor("magenta","magenta")#15:	both channel
-	client.defColor("white","white")	#16:	blank channel, visible
-
-#COMMANDS-------------------------------------------------------------------
-@client.command("ignore")
-def ignore(parent,person,*args):
-	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-	if not chatOverlay: return
-	chatbot = chatOverlay[-1].bot
-
-	if '@' == person[0]: person = person[1:]
-	if person in chatbot.ignores: return
-	chatbot.ignores.append(person)
-	if chatOverlay: chatOverlay[-1].redolines()
-
-@client.command("unignore")
-def unignore(parent,person,*args):
-	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-	if not chatOverlay: return
-	chatbot = chatOverlay[-1].bot
-
-	if '@' == person[0]: person = person[1:]
-	if person == "all" or person == "everyone":
-		chatbot.ignores.clear()
-		if chatOverlay: chatOverlay[-1].redolines()
-		return
-	if person not in chatbot.ignores: return
-	chatbot.ignores.remove(person)
-	chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-	if chatOverlay: chatOverlay[-1].redolines()
-
-@client.command("keys")
-def listkeys(parent,*args):
-	'''Get list of the ChatangoOverlay's keys'''
-	#keys are instanced at runtime
-	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-	if not chatOverlay: return
-	keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
-	keysList.addKeys({
-		"enter": lambda x: -1
-	})
-	return keysList
-
-@client.command("avatar",cc.tabFile)
-def avatar(parent,*args):
-	'''Upload the file as the user avatar'''
-	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-	if not chatOverlay: return
-	path = path.expanduser(' '.join(args))
-	path = path.replace("\ ",' ')
-	chatOverlay.bot.uploadAvatar(path)
-
-#---------------------------------------------------------------------------
-def parseArgs():	#start everything up now
-	creds = {}
-	readCredsFlag = True
-	credsArgFlag = 0
-	groupArgFlag = 0
-	
-	for arg in sys.argv:
-		#if it's an argument
-		if arg[0] in '-':
-			#stop creds parsing
-			if credsArgFlag == 1:
-				creds["user"] = ""
-			if credsArgFlag <= 2:
-				creds["passwd"] = ""
-			if groupArgFlag:
-				raise Exception("Improper argument formatting: -g without argument")
-			credsArgFlag = 0
-			groupArgFlag = 0
-			#creds inline
-			if arg == "-c":
-				creds_readwrite["user"] = 0		#no readwrite to user and pass
-				creds_readwrite["passwd"] = 0
-				credsArgFlag = 1
-				continue	#next argument
-			#group inline
-			elif arg == "-g":
-				creds_readwrite["room"] = 2		#write only to room
-				groupArgFlag = 1
-				continue
-			#flags without arguments
-			elif arg == "-r":		#relog
-				creds_readwrite["user"] = 2		#only write to creds
-				creds_readwrite["passwd"] = 2
-				creds_readwrite["room"] = 2
-			elif arg == "-nc":		#no custom
-				IMPORT_CUSTOM = False
-			elif arg == "--help":	#help
-				print(__doc__)
-				sys.exit()
-		#parse -c
-		if credsArgFlag:
-			creds[ ["user","passwd"][credsArgFlag-1] ] = arg
-			credsArgFlag = (credsArgFlag + 1) % 3
-		#parse -g
-		if groupArgFlag:
-			creds["room"] = arg
-			groupArgFlag = 0
-	#anon and improper arguments
-	if credsArgFlag >= 1:	#null name means anon
-		creds["user"] = ""
-	elif credsArgFlag == 2:	#null password means temporary name
-		creds["passwd"] = ""
-	if groupArgFlag:
-		raise Exception("Improper argument formatting: -g without argument")
-
-	return creds
-
 def runClient(main,creds):
 	#fill in credential holes
 	for num,i in enumerate(["user","passwd","room"]):
@@ -250,8 +124,60 @@ def runClient(main,creds):
 	chatbot.main()
 
 if __name__ == "__main__":
-	defineColors()
-	newCreds = parseArgs()
+	newCreds = {}
+	importCustom = True
+	readCredsFlag = True
+	credsArgFlag = 0
+	groupArgFlag = 0
+	
+	for arg in sys.argv:
+		#if it's an argument
+		if arg[0] in '-':
+			#stop creds parsing
+			if credsArgFlag == 1:
+				newCreds["user"] = ""
+			if credsArgFlag <= 2:
+				newCreds["passwd"] = ""
+			if groupArgFlag:
+				raise Exception("Improper argument formatting: -g without argument")
+			credsArgFlag = 0
+			groupArgFlag = 0
+			#creds inline
+			if arg == "-c":
+				creds_readwrite["user"] = 0		#no readwrite to user and pass
+				creds_readwrite["passwd"] = 0
+				credsArgFlag = 1
+				continue	#next argument
+			#group inline
+			elif arg == "-g":
+				creds_readwrite["room"] = 2		#write only to room
+				groupArgFlag = 1
+				continue
+			#flags without arguments
+			elif arg == "-r":		#relog
+				creds_readwrite["user"] = 2		#only write to creds
+				creds_readwrite["passwd"] = 2
+				creds_readwrite["room"] = 2
+			elif arg == "-nc":		#no custom
+				importCustom = False
+			elif arg == "--help":	#help
+				print(__doc__)
+				sys.exit()
+		#parse -c
+		if credsArgFlag:
+			newCreds[ ["user","passwd"][credsArgFlag-1] ] = arg
+			credsArgFlag = (credsArgFlag + 1) % 3
+		#parse -g
+		if groupArgFlag:
+			newCreds["room"] = arg
+			groupArgFlag = 0
+	#anon and improper arguments
+	if credsArgFlag >= 1:	#null name means anon
+		newCreds["user"] = ""
+	elif credsArgFlag == 2:	#null password means temporary name
+		newCreds["passwd"] = ""
+	if groupArgFlag:
+		raise Exception("Improper argument formatting: -g without argument")
 
 	#DEPRECATED, updating to current paradigm
 	if path.exists(DEPRECATED_SAVE_PATH):
