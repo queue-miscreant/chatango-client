@@ -26,16 +26,33 @@ Useful Key Bindings:
 	^R:		Refresh current group
 	^T:		Switch to new group
 '''
-from util import chatango_client as cc
-from util import client
+from lib import chatango_client as cc
+from lib import client
 import os
+import os.path as path
 import sys
 import json
 
+#custom and credential saving setup
 CREDS_FILENAME = "chatango_creds"
-CUSTOM_PATH = os.path.expanduser("~/.cubecli/")
-DEPRECATED_SAVE_PATH = os.path.expanduser("~/.%s"%CREDS_FILENAME)
-SAVE_PATH = CUSTOM_PATH+CREDS_FILENAME
+HOME_DIR = path.expanduser('~')
+CUSTOM_PATH = path.join(HOME_DIR,".cubecli")
+#save
+DEPRECATED_SAVE_PATH = path.join(HOME_DIR,".%s"%CREDS_FILENAME)
+SAVE_PATH = path.join(CUSTOM_PATH,CREDS_FILENAME)
+#init code to import everything in custom
+CUSTOM_INIT = '''
+#code ripped from stackoverflow questions/1057431
+#ensures the `from custom import *` in chatango.py will import all python files
+#in the directory
+
+from os.path import dirname, basename, isfile
+import glob
+modules = glob.glob(dirname(__file__)+"/*.py")
+__all__ = [basename(f)[:-3] for f in modules \
+			if not f.endswith("__init__.py") and isfile(f)]
+'''
+IMPORT_CUSTOM = True
 
 #entire creds from file
 creds_entire = {} 
@@ -63,6 +80,25 @@ DEFAULT_FORMATTING = \
 	,"232323"	#name color
 	,"0"		#font face
 	,12]		#font size
+
+def defineColors():
+	#Non-256 colors
+	ordering = \
+		("blue"
+		,"cyan"
+		,"magenta"
+		,"red"
+		,"yellow")
+	for i in range(10):
+		client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
+	del ordering
+	client.defColor("green",intense=True)
+	client.defColor("green")			#11:	>
+	client.defColor("none")				#12:	blank channel
+	client.defColor("red","red")		#13:	red channel
+	client.defColor("blue","blue")		#14:	blue channel
+	client.defColor("magenta","magenta")#15:	both channel
+	client.defColor("white","white")	#16:	blank channel, visible
 
 #COMMANDS-------------------------------------------------------------------
 @client.command("ignore")
@@ -109,9 +145,68 @@ def avatar(parent,*args):
 	'''Upload the file as the user avatar'''
 	chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
 	if not chatOverlay: return
-	path = os.path.expanduser(' '.join(args))
+	path = path.expanduser(' '.join(args))
+	path = path.replace("\ ",' ')
+	chatOverlay.bot.uploadAvatar(path)
 
 #---------------------------------------------------------------------------
+def parseArgs():	#start everything up now
+	creds = {}
+	readCredsFlag = True
+	credsArgFlag = 0
+	groupArgFlag = 0
+	
+	for arg in sys.argv:
+		#if it's an argument
+		if arg[0] in '-':
+			#stop creds parsing
+			if credsArgFlag == 1:
+				creds["user"] = ""
+			if credsArgFlag <= 2:
+				creds["passwd"] = ""
+			if groupArgFlag:
+				raise Exception("Improper argument formatting: -g without argument")
+			credsArgFlag = 0
+			groupArgFlag = 0
+			#creds inline
+			if arg == "-c":
+				creds_readwrite["user"] = 0		#no readwrite to user and pass
+				creds_readwrite["passwd"] = 0
+				credsArgFlag = 1
+				continue	#next argument
+			#group inline
+			elif arg == "-g":
+				creds_readwrite["room"] = 2		#write only to room
+				groupArgFlag = 1
+				continue
+			#flags without arguments
+			elif arg == "-r":		#relog
+				creds_readwrite["user"] = 2		#only write to creds
+				creds_readwrite["passwd"] = 2
+				creds_readwrite["room"] = 2
+			elif arg == "-nc":		#no custom
+				IMPORT_CUSTOM = False
+			elif arg == "--help":	#help
+				print(__doc__)
+				sys.exit()
+		#parse -c
+		if credsArgFlag:
+			creds[ ["user","passwd"][credsArgFlag-1] ] = arg
+			credsArgFlag = (credsArgFlag + 1) % 3
+		#parse -g
+		if groupArgFlag:
+			creds["room"] = arg
+			groupArgFlag = 0
+	#anon and improper arguments
+	if credsArgFlag >= 1:	#null name means anon
+		creds["user"] = ""
+	elif credsArgFlag == 2:	#null password means temporary name
+		creds["passwd"] = ""
+	if groupArgFlag:
+		raise Exception("Improper argument formatting: -g without argument")
+
+	return creds
+
 def runClient(main,creds):
 	#fill in credential holes
 	for num,i in enumerate(["user","passwd","room"]):
@@ -154,88 +249,19 @@ def runClient(main,creds):
 	client.onDone(chatbot.stop)
 	chatbot.main()
 
-def defineColors():
-	#Non-256 colors
-	ordering = \
-		("blue"
-		,"cyan"
-		,"magenta"
-		,"red"
-		,"yellow")
-	for i in range(10):
-		client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
-	del ordering
-	client.defColor("green",intense=True)
-	client.defColor("green")			#11:	>
-	client.defColor("none")				#12:	blank channel
-	client.defColor("red","red")		#13:	red channel
-	client.defColor("blue","blue")		#14:	blue channel
-	client.defColor("magenta","magenta")#15:	both channel
-	client.defColor("white","white")	#16:	blank channel, visible
-
 if __name__ == "__main__":
 	defineColors()
-	#start everything up now
-	newCreds = {}
-	readCredsFlag = True
-	importCustom = True
-	credsArgFlag = 0
-	groupArgFlag = 0
-	
-	for arg in sys.argv:
-		#if it's an argument
-		if arg[0] in '-':
-			#stop creds parsing
-			if credsArgFlag == 1:
-				newCreds["user"] = ""
-			if credsArgFlag <= 2:
-				newCreds["passwd"] = ""
-			if groupArgFlag:
-				raise Exception("Improper argument formatting: -g without argument")
-			credsArgFlag = 0
-			groupArgFlag = 0
+	newCreds = parseArgs()
 
-			if arg == "-c":			#creds inline
-				creds_readwrite["user"] = 0		#no readwrite to user and pass
-				creds_readwrite["passwd"] = 0
-				credsArgFlag = 1
-				continue	#next argument
-			elif arg == "-g":		#group inline
-				creds_readwrite["room"] = 2		#write only to room
-				groupArgFlag = 1
-				continue
-			#arguments without subarguments
-			elif arg == "-r":		#relog
-				creds_readwrite["user"] = 2		#only write to creds
-				creds_readwrite["passwd"] = 2
-				creds_readwrite["room"] = 2
-			elif arg == "-nc":		#no custom
-				importCustom = False
-			elif arg == "--help":	#help
-				print(__doc__)
-				sys.exit()
-			
-		if credsArgFlag:			#parse -c
-			newCreds[ ["user","passwd"][credsArgFlag-1] ] = arg
-			credsArgFlag = (credsArgFlag + 1) % 3
-
-		if groupArgFlag:			#parse -g
-			newCreds["room"] = arg
-			groupArgFlag = 0
-
-	if credsArgFlag >= 1:	#null name means anon
-		newCreds["user"] = ""
-	elif credsArgFlag == 2:	#null password means temporary name
-		newCreds["passwd"] = ""
-	if groupArgFlag:
-		raise Exception("Improper argument formatting: -g without argument")
-	
 	#DEPRECATED, updating to current paradigm
-	if os.path.exists(DEPRECATED_SAVE_PATH):
+	if path.exists(DEPRECATED_SAVE_PATH):
 		import shutil
 		os.mkdir(CUSTOM_PATH)
-		os.mkdir(CUSTOM_PATH + os.path.sep + "custom")
+		customDir = path.join(CUSTOM_PATH,"custom")
+		os.mkdir(customDir)
 		shutil.move(DEPRECATED_SAVE_PATH,SAVE_PATH)
+		with open(path.join(CUSTOM_PATH,"__init__.py"),"w") as a:
+			a.write(CUSTOM_INIT)
 
 	try:
 		jsonInput = open(SAVE_PATH)
@@ -258,13 +284,12 @@ if __name__ == "__main__":
 			creds_readwrite["ignores"] |= 2
 		if newCreds["options"].get("256color") == False:
 			two56colors = False
-
-	if importCustom:
+	
+	#finally importing custom
+	if IMPORT_CUSTOM:
 		sys.path.append(CUSTOM_PATH)
-		try:
-#			import custom
-			from custom import *
-		except ImportError: pass
+		from custom import *
+
 	#start
 	try:
 		client.start(runClient,newCreds,two56=two56colors)
