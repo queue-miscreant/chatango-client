@@ -1,8 +1,8 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.28318
+Version 6.283185
 --------------------------
-A CLI application written in python with curses input and ANSI escape-colored output.   
+A terminal application written in python with curses input and ANSI escape-colored output.   
 Used to implement a client for chatango, an online chatting service.   
 Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.  
 I recommend making a symlink in /usr/local/bin/ so you don't have to navigate to the folder,
@@ -20,15 +20,15 @@ If you want to extend the client somehow, consider looking at the [docs](DOCS.md
 
 Features:
 --------------------------
-* Tab completion
-* Terminal-resize compatible
+* (Cyclical) Tab completion
+* Live terminal resizing
 * Tracking images and links posted (F2)
 * View members of a certain room (F3)
 * Alter formatting sent to the chatango group (F4)
 * Change channel (F5)
 	* Supports white, red, and blue channels (and the apparently forgotten "both" channel)
-* Colorized output
-	* Color text matching a regex
+* Colorized and filtered output
+	* Color text matching a regex or filter messages based on conditions
 * Client commands
 	* Type \`help while the input box is empty to display a list of commands implemented
 * Mouse support
@@ -38,7 +38,7 @@ Features:
 Dependencies:
 --------------------------
 * Python 3
-* Python ncurses (included on most distros)
+* Python ncurses (included on most distros, python cygwin)
 ### Technically these are optional since you can change how they open  
 * Feh image viewer
 * MPV
@@ -47,9 +47,9 @@ Dependencies:
 Changing default openers:
 --------------------------
 If you want to use some other program like ImageMagick to open images,
-you'll have to do the following in custom.py
+you'll have to do the following in a custom file
 ```
-import client.linkopen
+from lib import client.linkopen
 client.linkopen.IMG_PATH = "animate"
 ```
 And similarly for replacing mpv.
@@ -69,6 +69,7 @@ Links in browser WILL NOT open correctly by default. There are two solutions:
 * specifying a BROWSER environment variable (as in `BROWSER=chrome chatango.py`)
 The latter implies that there is a link to the executable in /usr/bin in cygwin.
 This can be created with `ln -s /cygdrive/c/Program\ Files/.../[browser executable].exe /usr/bin`
+
 To preserve the value of BROWSER, write a line in ~/.bashrc like `BROWSER=chrome`
 If python detects cygwin (that is, if `sys.platform` is `cygwin`), then linkopen.py
 assumes Firefox and Chrome if BROWSER is null.
@@ -85,6 +86,17 @@ The comment about symlinking to /usr/local/bin still works.
 
 Changelog
 =========================
+## v6.283185 *2016/1/16*
+* "Better" extensibility
+	* Changed import order to allow importing classes like ChatBot
+	* Moved credentials into directory ~/.cubecli
+	* Moved custom.py into ~/.cubecli
+	* All legacy updates should be handled automatically by the main script
+* Tinkered some with how scrollables draw, but it's still buggy
+* Added cyclical scrolling
+	* That is, tab will generate a list and more tabs (and s-tabs) will cycle
+* Bugfix that made ESC do nothing
+
 ## v6.28318	*2016/1/16*
 * Added mouse support again
 	* Clicking on links in main interface

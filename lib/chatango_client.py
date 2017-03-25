@@ -200,12 +200,8 @@ class ChatBot(ch.Manager):
 
 	def onConnectionLost(self, group):
 		message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
-		@client.daemonize
-		def reconnect():
-			self.mainOverlay.msgDelete(message)
-			self.reconnect()
-		client.BlockingOverlay(self.mainOverlay.parent,reconnect,"connect").add()
-
+		client.BlockingOverlay(self.mainOverlay.parent,
+			client.daemonize(self.reconnect),"connect").add()
 
 #OVERLAY EXTENSION--------------------------------------------------------------
 class ChatangoOverlay(client.MainOverlay):
