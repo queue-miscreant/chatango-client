@@ -23,7 +23,7 @@ IMG_PATH = "feh"
 MPV_PATH = "mpv"
 if sys.platform == "cygwin":
 	IMG_PATH = ""
-	if os.environ.get("BROWSER") is not None:
+	if os.environ.get("BROWSER") is None:
 		os.environ["BROWSER"] = os.path.pathsep.join(["chrome","firefox"])
 
 import webbrowser
@@ -113,14 +113,18 @@ class opener:
 		if len(args) == 1 and callable(args[0]):
 			self._type = "default"
 			self(args[0])
+			self.func = args[0]
 			return
 		if args[0] not in ["default","extension","pattern","lambda"]:
 			raise LinkException("invalid first argument of linkopen.opener {}".format(args[0]))
 		self._type = args[0]
 		self._argument = args[1]
 
-	def __call__(self,func):
+	def __call__(self,*args):
 		#gross if statements
+		if hasattr(self,"func"):
+			return self.func(*args)
+		func = args[0]
 		if self._type == "default":
 			open_link._defaults.append(func)
 		elif self._type == "extension":
@@ -153,7 +157,7 @@ def daemonize(func):
 @daemonize
 def images(main, link, ext):
 	if not IMG_PATH:
-		browser(main,link)
+		return browser(main,link)
 	main.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
 	try:
@@ -169,7 +173,7 @@ def images(main, link, ext):
 def videos(main, link, ext):
 	'''Start and daemonize mpv (or replaced video playing program)'''
 	if not MPV_PATH:
-		browser(main,link)
+		return browser(main,link)
 	main.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
 	try:
