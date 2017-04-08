@@ -59,10 +59,12 @@ Windows (Cygwin):
 -----------------
 If you have python installed in cygwin, then drawing and sending messages work
 fine in MinTTY, the cygwin default terminal emulator.
-The following terminals are NOT supported:
-* Console2 (256 color mode; ANSI escapes don't render correctly)
+The following terminals are NOT supported or have restricted features:
+* Console2 (256 color mode)
 * cmd.exe (Doesn't support ANSI escapes)
 * Powershell (Same as cmd.exe)
+Untested:
+* PuTTY
 
 Links in browser WILL NOT open correctly by default. There are two solutions: 
 * adding the browser to the Windows PATH environment variable, or

@@ -149,6 +149,7 @@ class SizeException(Exception):
 	where if raised, the Main instance will not attempt to display.
 	'''
 
+CHAR_RETURN_CURSOR = "\x1b[?25h\x1b[u\n\x1b[A"
 def _moveCursor(row = 0):
 	'''Move the cursor to the row number specified'''
 	print("\x1b[%d;f" % row,end=CLEAR_FORMATTING)
@@ -1252,7 +1253,7 @@ class Main:
 		#draw each line in lines, deleting the rest of the garbage on the line
 		for i in lines:
 			print(i,end="\x1b[K\n\r") 
-		print(CHAR_RETURN_CURSOR,end="\x1b[?25h")
+		print(CHAR_RETURN_CURSOR,end="")
 	def _updateinput(self):
 		'''Input display backend'''
 		if not (self.active and self.candisplay): return

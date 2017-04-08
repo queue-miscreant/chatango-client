@@ -180,14 +180,15 @@ if __name__ == "__main__":
 		raise Exception("Improper argument formatting: -g without argument")
 
 	#DEPRECATED, updating to current paradigm
-	if path.exists(DEPRECATED_SAVE_PATH):
+	if path.exists(DEPRECATED_SAVE_PATH) or not path.exists(CUSTOM_PATH):
 		import shutil
 		os.mkdir(CUSTOM_PATH)
 		customDir = path.join(CUSTOM_PATH,"custom")
 		os.mkdir(customDir)
-		shutil.move(DEPRECATED_SAVE_PATH,SAVE_PATH)
 		with open(path.join(CUSTOM_PATH,"__init__.py"),"w") as a:
 			a.write(CUSTOM_INIT)
+	if path.exists(DEPRECATED_SAVE_PATH):
+		shutil.move(DEPRECATED_SAVE_PATH,SAVE_PATH)
 
 	try:
 		jsonInput = open(SAVE_PATH)

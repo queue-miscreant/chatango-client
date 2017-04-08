@@ -11,7 +11,7 @@ import re
 from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
-__all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","CHAR_RETURN_CURSOR","SELECT"
+__all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT"
 			,"_COLORS","SELECT_AND_MOVE","dbmsg","def256colors","getColor","rawNum"
 			,"strlen","Coloring","Scrollable","Tokenize","ScrollSuggest"]
 
@@ -48,7 +48,6 @@ _COLORS =	["\x1b[39;22;49m"	#Normal/Normal
 			]
 _NUM_PREDEFINED = len(_COLORS)
 CHAR_CURSOR = "\x1b[s"
-CHAR_RETURN_CURSOR = "\x1b[u\n\x1b[A"
 SELECT = _EFFECTS[0][0]
 SELECT_AND_MOVE = CHAR_CURSOR + SELECT
 CLEAR_FORMATTING = "\x1b[m"
