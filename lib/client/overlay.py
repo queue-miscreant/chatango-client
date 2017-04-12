@@ -353,7 +353,7 @@ class TextOverlay(OverlayBase):
 			,curses.KEY_LEFT:	staticize(self.text.movepos,-1)
 			,curses.KEY_HOME:	staticize(self.text.home)
 			,curses.KEY_END:	staticize(self.text.end)
-			,520:				staticize(self.text.delwordback)
+			,520:				staticize(self.text.delnextword)
 		})
 		self._keys[curses.KEY_LEFT].__doc__ = "Move cursor left"
 		self._keys[curses.KEY_RIGHT].__doc__ = "Move cursor right"

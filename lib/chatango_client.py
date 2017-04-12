@@ -221,6 +221,7 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^t":		self.joingroup
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
+						,"^y":		self.yank
 				,"mouse-left":		self.clickOnLink
 				,"mouse-middle":	client.override(client.staticize(self.openSelectedLinks),1)
 		},1)	#these are methods, so they're defined on __init__
@@ -308,6 +309,19 @@ class ChatangoOverlay(client.MainOverlay):
 			return 
 		self.text.complete()
 
+	def yank(self):
+		if self.isselecting():
+			try:
+				#allmessages contain the colored message and arguments
+				message = self.getselected()
+				msg,name = message[1][0].post, message[1][0].user
+				if name[0] in "!#": name = name[1:]
+				if self.bot.me:
+					msg = msg.replace("@"+self.bot.me,"")
+				text = "@{}: `{}`".format(name, msg.replace('`',""))
+				client.dbmsg(text)
+			except: pass
+	
 	def linklist(self):
 		'''List accumulated links'''
 		linksList = client.getLinks()

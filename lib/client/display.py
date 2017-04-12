@@ -490,11 +490,12 @@ class Scrollable:
 		#adjust the tail
 		while not endwidth or (width < self._width and end < lentext):
 			char = self._str[end]
+			dbmsg(char,end,width,endwidth)
 			if char == '\t':
 				width += _TABLEN
 			elif char == '\n' or char == '\r':
-				width += 2	#for \n
-			elif ord(char) > 32:
+				width += 2	#for r'\n'
+			elif ord(char) >= 32:
 				width += wcwidth(char)
 			end += 1
 			if end == self._pos:
@@ -506,7 +507,7 @@ class Scrollable:
 				width -= _TABLEN
 			elif char == '\n' or char == '\r':
 				width -= 2	#for \n
-			elif ord(char) > 32:
+			elif ord(char) >= 32:
 				width -= wcwidth(char)
 			start += 1
 		if self.password:
@@ -546,6 +547,7 @@ class Scrollable:
 			raise DisplayException()
 		self._width = new
 		self._onchanged()
+	#TEXTBOX METHODS-----------------------------------------------------------
 	def movepos(self,dist):
 		'''Move cursor by distance (can be negative). Adjusts display position'''
 		if not len(self._str):
@@ -573,10 +575,10 @@ class Scrollable:
 		'''Go back to the last word'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
 		if pos and not self.password:
-			#we started with a space
-			span = (lambda x: x[1] - x[0])(pos.span(1))
-			#how far we went
-			self.movepos(-span)
+			#_UP_TO_WORD_RE captures a long series of words
+			#from the start. where it ends is how far we go.
+			#move backward, so subtract the larger position, offset of 1 b/c space
+			self.movepos(pos.end(1)-self._pos-1)
 		else:
 			self.home()
 	def wordnext(self):
@@ -607,7 +609,7 @@ class Scrollable:
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
 		if pos and not self.password:
 			#we started with a space
-			span = pos.end(1)- 1
+			span = pos.end(1) - 1
 			#how far we went
 			self._str = self._str[:span] + self._str[self._pos:]
 			self.movepos(span-self._pos)
@@ -616,8 +618,8 @@ class Scrollable:
 			self._disp = 0
 			self._pos = 0
 			self._onchanged()
-	def delwordback(self):
-		'''Delete word behind cursor, like in sane text boxes'''
+	def delnextword(self):
+		'''Delete word ahead of cursor, like in sane text boxes'''
 		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
 		if pos and not self.password:
 			span = pos.end(1)
@@ -730,7 +732,7 @@ class ScrollSuggest(Scrollable):
 				if len(spaceSplit) == 1: search = self._nonscroll + search
 				self._suggestList = self.completer.complete(search)
 
-		#if there's a list or we generated one
+		#if there's a list or we could generate one
 		if self._suggestList:
 			self._suggestNum = (self._suggestNum+1)%len(self._suggestList)
 			suggestion = self._suggestList[self._suggestNum]
