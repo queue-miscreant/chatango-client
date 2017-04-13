@@ -5,9 +5,8 @@ Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.
 '''
-#TODO make space ignoring better for argument tab (/TODO for it)
-
 import re
+from shlex import shlex
 from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
@@ -490,7 +489,6 @@ class Scrollable:
 		#adjust the tail
 		while not endwidth or (width < self._width and end < lentext):
 			char = self._str[end]
-			dbmsg(char,end,width,endwidth)
 			if char == '\t':
 				width += _TABLEN
 			elif char == '\n' or char == '\r':
@@ -673,7 +671,7 @@ class Tokenize:
 			preflen = len(prefix)
 			if (incomplete[:preflen] == prefix):
 				search = incomplete[preflen:]
-				return Tokenize.collapseSugestion(search,suggestions[pno])
+				return Tokenize.collapseSugestion(search,suggestions[pno])[0]
 		return []
 
 	@staticmethod
@@ -683,13 +681,17 @@ class Tokenize:
 		been found, cut the list down based on the length of the search
 		'''
 		cut = len(search)
+		truecut = 0
 		if callable(suggestion):
 			suggest,cut = suggestion(search)
+			if cut < 0:
+				truecut = cut
+				cut = 0
 		else:
 			suggest = [i for i in list(suggestion) if not i.find(search)]
 			if len(suggest) <= 1:
-				return [i[cut:]+' ' for i in suggest]
-		return [i[cut:] for i in suggest]
+				return [i[cut:]+' ' for i in suggest], truecut
+		return [i[cut:] for i in suggest], truecut
 			
 
 class ScrollSuggest(Scrollable):
@@ -710,26 +712,46 @@ class ScrollSuggest(Scrollable):
 		'''Complete the last word before the cursor'''
 		#need to generate list
 		if not self._suggestList:
-			spaceSplit = self._str[:self._pos].split(' ')
-			numSpaces = len(spaceSplit)
-			#argument-styled completion if we have it
-			if numSpaces > 1 and self._argumentComplete:
-				verb = spaceSplit[0]
+			closeQuote = False
+			if self._str[:self._pos].count('"') % 2:
+				lexicon = shlex(self._str[:self._pos]+'"',posix=True)
+				closeQuote = True
+			else:
+				lexicon = shlex(self._str[:self._pos],posix=True)
+			lexicon.quotes = '"' #no single quotes
+			argsplit = []
+			lastToken = lexicon.get_token()
+			while lastToken:
+				argsplit.append(lastToken)
+				lastToken = lexicon.get_token()
+
+			if len(argsplit) > 1 and self._argumentComplete:
+				verb, suggest = argsplit[0], argsplit[-1]
 				if verb in self._argumentComplete:
 					complete = self._argumentComplete[verb]
-					#iterate to not care about \ before a space
-					#TODO consider "", escaped escapes
-					suggest = spaceSplit[-1]
-					splitNo = 2
-					while splitNo < numSpaces and spaceSplit[-splitNo][-1] == '\\':
-						suggest = spaceSplit[-splitNo] + ' ' + suggest
-						splitNo += 1
-					self._suggestList = Tokenize.collapseSugestion(suggest,complete)
+					tempSuggest, temp = Tokenize.collapseSugestion(argsplit[-1],
+						complete)
+					if tempSuggest and temp:
+						#-2 for both quotes being counted
+						startedWithQuote = self._str[-len(argsplit[-1])-2] == '"'
+						if startedWithQuote or closeQuote:
+							#if we're closing a quote, then we only need to account
+							#for one quote
+							temp -= 1 + (not closeQuote)
+							tempSuggest = [(i[-1] != '"') and ('"%s"' % i) or i
+								for i in tempSuggest]
+							
+						self._str = self._str[:self._pos+temp] + self._str[self._pos:]
+						self.movepos(temp)
+						self._suggestList = tempSuggest
+
 			#just use a prefix
-			if not self._suggestList:
-				search = spaceSplit[-1]
-				#if there is no lastspace, settle for 0
-				if len(spaceSplit) == 1: search = self._nonscroll + search
+			if len(argsplit) > 0 and not self._suggestList:
+				search = argsplit[-1]
+				if self._str[self._pos-1:self._pos] == ' ':
+					#no need to try to complete if there's a space after the word
+					return
+				if len(argsplit) == 1: search = self._nonscroll + search
 				self._suggestList = self.completer.complete(search)
 
 		#if there's a list or we could generate one

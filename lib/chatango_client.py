@@ -221,7 +221,6 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^t":		self.joingroup
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
-						,"^y":		self.yank
 				,"mouse-left":		self.clickOnLink
 				,"mouse-middle":	client.override(client.staticize(self.openSelectedLinks),1)
 		},1)	#these are methods, so they're defined on __init__
@@ -308,19 +307,6 @@ class ChatangoOverlay(client.MainOverlay):
 			except Exception as e: client.dbmsg(e)
 			return 
 		self.text.complete()
-
-	def yank(self):
-		if self.isselecting():
-			try:
-				#allmessages contain the colored message and arguments
-				message = self.getselected()
-				msg,name = message[1][0].post, message[1][0].user
-				if name[0] in "!#": name = name[1:]
-				if self.bot.me:
-					msg = msg.replace("@"+self.bot.me,"")
-				text = "@{}: `{}`".format(name, msg.replace('`',""))
-				client.dbmsg(text)
-			except: pass
 	
 	def linklist(self):
 		'''List accumulated links'''
@@ -657,24 +643,34 @@ def convertTo256(string):
 def tabFile(path):
 	'''A file tabbing utility'''
 	findpart = path.rfind(os.path.sep)
+	#offset how much we remove
+	numadded = 0
+	if findpart == -1:
+		path += os.path.sep
+		findpart = len(path)
+		numadded += 1
 	initpath,search = path[:findpart+1], path[findpart+1:]
-	if not path or "~/" not in path[0]: #try to generate full path
-		newpath = os.getcwd()+os.path.sep+path[:findpart+1].replace("\ ",' ')
-		ls = os.listdir(newpath)
-	else:
-		ls = os.listdir(os.path.expanduser(initpath))
+	try:
+		if not path or path[0] not in "~/": #try to generate full path
+			newpath = os.path.join(os.getcwd(),path[:findpart+1])
+			ls = os.listdir(newpath)
+		else:
+			ls = os.listdir(os.path.expanduser(initpath))
+	except (NotADirectoryError, FileNotFoundError):
+		return [],0
 		
 	suggestions = []
 	if search: #we need to iterate over what we were given
 		#insert \ for the suggestion parser
-		suggestions = sorted([i.replace(' ',"\ ")  for i in ls
-			if not i.find(search)])
+		suggestions = sorted([' ' in i and '"%s"' % (initpath+i).replace('"','\"')
+			or initpath+i for i in ls if not i.find(search)])
 	else: #otherwise ignore hidden files
-		suggestions = sorted([i.replace(' ',"\ ") for i in ls if i.find('.')])
+		suggestions = sorted([' ' in i and '"%s"' % (initpath+i).replace('"','\"')
+			or (initpath+i).replace('"','\"') for i in ls if i.find('.')])
 
 	if not suggestions:
 		return [],0
-	return suggestions,len(path)-len(initpath)
+	return suggestions,-len(path) + numadded
 
 #what it says on the tin
 if ONLY_ONCE:
