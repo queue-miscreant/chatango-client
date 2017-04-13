@@ -719,6 +719,8 @@ class ScrollSuggest(Scrollable):
 			else:
 				lexicon = shlex(self._str[:self._pos],posix=True)
 			lexicon.quotes = '"' #no single quotes
+			lexicon.wordchars += ''.join(self.completer.localPrefix) + \
+				''.join(self.completer.prefixes) #add in predefined characters
 			argsplit = []
 			lastToken = lexicon.get_token()
 			while lastToken:
@@ -745,6 +747,7 @@ class ScrollSuggest(Scrollable):
 						self.movepos(temp)
 						self._suggestList = tempSuggest
 
+			dbmsg(argsplit)
 			#just use a prefix
 			if len(argsplit) > 0 and not self._suggestList:
 				search = argsplit[-1]
