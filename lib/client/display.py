@@ -12,7 +12,7 @@ from .wcwidth import wcwidth
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT"
 			,"_COLORS","SELECT_AND_MOVE","dbmsg","def256colors","getColor","rawNum"
-			,"strlen","Coloring","Scrollable","Tokenize","ScrollSuggest"]
+			,"collen","Coloring","Scrollable","Tokenize","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
@@ -291,8 +291,11 @@ class Coloring:
 			self.effectRange(find.start(group),find.end(group),effect)
 
 	def breaklines(self,length,outdent=""):
-		'''Break string (courteous of spaces) into a list of column-length 'length' substrings'''
-		outdentLen = strlen(outdent)
+		'''
+		Break string (courteous of spaces) into a list of strings spanning
+		up to `length` columns
+		'''
+		outdentLen = collen(outdent)
 		TABSPACE = length - outdentLen
 		THRESHOLD = length >> 1
 		broken = []
@@ -307,13 +310,16 @@ class Coloring:
 		lastEffect = 0
 		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
 			lenj = wcwidth(j)
+			#if we have a 'next color', and we're at that position
 			if getFormat and pos == self._positions[formatPos]:
 				lineBuffer += self._str[start:pos]
 				start = pos
+				#decode the color/effect
 				lastColor = (self._formatting[formatPos] >> _NUM_EFFECTS) or lastColor
 				nextEffect = self._formatting[formatPos] & _EFFECTS_BITS
 				formatPos += 1
 				getFormat = formatPos != len(self._positions)
+				#do we even need to draw this?
 				if space > 0:
 					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 					for i in range(_NUM_EFFECTS):
@@ -322,6 +328,7 @@ class Coloring:
 								lineBuffer += _EFFECTS[i][1]
 							else:
 								lineBuffer += _EFFECTS[i][0]
+				#effects are turned off and on by the same bit
 				lastEffect ^= nextEffect
 			if j == '\t':			#tabs are the length of outdents
 				lenj = outdentLen
@@ -329,9 +336,11 @@ class Coloring:
 				start = pos+1 #skip over tab
 				lineBuffer += ' '*min(lenj,space)
 			elif j == '\n':
+				#add the new line
 				lineBuffer += self._str[start:pos]
 				if lineBuffer.rstrip() != outdent.rstrip():
 					broken.append(lineBuffer + CLEAR_FORMATTING)
+				#refresh variables
 				lineBuffer = outdent
 				lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 				for i in range(_NUM_EFFECTS):
@@ -345,11 +354,14 @@ class Coloring:
 				continue
 
 			space -= lenj
-			if j in _LINE_BREAKING and space > 0: #add the last word
+			#if this is a line breaking character and we have room just after it
+			if j in _LINE_BREAKING and space > 0:
+				#add the last word
 				lineBuffer += self._str[start:pos+1]
 				start = pos+1
 				lastcol = space
 			if space <= 0:			#time to break
+				#do we have a 'last space (breaking char)' recent enough to split after?
 				if lastcol < THRESHOLD and lastcol > 0:
 					broken.append(lineBuffer + CLEAR_FORMATTING)
 					lineBuffer = outdent
@@ -358,8 +370,9 @@ class Coloring:
 						if lastEffect & (1 << i):
 							lineBuffer += _EFFECTS[i][0]
 					lenj += lastcol
+				#split on a long word
 				else:
-					broken.append("{}{}{}".format(lineBuffer,self._str[start:pos],CLEAR_FORMATTING))
+					broken.append(lineBuffer + self._str[start:pos] + CLEAR_FORMATTING)
 					lineBuffer = outdent
 					lineBuffer += lastColor > 0 and _COLORS[lastColor-1] or ""
 					for i in range(_NUM_EFFECTS):
@@ -375,7 +388,7 @@ class Coloring:
 
 		return broken,len(broken)
 
-def strlen(string):
+def collen(string):
 	'''Column width of a string'''
 	escape = False
 	a = 0
@@ -469,7 +482,7 @@ class Scrollable:
 		self._width = width
 		#position of the cursor and display column of the cursor
 		self._pos = len(string)
-		self._disp = max(0,strlen(string)-width)
+		self._disp = max(0,collen(string)-width)
 		#nonscrolling characters
 		self._nonscroll = ""
 		self._nonscroll_width = 0
@@ -533,7 +546,7 @@ class Scrollable:
 		self.end()
 	def setnonscroll(self,new):
 		'''Set nonscrolling characters of scrollable'''
-		check = strlen(new)
+		check = collen(new)
 		if check > MAX_NONSCROLL_WIDTH:
 			new = new[:columnslice(new,MAX_NONSCROLL_WIDTH)]
 		self._nonscroll = new
@@ -695,6 +708,10 @@ class Tokenize:
 			
 
 class ScrollSuggest(Scrollable):
+	'''
+	A Scrollable extension with suggestion built in
+	If you need to extend a Scrollable, it's probably this one
+	'''
 	def __init__(self,width,string=""):
 		super(ScrollSuggest,self).__init__(width,string)
 		self._argumentComplete = {}

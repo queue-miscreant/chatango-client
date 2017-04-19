@@ -6,7 +6,6 @@ system of overlays, pulling input from the topmost
 one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
-#TODO scrolling should let you scroll up from long messages
 
 try:
 	import curses
@@ -191,7 +190,7 @@ class Box:
 		'''Pad string by column width'''
 		if not isinstance(self.parent,Main):
 			raise Exception("box object {} has no parent".format(self.__name__))
-		return "{}{}".format(string,justchar*(self.parent.x-2-strlen(string)))
+		return "{}{}".format(string,justchar*(self.parent.x-2-collen(string)))
 	def box_noform(self,string):
 		'''Returns a string in the sides of a box. Does not pad spaces'''
 		return self.CHAR_VSPACE + string + self.CHAR_VSPACE
@@ -795,7 +794,7 @@ class MainOverlay(TextOverlay):
 	replace = True
 	#sequence between messages to draw reversed
 	INDENT = "    "
-	_msgSplit = '\x1b' 
+	_MSGSPLIT = '\x1b' 
 	_monitors = {}
 	def __init__(self,parent,pushtimes = True):
 		super(MainOverlay, self).__init__(parent)
@@ -830,15 +829,16 @@ class MainOverlay(TextOverlay):
 		msgno = 0
 		#go backwards by default
 		direction = -1
-		if self._linesup-self._unfiltup >= lenlines:
+		#if we need to go forwards
+		if self._linesup-self._unfiltup-self._innerheight > lenlines:
 			direction = 1
 			msgno = self._unfiltup
-			selftraverse,linetraverse = -self._linesup,-lenlines
+			selftraverse,linetraverse = -self._linesup+self._innerheight,-lenlines
 			lenself, lenlines = -1,-2
 		#traverse list of lines
 		while (selftraverse*direction) <= lenself and \
 		(linetraverse*direction) <= lenlines:
-			if self._lines[selftraverse] == self._msgSplit:
+			if self._lines[selftraverse] == self._MSGSPLIT:
 				selftraverse += direction #disregard this line
 				msgno -= direction #count lines down downward, up upward
 				continue
@@ -899,8 +899,19 @@ class MainOverlay(TextOverlay):
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _getnextmessage(self,step):
 		'''Backend for selecting message'''
+		#downward, so try to scroll the message downward
+		if step > 0 and self._innerheight:
+			self._innerheight -= 1
+			return 0
+		tooBig = self._allMessages[-self._selector][2] - (self.parent.y-1)
+		if step < 0 and tooBig > 0:
+			if self._innerheight < tooBig:
+				self._innerheight += 1
+				return 0
+		#otherwise, try to find next message
 		select = self._selector+step
 		addlines = 0
+		#get the next non-filtered message
 		while not addlines and select <= len(self._allMessages):
 			addlines = self._allMessages[-select][2]
 			select += step
@@ -908,6 +919,7 @@ class MainOverlay(TextOverlay):
 		if select-step-self._selector:
 			self._selector = max(0,select-step)
 			self._unfiltup = max(0,self._unfiltup+step)
+			self._innerheight = 0
 		return addlines
 	def _maxselect(self):
 		soundBell()
@@ -923,7 +935,7 @@ class MainOverlay(TextOverlay):
 			if self._linesup > len(self._lines):	#don't forget the new lines
 				cur = self.getselected()
 				a,b = cur[0].breaklines(self.parent.x,self.INDENT)
-				a.append(self._msgSplit)
+				a.append(self._MSGSPLIT)
 				self._lines = a + self._lines
 				cur[2] = b
 				#sanity checking
@@ -933,8 +945,9 @@ class MainOverlay(TextOverlay):
 		'''Select message down'''
 		if not self.canselect: return 1
 		#go down the number of lines of the currently selected message
-		self._linesup = max(0,self._linesup-self.getselected()[2]-1)
-		self._getnextmessage(-1)
+		curmsg, downmsg = self.getselected()[2], self._getnextmessage(-1)
+		if downmsg:
+			self._linesup = max(0,self._linesup-curmsg-1)
 		if not self._selector:
 			self.parent.updateinput()	#move the cursor back
 		return 1
@@ -945,9 +958,10 @@ class MainOverlay(TextOverlay):
 		self._allMessages = []
 		self._lines = []
 		#these too because they select the previous two
-		self._selector = 0
-		self._unfiltup = 0
-		self._linesup = 0
+		self._selector = 0			#messages from the bottom
+		self._unfiltup = 0			#ALL messages from the bottom, incl filtered
+		self._linesup = 0			#lines up from the bottom, incl MSGSPLIT
+		self._innerheight = 0		#inner message height, for ones too big
 		self._redoScheduled = False
 	#VIRTUAL FILTERING------------------------------------------
 	def colorizeMessage(self, msg, *args):
@@ -1001,7 +1015,7 @@ class MainOverlay(TextOverlay):
 			#"height" from the top
 			y = self.parent.y - y
 		#find message until we exceed the height
-		while height < (y+direction):
+		while msgNo >= -len(self._allMessages) and height < (y+direction):
 			height += self._allMessages[msgNo][2]
 			msgNo += direction
 		msg = self._allMessages[msgNo-direction]
@@ -1015,7 +1029,7 @@ class MainOverlay(TextOverlay):
 		#adjust the position
 		pos = x 
 		for i in range(linesDeep):
-			pos += strlen(self._lines[i+firstLine]) - len(self.INDENT)
+			pos += collen(self._lines[i+firstLine]) - len(self.INDENT)
 		if x < len(self.INDENT):
 			pos += len(self.INDENT) - x
 
@@ -1047,7 +1061,7 @@ class MainOverlay(TextOverlay):
 					continue
 			except: pass
 			a,b = i[0].breaklines(width,self.INDENT)
-			a.append(self._msgSplit)
+			a.append(self._MSGSPLIT)
 			newlines = a + newlines
 			i[2] = b
 			numup += b
@@ -1075,7 +1089,7 @@ class MainOverlay(TextOverlay):
 					continue
 			except: pass
 			a,b = i[0].breaklines(width,self.INDENT)
-			a.append(self._msgSplit)
+			a.append(self._MSGSPLIT)
 			newlines = a + newlines
 			i[2] = b
 			numup += b
@@ -1130,7 +1144,7 @@ class MainOverlay(TextOverlay):
 				self._allMessages.insert(0,msg)
 				return msg[4]
 			a,b = newline.breaklines(self.parent.x,self.INDENT)
-			self._lines.insert(0,self._msgSplit)
+			self._lines.insert(0,self._MSGSPLIT)
 			self._lines = a + self._lines
 			msg[2] = b
 
@@ -1151,7 +1165,7 @@ class MainOverlay(TextOverlay):
 		self._lines += a
 		msg[2] = b
 		self._allMessages.append(msg)
-		self._lines.append(self._msgSplit)
+		self._lines.append(self._MSGSPLIT)
 		#keep the right message selected
 		if self._selector:
 			self._linesup += b+1
@@ -1261,7 +1275,7 @@ class Main:
 		if not self._scrolls: return	#no textoverlays added, but how are you firing this
 		string = format(self._scrolls[-1])
 		_moveCursor(self.y+1)
-		print("{}\x1b[K".format(string),end=CHAR_RETURN_CURSOR)
+		print("%s\x1b[K" % string,end=CHAR_RETURN_CURSOR)
 	def _printblurb(self,blurb,time):
 		'''Blurb display backend'''
 		if not (self.active and self.candisplay): return
@@ -1291,7 +1305,7 @@ class Main:
 		_moveCursor(self.y+3)
 		self._bottom_edges[0] = left or self._bottom_edges[0]
 		self._bottom_edges[1] = right or self._bottom_edges[1]
-		room = self.x - strlen(self._bottom_edges[0]) - strlen(self._bottom_edges[1])
+		room = self.x - collen(self._bottom_edges[0]) - collen(self._bottom_edges[1])
 		if room < 1: return
 		#selected, then turn off
 		print("\x1b[7m{}{}{}\x1b[0m".format(self._bottom_edges[0],

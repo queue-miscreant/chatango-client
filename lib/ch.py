@@ -54,13 +54,15 @@ class _Generate:
 			return specials[group]
 		group = re.sub("-|_", 'q', group)
 		wt, gw = sum([n[1] for n in weights]), 0
-		num1 = 1000 if len(group) < 7 else max(int(group[6:9], 36), 1000)
-		num2 = (int(group[:5],36) % num1) / num1
+		try:
+			num1 = 1000 if len(group) < 7 else max(int(group[6:9], 36), 1000)
+			num2 = (int(group[:5],36) % num1) / num1
+		except ValueError:
+			return
 		for i, v in weights:
 			gw += v / wt
 			if gw >= num2:
 				return i
-		return None
 
 class _Multipart(urllib.request.Request):
 	'''Simplified version of requests.post for multipart/form-data'''
@@ -384,7 +386,7 @@ class _Connection:
 			self._sendCommand("")
 		else:
 			self._disconnect()
-			self._callEvent("onConnectionLost")
+			self._callEvent("onConnectionError","lost")
 
 class Group(_Connection):
 	'''_Connection subclass for typical chatango Groups'''
@@ -434,19 +436,25 @@ class Group(_Connection):
 	last      = property(_getLastMsgTime)
 
 	def _connect(self):
-		'''Connect to the server. Fires onConnectionLost when this fails'''
+		'''Connect to the server. Fires onConnectionError on failure'''
 		self._clearBuffers()
+		if self._server == None:
+			return self._callEvent("onConnectionError","noserver")
 		try:
 			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			self.sock.connect(("s{}.chatango.com".format(self._server), self._port))
 			self.sock.setblocking(False)
 		except socket.gaierror:
-			return self._callEvent("onConnectionLost")
+			return self._callEvent("onConnectionError","address")
+		except ConnectionRefusedError:
+			return self._callEvent("onConnectionError","refused")
 		#authenticate
-		self._sendCommand("bauth", self._name, self._uid, self._manager.username, self._manager.password, firstcmd = True)
+		self._sendCommand("bauth", self._name, self._uid,
+			self._manager.username,self._manager.password, firstcmd = True)
 
 		self._lockWrite(True) #lock until inited
-		self._pingTask = Task.addInterval(self._manager, self._manager._pingDelay, self.ping)
+		self._pingTask = Task.addInterval(self._manager,
+			self._manager._pingDelay, self.ping)
 		self._canPing = True
 		if not self._reconnecting: self.connected = True
 
@@ -756,7 +764,7 @@ class PM(_Connection):
 			self.sock.connect((self._PMHost, self._port))
 			self.sock.setblocking(False)
 		except socket.gaierror:
-			return self._callEvent("onConnectionLost")
+			return self._callEvent("onConnectionError","lost")
 
 		self._sendCommand("tlogin", self._auid, '2', self._uid, firstcmd = True)
 		self._lockWrite(True)
@@ -1017,8 +1025,12 @@ class Manager:
 		'''Event called on group disconnect'''
 		pass
 
-	def onConnectionLost(self, group):
-		'''Event called on group connection lost'''
+	def onConnectionError(self, group, error):
+		'''
+		Event called on group connection error. Error can be 'address'
+		(gaierror), 'refused' (ConnectionRefusedError), 'lost'
+		(connection to group lost), or 'noserver' (no server found)
+		'''
 		pass
 
 	def onLoginFail(self, group):

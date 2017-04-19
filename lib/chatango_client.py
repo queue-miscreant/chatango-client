@@ -198,10 +198,13 @@ class ChatBot(ch.Manager):
 		self.mainOverlay.parent.newBlurb("%s has left" % user)
 		self._runEvent("onMemberLeave",group,user)
 
-	def onConnectionLost(self, group):
-		message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
-		client.BlockingOverlay(self.mainOverlay.parent,
-			client.daemonize(self.reconnect),"connect").add()
+	def onConnectionError(self, group, error):
+		if error == "lost":
+			message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
+			client.BlockingOverlay(self.mainOverlay.parent,
+				client.daemonize(self.reconnect),"connect").add()
+		else:
+			self.mainOverlay.msgSystem("Connection error occurred. Try joining another room with ^T")
 
 #OVERLAY EXTENSION--------------------------------------------------------------
 class ChatangoOverlay(client.MainOverlay):
