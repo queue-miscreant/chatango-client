@@ -6,6 +6,7 @@ system of overlays, pulling input from the topmost
 one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
+#TODO clicking on ListOverlays past the end of a list causes fatal error
 
 try:
 	import curses
@@ -425,16 +426,17 @@ class ListOverlay(OverlayBase,Box):
 		def tryEnter():
 			'''Try to run the function bound to enter'''
 			selectFun = self._keys.get(10)
-			if selectFun:
-				try:
-					return selectFun()
-				except TypeError: pass
+			if callable(selectFun):
+				return selectFun()
 		def click(_,y):
 			'''Manipulate self.it and tryEnter'''
 			#y in the list
 			size = self.parent.y - 2
+			#borders
 			if not y in range(1,size+1): return
-			self.it = (self.it//size)*size + (y - 1)
+			newit = (self.it//size)*size + (y - 1)
+			if newit > len(self.list): return
+			self.it = newit
 			return tryEnter()
 		self._mouse.update(
 			{_MOUSE_BUTTONS["left"]:		click
