@@ -643,6 +643,10 @@ class Scrollable:
 		'''Clear cursor and string'''
 		self._str = ""
 		self.home()
+	def undo(self):
+		#TODO populate a list of changes since some interval
+		#or after pressing space
+		pass
 
 class Tokenize:
 	'''Class for holding new tab-completers'''
@@ -764,7 +768,6 @@ class ScrollSuggest(Scrollable):
 						self.movepos(temp)
 						self._suggestList = tempSuggest
 
-			dbmsg(argsplit)
 			#just use a prefix
 			if len(argsplit) > 0 and not self._suggestList:
 				search = argsplit[-1]

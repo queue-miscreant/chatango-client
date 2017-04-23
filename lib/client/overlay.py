@@ -6,14 +6,15 @@ system of overlays, pulling input from the topmost
 one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
-#TODO clicking on ListOverlays past the end of a list causes fatal error
+#TODO one last try for less lazy redolines?
 
 try:
 	import curses
 except ImportError:
-	raise ImportError("ERROR WHILE IMPORTING CURSES, is this running on Windows cmd?")
+	raise ImportError("ERROR IMPORTING CURSES, is this running on Windows cmd?")
 import sys
 import os
+import signal #redirect ctrl-z
 #escape has delay typically
 os.environ.setdefault("ESCDELAY", "25")
 import time
@@ -27,6 +28,11 @@ __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 
 lasterr = None
 RESERVE_LINES = 3
+
+#I don't wanna fire terminal stop, so just raise an exception to signal ctrl-z
+class ControlZ(Exception): pass
+def handler(signum, frame): raise ControlZ()
+signal.signal(signal.SIGTSTP,handler)
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -345,6 +351,7 @@ class TextOverlay(OverlayBase):
 		self._keys.update({
 			-1:				self._input
 			,9:				staticize(self.text.complete)
+			,26:			staticize(self.text.undo)
 			,127:			staticize(self.text.backspace)
 			,curses.KEY_BTAB:	staticize(self.text.backcomplete)
 			,curses.KEY_DC:		staticize(self.text.delchar)
@@ -694,9 +701,10 @@ class CommandOverlay(TextOverlay):
 	'''Overlay to run commands. Commands are run in separate threads'''
 	replace = False
 	history = History()	#global command history
-	def __init__(self,parent):
+	def __init__(self,parent,caller = None):
 		super(CommandOverlay,self).__init__(parent)
 		self._sentinel = ord(CHAR_COMMAND)
+		self.caller = caller
 		self.text.setnonscroll(CHAR_COMMAND)
 		self.text.completer.addComplete(CHAR_COMMAND,_commands)
 		for i,j in _commandComplete.items():
@@ -712,11 +720,10 @@ class CommandOverlay(TextOverlay):
 	def __call__(self,lines):
 		lines[-1] = "COMMAND"
 	def _onSentinel(self):
-		main = self.parent.getOverlaysByClassName("MainOverlay")
-		if main:
+		#TODO just assign this a reference to the MainOverlay that called it
+		if self.caller:
 			#get the highest mainOverlay
-			main = main[-1]
-			main.text.append(CHAR_COMMAND)
+			self.caller.text.append(CHAR_COMMAND)
 		return -1
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
@@ -794,14 +801,12 @@ class MainOverlay(TextOverlay):
 	blurbs every few seconds
 	'''
 	replace = True
-	#sequence between messages to draw reversed
-	INDENT = "    "
-	_MSGSPLIT = '\x1b' 
+	_MSGSPLIT = '\x1b'	#sequence between messages to draw reversed
+	_INDENT = "    "	#indent for breaklines
 	_monitors = {}
 	def __init__(self,parent,pushtimes = True):
 		super(MainOverlay, self).__init__(parent)
 		self._sentinel = ord(CHAR_COMMAND)
-		self.canselect = True
 		self._pushtimes = pushtimes
 		self.history = History()
 		self.clear()
@@ -822,6 +827,7 @@ class MainOverlay(TextOverlay):
 			self._examine = examiners
 		else:
 			self._examine = []
+
 	def __call__(self,lines):
 		'''Display messages'''
 		select = SELECT_AND_MOVE
@@ -832,7 +838,7 @@ class MainOverlay(TextOverlay):
 		#go backwards by default
 		direction = -1
 		#if we need to go forwards
-		if self._linesup-self._unfiltup-self._innerheight > lenlines:
+		if self._linesup-self._unfiltup-self._innerheight >= lenlines:
 			direction = 1
 			msgno = self._unfiltup
 			selftraverse,linetraverse = -self._linesup+self._innerheight,-lenlines
@@ -849,20 +855,19 @@ class MainOverlay(TextOverlay):
 			selftraverse += direction
 			linetraverse += direction
 		lines[-1] = Box.CHAR_HSPACE*self.parent.x
+
 	#method overloading---------------------------------------------------------
 	def _onSentinel(self):
 		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''
-		CommandOverlay(self.parent).add()
+		CommandOverlay(self.parent,self).add()
 	def _post(self):
 		'''Stop selecting'''
 		if self._selector:
 			self._selector = 0
 			self._linesup = 0
 			self._unfiltup = 0
+			self._innerheight = 0
 			self.parent.updateinput()	#put the cursor back
-			if self._redoScheduled:
-				self.redolines()
-				self._redoScheduled = False
 			return 1
 	def add(self):
 		'''Start timeloop and add overlay'''
@@ -882,6 +887,50 @@ class MainOverlay(TextOverlay):
 		super().resize(newx,newy)
 		if newx != self.parent.x:
 			self.redolines(newx,newy)
+
+	def clear(self):
+		'''Clear all lines and messages'''
+		self.canselect = True
+		#these two REALLY should be private
+		self._allMessages = []
+		self._lines = []
+		#these too because they select the previous two
+		self._selector = 0			#messages from the bottom
+		self._unfiltup = 0			#ALL messages from the bottom, incl filtered
+		self._linesup = 0			#lines up from the bottom, incl MSGSPLIT
+		self._innerheight = 0		#inner message height, for ones too big
+		#recolor
+		self._lastrecolor = 0		#last recolor time
+		self._messageAdjust = 0		#adjuster for resize
+		self._linesAdjust = 0		#adjuster for lines
+	#VIRTUAL FILTERING------------------------------------------
+	@classmethod
+	def examineMessage(cls,className):
+		'''
+		Wrapper for a function that monitors messages. Such function may perform some
+		effect such as pushing a new message or alerting the user
+		'''
+		def wrap(func):
+			if cls._monitors.get(className) is None:
+				cls._monitors[className] = []
+			cls._monitors[className].append(func)
+		return wrap
+	def colorizeMessage(self, msg, *args):
+		'''
+		Virtual function. Overload to apply some transformation on argument
+		`msg`, which is a client.Coloring object. Arguments are left generic
+		so that the user can define message args
+		'''
+		return msg
+	def filterMessage(self, *args):
+		'''
+		Virtual function called to see if a message can be displayed. If False,
+		the message can be displayed. Otherwise, the message is pushed to
+		_allMessages without drawing to _lines. Arguments are left generic so
+		that the user can define message args
+		'''
+		return False
+
 	def _timeloop(self):
 		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
 		i = 0
@@ -898,14 +947,54 @@ class MainOverlay(TextOverlay):
 	def _replaceback(self):
 		'''Add a newline if the next character is n, or a tab if the next character is t'''
 		EscapeOverlay(self.parent,self.text).add()
+
+	#MESSAGE PUSHING BACKEND-----------------------------------
+	def _prepend(self,newline,args = None,isSystem = False):
+		'''Prepend new message. Use msgPrepend instead'''
+		#run filters early so that the message can be selected up to properly
+		msg = [newline, args, isSystem, not self.filterMessage(*args)
+			,self._lastrecolor, len(self._allMessages)]
+		self._allMessages.insert(0,msg)
+		#we actually need to draw it
+		if (self._linesup - self._unfiltup) < (self.parent.y-1):
+			#ignore the hacky thing I'm using lines length for
+			if isSystem or msg[3]:
+				a,b = newline.breaklines(self.parent.x,self._INDENT)
+				a.append(self._MSGSPLIT)
+				self._lines = a + self._lines
+				msg[3] = b
+
+		return msg[-1]
+		
+	def _append(self,newline,args = None,isSystem = False):
+		'''Add new message. Use msgPost instead'''
+		#undisplayed messages have length zero
+		msg = [newline,args,isSystem,0,self._lastrecolor,len(self._allMessages)]
+		self._allMessages.append(msg)
+		#before we filter it
+		self._selector += (self._selector>0)
+		#run filters
+		if (not isSystem) and self.filterMessage(*args):
+			return msg[-1]
+		a,b = newline.breaklines(self.parent.x,self._INDENT)
+		a.append(self._MSGSPLIT)
+		self._lines += a
+		msg[3] = b
+		#keep the right message selected
+		if self._selector:
+			self._linesup += b+1
+			self._unfiltup += 1
+		return msg[-1]
+
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _getnextmessage(self,step):
 		'''Backend for selecting message'''
-		#downward, so try to scroll the message downward
+		#scroll back up the message
 		if step > 0 and self._innerheight:
 			self._innerheight -= 1
 			return 0
-		tooBig = self._allMessages[-self._selector][2] - (self.parent.y-1)
+		tooBig = self._allMessages[-self._selector][3] - (self.parent.y-1)
+		#downward, so try to scroll the message downward
 		if step < 0 and tooBig > 0:
 			if self._innerheight < tooBig:
 				self._innerheight += 1
@@ -915,12 +1004,12 @@ class MainOverlay(TextOverlay):
 		addlines = 0
 		#get the next non-filtered message
 		while not addlines and select <= len(self._allMessages):
-			addlines = self._allMessages[-select][2]
+			addlines = self._allMessages[-select][3]
 			select += step
 		#if we're even "going" anywhere
-		if select-step-self._selector:
-			self._selector = max(0,select-step)
-			self._unfiltup = max(0,self._unfiltup+step)
+		if select - step - self._selector:
+			self._selector = max(0,select - step)
+			self._unfiltup = max(0,self._unfiltup + step)
 			self._innerheight = 0
 		return addlines
 	def _maxselect(self):
@@ -935,76 +1024,43 @@ class MainOverlay(TextOverlay):
 		else:
 			self._linesup += upmsg+1
 			if self._linesup > len(self._lines):	#don't forget the new lines
-				cur = self.getselected()
-				a,b = cur[0].breaklines(self.parent.x,self.INDENT)
+				cur = self._allMessages[-self._selector]
+				if (not cur[2]) and cur[4] < self._lastrecolor:
+					self.colorizeMessage(cur[0],*cur[1])
+				a,b = cur[0].breaklines(self.parent.x,self._INDENT)
 				a.append(self._MSGSPLIT)
 				self._lines = a + self._lines
-				cur[2] = b
-				#sanity checking
+				cur[3] = b
+				#IMPERATIVE to get the correct length up
 				self._linesup += (b - upmsg)
 		return 1
 	def selectdown(self):
 		'''Select message down'''
 		if not self.canselect: return 1
 		#go down the number of lines of the currently selected message
-		curmsg, downmsg = self.getselected()[2], self._getnextmessage(-1)
-		if downmsg:
-			self._linesup = max(0,self._linesup-curmsg-1)
+		curLines = self._allMessages[-self._selector][3]
+		downMsg = self._getnextmessage(-1)
+		if downMsg:
+			self._linesup = max(0,self._linesup-curLines-1)
 		if not self._selector:
 			self.parent.updateinput()	#move the cursor back
 		return 1
 
-	def clear(self):
-		'''Clear all lines and messages'''
-		#these two REALLY should be private
-		self._allMessages = []
-		self._lines = []
-		#these too because they select the previous two
-		self._selector = 0			#messages from the bottom
-		self._unfiltup = 0			#ALL messages from the bottom, incl filtered
-		self._linesup = 0			#lines up from the bottom, incl MSGSPLIT
-		self._innerheight = 0		#inner message height, for ones too big
-		self._redoScheduled = False
-	#VIRTUAL FILTERING------------------------------------------
-	def colorizeMessage(self, msg, *args):
-		'''
-		Virtual function. Overload to apply some transformation on argument
-		`msg`, which is a client.Coloring object. Arguments are left generic
-		so that the user can define message args
-		'''
-		return msg
-	def filterMessage(self, *args):
-		'''
-		Virtual function called to see if a message can be displayed. If False,
-		the message can be displayed. Otherwise, the message is pushed to
-		_allMessages without drawing to _lines. Arguments are left generic so
-		that the user can define message args
-		'''
-		return False
 	#FRONTENDS--------------------------------------------------
-	@staticmethod
-	def examineMessage(className):
-		'''
-		Wrapper for a function that monitors messages. Such function may perform some
-		effect such as pushing a new message or alerting the user
-		'''
-		def wrap(func):
-			if MainOverlay._monitors.get(className) is None:
-				MainOverlay._monitors[className] = []
-			MainOverlay._monitors[className].append(func)
-		return wrap
 	def isselecting(self):
 		'''Whether a message is selected or not'''
 		return bool(self._selector)
 	def getselected(self):
 		'''
-		Frontend for getting the selected message. Returns a tuple of
-		length three: the message (in a coloring object), an argument tuple,
-		and how many lines it occupies
+		Frontend for getting the selected message. Returns a 6-list:
+		[0]: the message (in a coloring object), [1] an argument tuple,
+		[2]: if it's a system message, [3] how many lines it occupies,
+		[4]: the last time the message was colored, [5]: its ID in _allMessages
 		'''
 		return self._allMessages[-self._selector]
+
 	def clickMessage(self,x,y):
-		'''Get the message `height` messages from the top'''
+		'''Get the message at position x,y and depth into the string'''
 		if y >= self.parent.y-1: return
 		#go up or down
 		direction = -1
@@ -1018,25 +1074,23 @@ class MainOverlay(TextOverlay):
 			y = self.parent.y - y
 		#find message until we exceed the height
 		while msgNo >= -len(self._allMessages) and height < (y+direction):
-			height += self._allMessages[msgNo][2]
+			height += self._allMessages[msgNo][3]
 			msgNo += direction
 		msg = self._allMessages[msgNo-direction]
-
 		#do some logic for finding the line clicked
 		linesDeep = (y-height)*direction + 1
 		firstLine = (height * direction) + msgNo + 1
 		if direction + 1:
-			firstLine -= msg[2] + self._linesup - self._selector + 2
-			linesDeep += msg[2] - 1
+			firstLine -= msg[3] + self._linesup - self._selector + 2
+			linesDeep += msg[3] - 1 + self._innerheight
 		#adjust the position
 		pos = x 
 		for i in range(linesDeep):
-			pos += collen(self._lines[i+firstLine]) - len(self.INDENT)
-		if x < len(self.INDENT):
-			pos += len(self.INDENT) - x
-
+			pos += collen(self._lines[i+firstLine]) - len(self._INDENT)
+		if x < len(self._INDENT):
+			pos += len(self._INDENT) - x
 		return msg,pos
-
+	#REAPPLY METHODS-----------------------------------------------------------
 	def redolines(self, width = None, height = None):
 		'''
 		Redo lines, if current lines does not represent the unfiltered messages
@@ -1046,34 +1100,31 @@ class MainOverlay(TextOverlay):
 		if height is None: height = self.parent.y
 		newlines = []
 		numup,nummsg = 0,1
-		filtered = 0
-
 		#while there are still messages to add (to the current height)
 		#feels dirty and slow, but this will also resize all messages below
 		#the selection
 		while (nummsg <= self._selector or numup < height) and \
 			nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
-			#if a filter fails, then the message should be drawn, as it's likely a system message
-			try:
-				if (not i[3]) and self.filterMessage(*i[1]):
-					i[2] = 0
-					nummsg += 1
-					filtered += 1
-					continue
-			except: pass
-			a,b = i[0].breaklines(width,self.INDENT)
+			#check if the message should be drawn
+			if (not i[2]) and self.filterMessage(*i[1]):
+				i[3] = 0
+				nummsg += 1
+				continue
+			a,b = i[0].breaklines(width,self._INDENT)
 			a.append(self._MSGSPLIT)
 			newlines = a + newlines
-			i[2] = b
+			i[3] = b
 			numup += b
-			if nummsg == self._selector: #invalid = self._selector = 0
+			if nummsg == self._selector: #invalid always when self._selector = 0
 				self._linesup = numup + self._unfiltup
 			nummsg += 1
 		self._lines = newlines
 		self.canselect = True
+
 	def recolorlines(self):
 		'''Re-apply colorizeMessage and redraw all visible lines'''
+		self._lastrecolor = time.time()
 		width = self.parent.x
 		height = self.parent.y
 		newlines = []
@@ -1081,23 +1132,20 @@ class MainOverlay(TextOverlay):
 		while (numup < height or nummsg <= self._selector) and \
 			nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
-			if not i[3]:	#don't decolor system messages
+			if not i[2]:	#don't decolor system messages
 				i[0].clear()
 				self.colorizeMessage(i[0],*i[1])
-			try:
-				if (not i[3]) and self.filterMessage(*i[1]):
-					i[2] = 0
-					nummsg += 1
-					continue
-			except: pass
-			a,b = i[0].breaklines(width,self.INDENT)
-			a.append(self._MSGSPLIT)
-			newlines = a + newlines
-			i[2] = b
-			numup += b
+				i[4] = self._lastrecolor
 			nummsg += 1
+			if i[3]: #unfiltered (non zero lines)
+				a,b = i[0].breaklines(width,self._INDENT)
+				a.append(self._MSGSPLIT)
+				newlines = a + newlines
+				i[3] = b
+				numup += b
 		self._lines = newlines
 		self.parent.display()
+	#MESSAGE ADDITION----------------------------------------------------------
 	def msgSystem(self, base):
 		'''System message'''
 		base = Coloring(base)
@@ -1126,53 +1174,10 @@ class MainOverlay(TextOverlay):
 		return ret
 	def msgDelete(self,number):
 		for i,j in enumerate(reversed(self._allMessages)):
-			if number == j[4]:
+			if number == j[-1]:
 				del self._allMessages[-i-1]
 				self.redolines()
 				self.parent.display()
-				return
-	def msgDeleteLast(self):
-		self.msgDelete(len(self._allMessages)-1)
-
-	#MESSAGE PUSHING BACKEND-----------------------------------
-	def _prepend(self,newline,args = None,isSystem = False):
-		'''Prepend new message. Use msgPrepend instead'''
-		#just prepend it
-		msg = [newline,args,1,isSystem,len(self._allMessages)]
-		#we actually need to draw it
-		if (self._linesup-self._unfiltup) < (self.parent.y-1):
-			#run filters
-			if (not isSystem) and self.filterMessage(*args):
-				self._allMessages.insert(0,msg)
-				return msg[4]
-			a,b = newline.breaklines(self.parent.x,self.INDENT)
-			self._lines.insert(0,self._MSGSPLIT)
-			self._lines = a + self._lines
-			msg[2] = b
-
-		self._allMessages.insert(0,msg)
-		return msg[4]
-		
-	def _append(self,newline,args = None,isSystem = False):
-		'''Add new message. Use msgPost instead'''
-		#undisplayed messages have length zero
-		msg = [newline,args,0,isSystem,len(self._allMessages)]
-		#before we filter it
-		self._selector += (self._selector>0)
-		#run filters
-		if (not isSystem) and self.filterMessage(*args):
-			self._allMessages.append(msg)
-			return msg[4]
-		a,b = newline.breaklines(self.parent.x,self.INDENT)
-		self._lines += a
-		msg[2] = b
-		self._allMessages.append(msg)
-		self._lines.append(self._MSGSPLIT)
-		#keep the right message selected
-		if self._selector:
-			self._linesup += b+1
-			self._unfiltup += 1
-		return msg[4]
 
 class _NScrollable(ScrollSuggest):
 	'''
@@ -1395,18 +1400,21 @@ class Main:
 	#Loop Backend--------------------------------------------------------------
 	def _input(self):
 		'''Crux of input. Submain client loop'''
+		chars = []
 		try:
 			next = -1
 			while next == -1:
 				next = self._screen.getch()
 				time.sleep(.01) #less CPU intensive
-			chars = [next]
+			chars.append(next)
 			while next != -1:
 				next = self._screen.getch()
 				chars.append(next)
 		except KeyboardInterrupt:
 			self.active = False
 			return
+		except ControlZ:
+			chars.append('\26')
 		if not len(self._ins): return
 		return self._ins[-1].runkey(chars)
 	def loop(self):
@@ -1489,7 +1497,7 @@ def start(target,*args,two56=False):
 @command("help")
 def listcommands(parent,*args):
 	def select(self):
-		new = CommandOverlay(parent)
+		new = CommandOverlay(parent,self.caller)
 		new.text.append(self.list[self.it])
 		self.swap(new)
 
