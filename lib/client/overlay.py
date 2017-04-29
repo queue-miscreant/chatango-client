@@ -226,6 +226,8 @@ class OverlayBase:
 		}
 		self._altkeys =	{-1: lambda: -1}
 		self._mouse = {}
+		if (hasattr(self,"_addOnInit")):
+			self.addKeys(self._addOnInit)
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
 		ret = []
@@ -340,6 +342,14 @@ class OverlayBase:
 				self._keys[i] = staticize(j)
 			else:
 				self._keys[i] = staticize(j,self)
+
+	@classmethod
+	def addKey(cls,key):
+		if not hasattr(cls,"_addOnInit"):
+			cls._addOnInit = {}
+		def ret(func):
+			cls._addOnInit[key] = func
+		return ret
 
 class TextOverlay(OverlayBase):
 	'''Virtual overlay with text input (at bottom of screen)'''

@@ -648,28 +648,25 @@ def tabFile(path):
 	findpart = path.rfind(os.path.sep)
 	#offset how much we remove
 	numadded = 0
-	if findpart == -1:
-		path += os.path.sep
-		findpart = len(path)
-		numadded += 1
 	initpath,search = path[:findpart+1], path[findpart+1:]
 	try:
 		if not path or path[0] not in "~/": #try to generate full path
-			newpath = os.path.join(os.getcwd(),path[:findpart+1])
+			newpath = os.path.join(os.getcwd(),initpath)
 			ls = os.listdir(newpath)
 		else:
 			ls = os.listdir(os.path.expanduser(initpath))
 	except (NotADirectoryError, FileNotFoundError):
+		client.dbmsg("error occurred, aborting")
 		return [],0
 		
 	suggestions = []
 	if search: #we need to iterate over what we were given
 		#insert \ for the suggestion parser
-		suggestions = sorted([' ' in i and '"%s"' % (initpath+i).replace('"','\"')
-			or initpath+i for i in ls if not i.find(search)])
+		suggestions = sorted([' ' in i and '"%s"' % (initpath+i).replace('"',r"\"")
+			or (initpath+i).replace('"',r"\"") for i in ls if not i.find(search)])
 	else: #otherwise ignore hidden files
 		suggestions = sorted([' ' in i and '"%s"' % (initpath+i).replace('"','\"')
-			or (initpath+i).replace('"','\"') for i in ls if i.find('.')])
+			or (initpath+i).replace('"',r"\"") for i in ls if i.find('.')])
 
 	if not suggestions:
 		return [],0
@@ -741,7 +738,7 @@ if ONLY_ONCE:
 		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
 		if not chatOverlay: return
 		path = os.path.expanduser(' '.join(args))
-		path = os.path.replace("\ ",' ')
-		chatOverlay.bot.uploadAvatar(path)
+		path = path.replace("\ ",' ')
+		chatOverlay[-1].bot.uploadAvatar(path)
 
 	ONLY_ONCE = False
