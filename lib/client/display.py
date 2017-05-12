@@ -84,6 +84,7 @@ def defColor(fore,back = "none",intense = False):
 	else:
 		pair += ";4%d" % _COLOR_NAMES.index(back)
 	_COLORS.append(pair+"m")
+	return len(_COLORS)-1-_NUM_PREDEFINED
 def defEffect(on,off):
 	'''Define a new effect, turned on with `on`, and off with `off`'''
 	if not _CAN_DEFINE_EFFECTS:
@@ -96,6 +97,7 @@ def defEffect(on,off):
 def def256colors():
 	for i in range(256):
 		defColor(i)
+	return len(_COLORS) - 256 - _NUM_PREDEFINED
 
 def getColor(c):
 	'''insertColor without position or coloring object'''
