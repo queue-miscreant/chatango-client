@@ -529,7 +529,7 @@ class Scrollable:
 			else:
 				endwidth -= 1
 			return "%s%s%s%s"%(self._nonscroll,'*'*endwidth,CHAR_CURSOR,
-				'*'*(self._width-endwidth))
+				'*'*(width-endwidth))
 		text = "%s%s%s%s"%(self._nonscroll,self._str[start:self._pos],
 			CHAR_CURSOR,self._str[self._pos:end])
 		#actually replace the lengths I asserted earlier
@@ -637,7 +637,7 @@ class Scrollable:
 		if pos and not self.password:
 			span = pos.end(1)
 			#how far we went
-			self._str = self._str[:self._pos] + self._str[span:]
+			self._str = self._str[:self._pos] + self._str[self._pos+span:]
 		else:
 			self._str = self._str[:self._pos]
 		self._onchanged()
@@ -645,6 +645,10 @@ class Scrollable:
 		'''Clear cursor and string'''
 		self._str = ""
 		self.home()
+	def undo(self):
+		#TODO populate a list of changes since some interval
+		#or after pressing space
+		pass
 
 class Tokenize:
 	'''Class for holding new tab-completers'''
@@ -739,7 +743,8 @@ class ScrollSuggest(Scrollable):
 				lexicon = shlex(self._str[:self._pos],posix=True)
 			lexicon.quotes = '"' #no single quotes
 			lexicon.wordchars += ''.join(self.completer.localPrefix) + \
-				''.join(self.completer.prefixes) #add in predefined characters
+				''.join(self.completer.prefixes) + '/~' #add in predefined characters
+			#TODO go back to old method
 			argsplit = []
 			lastToken = lexicon.get_token()
 			while lastToken:
@@ -766,7 +771,6 @@ class ScrollSuggest(Scrollable):
 						self.movepos(temp)
 						self._suggestList = tempSuggest
 
-			dbmsg(argsplit)
 			#just use a prefix
 			if len(argsplit) > 0 and not self._suggestList:
 				search = argsplit[-1]
