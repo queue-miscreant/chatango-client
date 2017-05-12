@@ -99,13 +99,14 @@ Returns whether the instance has a color/effect at string index `position`
 ```
 Coloring.insertColor(position,color)
 ```
+
 Inserts a color number `color` at position `position`
 
 ```
 Coloring.effectRange(start,end,effect)
 ```
 Adds an effect with number `effect` from string slice `[start:end]`.
-effectRange(0,-1,0) will make the entire string until the last character reverse video.
+`For example, effectRange(0,-1,0)` will make the entire string until the last character reverse video.
 
 ```
 Coloring.addGlobalEffect(effect)
@@ -118,7 +119,7 @@ Coloring.colorByRegex(regex, color, fallback = None, group = 0)
 Insert a color from a compiled regex `regex`.
 When the regex is matched, `color` will be applied to the match (with regex group `group`).
 This function preserves the color immediately before the match.
-e.g.: If a completely green string "(Green)" has blue inserted somewhere in it, the string will have colors "(Green)(Blue)(Green)"
+For example, if a completely green string "(Green)" has blue inserted somewhere in it, the string will have colors "(Green)(Blue)(Green)".
 `color` should be an integer or function that returns an integer.
 `fallback` is the fallback color if no colors exist before the match. Defaults to 0: normal text on normal background
 
