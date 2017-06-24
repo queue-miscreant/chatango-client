@@ -82,7 +82,6 @@ class ChatBot(ch.Manager):
 	def addEvent(cls,eventname,func):
 		if eventname in cls._events:
 			cls._events[eventname] = func
-			client.dbmsg(eventname,func)
 	
 	def onInit(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
