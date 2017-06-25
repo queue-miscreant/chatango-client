@@ -75,6 +75,7 @@ class ChatBot(ch.Manager):
 
 		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
 		client.Tokenize('@',self.members)
+		self.loop.create_task(self.onInit())
 
 	def _runEvent(self,event,*args):
 		try:
@@ -85,15 +86,11 @@ class ChatBot(ch.Manager):
 		if eventname in cls._events:
 			cls._events[eventname] = func
 	
+	@asyncio.coroutine
 	def onInit(self):
-		#wait until now to initialize the object, since now the information is guaranteed to exist
-		if not self.isinited:
-			self.isinited = 0
-			super(ChatBot,self).__init__(self.creds["user"], self.creds["passwd"], False)
-			self.isinited = 1
-		self.mainOverlay.msgSystem("Connecting")
 		self.members.clear()
-		self.joinGroup(self.creds["room"])
+		yield from self.mainOverlay.msgSystem("Connecting")
+		yield from self.joinGroup(self.creds["room"])
 	
 	def stop(self):
 		if not self.isinited: return
@@ -122,25 +119,19 @@ class ChatBot(ch.Manager):
 	
 	def tryPost(self,text):
 		if self.joinedGroup is None: return
-		self.joinedGroup.sendPost(text,self.channel)
+		self.loop.create_task(self.joinedGroup.sendPost(text,self.channel))
 	
 	@asyncio.coroutine
 	def onConnect(self, group):
-		self.mainOverlay.msgSystem("Connected to "+group.name)
 		self.joinedGroup = group
 		self.setFormatting()
 		self.me = group.username
 		if self.me[0] in "!#": self.me = self.me[1:]
 		self.mainOverlay.parent.updateinfo(None,"{}@{}".format(self.me,group.name))
 		#show last message time
-		self.mainOverlay.msgTime(group.last,"Last message at ")
-		self.mainOverlay.msgTime()
-
-	#on removal from a group
-	@asyncio.coroutine
-	def onLeave(self,group):
-		'''On leave. No event because you can just use onDone'''
-		self.stop()
+		yield from self.mainOverlay.msgSystem("Connected to "+group.name)
+		yield from self.mainOverlay.msgTime(group.last,"Last message at ")
+		yield from self.mainOverlay.msgTime()
 		
 	#on message
 	@asyncio.coroutine
@@ -157,18 +148,18 @@ class ChatBot(ch.Manager):
 			client.soundBell()
 
 		self.members.promote(user.lower())
-		self.mainOverlay.msgPost(*msg)
+		yield from self.mainOverlay.msgPost(*msg)
 
 	@asyncio.coroutine
 	def onHistoryDone(self, group, history):
-		'''On retrieved initial history. No event because this is run on successful connect'''
+		'''On retrieved history'''
 		for post in history:
 			user = post.user
 			if user[0] in '#!': user = user[1:]
 			if user not in self.members:
 				self.members.append(user.lower())
 			msg = parsePost(post, self.me, True)
-			self.mainOverlay.msgPrepend(*msg)
+			yield from self.mainOverlay.msgPrepend(*msg)
 		self.mainOverlay.canselect = True
 
 	@asyncio.coroutine
@@ -190,7 +181,7 @@ class ChatBot(ch.Manager):
 	def onParticipants(self, group):
 		'''On received joined members. No event because this is run on successful connect'''
 		self.members.extend(group.userlist)
-		self.mainOverlay.recolorlines()
+		yield from self.mainOverlay.recolorlines()
 
 	@asyncio.coroutine
 	def onUsercount(self, group):
@@ -214,6 +205,7 @@ class ChatBot(ch.Manager):
 	def onConnectionError(self, group, error):
 		if error == "lost":
 			message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
+			#XXX
 			client.BlockingOverlay(self.mainOverlay.parent,
 				client.daemonize(self.reconnect),"connect").add()
 		else:
@@ -229,9 +221,9 @@ class ChatangoOverlay(client.MainOverlay):
 						,"a-enter":	self.onaltenter
 						,"tab":		self.ontab
 						,"f2":		self.linklist
-						,"f3":		self.F3
-						,"f4":		self.F4
-						,"f5":		self.F5
+						,"f3":		self.listmembers
+						,"f4":		self.setformatting
+						,"f5":		self.setchannel
 						,"f12":		self.options
 						,"^n":		self.addignore
 						,"^t":		self.joingroup
@@ -262,7 +254,8 @@ class ChatangoOverlay(client.MainOverlay):
 				if i not in self.bot.visited_links:
 					self.bot.visited_links.append(i)
 			#don't recolor if the list is empty
-			if alllinks: self.recolorlines()
+			#need to recolor ALL lines, not just this one
+			if alllinks: self.parent.loop.create_task(self.recolorlines())
 				
 		if len(alllinks) >= self.bot.options["linkwarn"]:
 			self.parent.holdBlurb(
@@ -286,7 +279,7 @@ class ChatangoOverlay(client.MainOverlay):
 		if link:
 			client.open_link(self.parent,link)
 			self.bot.visited_links.append(link)
-			self.recolorlines()
+			self.parent.loop.create_task(self.recolorlines())
 		return 1
 
 	def onenter(self):
@@ -335,7 +328,7 @@ class ChatangoOverlay(client.MainOverlay):
 			client.open_link(self.parent,current,me.mode)
 			if current not in self.bot.visited_links:
 				self.bot.visited_links.append(current)
-				self.recolorlines()
+				self.parent.loop.create_task(self.recolorlines())
 			#exit
 			return -1
 
@@ -351,7 +344,7 @@ class ChatangoOverlay(client.MainOverlay):
 					,"tab": client.override(select)})
 		box.add()
 
-	def F3(self):
+	def listmembers(self):
 		'''List members of current group'''
 		if self.bot.joinedGroup is None: return
 		def select(me):
@@ -388,7 +381,7 @@ class ChatangoOverlay(client.MainOverlay):
 		})
 		box.add()
 
-	def F4(self):
+	def setformatting(self):
 		'''Chatango formatting settings'''
 		#select which further input to display
 		def select(me):
@@ -458,7 +451,7 @@ class ChatangoOverlay(client.MainOverlay):
 		box.addKeys({"enter":select})
 		box.add()
 
-	def F5(self):
+	def setchannel(self):
 		'''List channels'''
 		def select(me):
 			self.bot.channel = me.it
@@ -517,7 +510,6 @@ class ChatangoOverlay(client.MainOverlay):
 				self.recolorlines()
 			
 		def drawOptions(string,i,maxval):
-			base256 = self.parent.two56start
 			if i == 0:		#mouse
 				string[:-1]+(self.bot.options["mouse"] and "y" or "n")
 				string.insertColor(-1,self.bot.options["mouse"] and 11 or 3)
@@ -540,13 +532,13 @@ class ChatangoOverlay(client.MainOverlay):
 				if (self.bot.options["256color"]):
 					string.insertColor(-1,self.bot.options["htmlcolor"] and 11 or 3)
 				elif self.parent.two56:
-					string.insertColor(0,245 + base256)
+					string.insertColor(0,245 + self.parent.two56start)
 			elif i == 6:
 				string[:-1]+(self.bot.options["anoncolor"] and "y" or "n")
 				if self.bot.options["256color"] and self.bot.options["htmlcolor"]:
 					string.insertColor(-1,self.bot.options["anoncolor"] and 11 or 3)
 				elif self.parent.two56:
-					string.insertColor(0,245 + base256)
+					string.insertColor(0,245 + self.parent.two56start)
 
 		box = client.ListOverlay(self.parent, OPTION_NAMES, drawOptions)
 		box.addKeys({
@@ -583,7 +575,7 @@ class ChatangoOverlay(client.MainOverlay):
 		client.open_link(self.parent,last)
 		if last not in self.bot.visited_links:
 			self.bot.visited_links.append(last)
-			self.recolorlines()
+			self.parent.loop.create_task(self.recolorlines())
 
 	def joingroup(self):
 		'''Join a new group'''
@@ -600,13 +592,17 @@ class ChatangoOverlay(client.MainOverlay):
 		))
 
 	def colorizeMessage(self, msg, post, isreply, ishistory):
-		base256 = self.parent.two56start
-		nameColor = convertTo256(post.nColor) + base256
-		fontColor = convertTo256(post.fColor) + base256
+		rawWhite = client.rawNum(0)
+		nameColor = rawWhite
+		fontColor = rawWhite
 		if not self.parent.two56 or not self.bot.options["htmlcolor"] or \
 			(self.bot.options["anoncolor"] and post.user[0] in "#!"):
 			nameColor = getColor(post.user)
 			fontColor = getColor(post.user)
+		elif self.parent.two56:
+			base256 = self.parent.two56start
+			nameColor = convertTo256(post.nColor, base256)
+			fontColor = convertTo256(post.fColor, base256)
 
 		#greentext, font color
 		textColor = lambda x: x[0] == '>' and 11 or fontColor
@@ -615,7 +611,7 @@ class ChatangoOverlay(client.MainOverlay):
 		if self.parent.two56:
 			#links in white
 			linkColor = lambda x: (x in self.bot.visited_links and \
-				 self.parent.two56) and (245 + base256) or client.rawNum(0)
+				 self.parent.two56) and (245 + base256) or rawWhite
 			msg.colorByRegex(client.LINK_RE, linkColor, fontColor, 1)
 
 		#underline quotes
@@ -624,6 +620,7 @@ class ChatangoOverlay(client.MainOverlay):
 		#make sure we color the name right
 		msg.insertColor(1, nameColor)
 		#insurance the @s before a > are colored right
+		#		space/username/:(space)
 		msgStart = 1+len(post.user)+2
 		if not msg.coloredAt(msgStart):
 			msg.insertColor(msgStart,fontColor)
@@ -645,16 +642,20 @@ def getColor(name,init = 6,split = 109,rot = 6):
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-def convertTo256(string):
-	'''Convert a hex string to 256 color variant'''
+def convertTo256(string,base = 0):
+	'''
+	Convert a hex string to 256 color variant.
+	Base denotes the position at which 256 colors are defined
+	'''
 	if string is None or len(string) < 3 or len(string) == 4:
 		return client.rawNum(0)
 	partsLen = len(string)//3
 	in216 = [int(int(string[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))
 		 for i in range(3)]
+	#too white or too black
 	if sum(in216) < 2 or sum(in216) > 34:
 		return client.rawNum(0)
-	return 16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
+	return base+16+sum(map(lambda x,y: x*y,in216,[36,6,1]))
 
 def tabFile(path):
 	'''A file tabbing utility'''

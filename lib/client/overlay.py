@@ -581,7 +581,8 @@ class ColorOverlay(ListOverlay,Box):
 		ispec = [(r,0,5) for r in init]
 		mspec = [(5,0,b) for b in final]
 
-		spectrum = [item for i in [rspec,yspec,cspec,bspec,ispec,mspec] for item in i]
+		spectrum = [item for i in [rspec,yspec,cspec,bspec,ispec,mspec]
+			for item in i]
 
 		shade = [(max(0,i[0]-1),max(0,i[1]-1),max(0,i[2]-1)) for i in spectrum]
 		tint = [(min(5,i[0]+1),min(5,i[1]+1),min(5,i[2]+1)) for i in spectrum]
@@ -721,7 +722,7 @@ class InputOverlay(TextOverlay,Box):
 		self.ondone = func
 
 class CommandOverlay(TextOverlay):
-	'''Overlay to run commands. Commands are run in separate threads'''
+	'''Overlay to run commands'''
 	replace = False
 	history = History()	#global command history
 	def __init__(self,parent,caller = None):
@@ -744,7 +745,6 @@ class CommandOverlay(TextOverlay):
 	def __call__(self,lines):
 		lines[-1] = "COMMAND"
 	def _onSentinel(self):
-		#TODO just assign this a reference to the MainOverlay that called it
 		if self.caller:
 			#get the highest mainOverlay
 			self.caller.text.append(CHAR_COMMAND)
@@ -754,6 +754,7 @@ class CommandOverlay(TextOverlay):
 		if not str(self.text): return -1
 		self.text.backspace()
 	def _run(self):
+		#TODO use futures for command returns
 		'''Run command'''
 		text = str(self.text)
 		self.history.append(text)
@@ -794,12 +795,15 @@ class ConfirmOverlay(OverlayBase):
 	replace = False
 	def __init__(self,parent,confirmfunc):
 		super(ConfirmOverlay, self).__init__(parent)
-		def confirmed(*args):
-			confirmfunc()
+		def callback(*args):
+			if asyncio.iscoroutine(confirmfunc):
+				self.parent.loop.create_task(confirmfunc())
+			else:
+				self.parent.loop.call_soon(confirmfunc)
 			self.parent.releaseBlurb()
 			return -1
 		self._keys.update( #run these in order
-			{ord('y'):	confirmed
+			{ord('y'):	callback
 			,ord('n'):	override(staticize(self.parent.releaseBlurb),-1)
 		})
 
@@ -809,7 +813,13 @@ class BlockingOverlay(OverlayBase):
 	def __init__(self,parent,confirmfunc,tag=""):
 		super(BlockingOverlay, self).__init__(parent)
 		self.tag = tag
-		self._keys.update({-1: override(staticize(confirmfunc),-1)})
+		def callback(*args):
+			if asyncio.iscoroutine(confirmfunc):
+				self.parent.loop.create_task(confirmfunc())
+			else:
+				self.parent.loop.call_soon(confirmfunc)
+			return -1
+		self._keys.update({-1: callback})
 
 	def add(self):
 		if self.tag:
@@ -892,7 +902,8 @@ class MainOverlay(TextOverlay):
 			self._linesup = 0
 			self._unfiltup = 0
 			self._innerheight = 0
-			self.parent.updateinput()	#put the cursor back
+			#put the cursor back
+			self.parent.loop.create_task(self.parent.updateinput())
 			return 1
 	def add(self):
 		'''Start timeloop and add overlay'''
@@ -900,17 +911,21 @@ class MainOverlay(TextOverlay):
 		if self._pushtimes:
 			self.parent.loop.create_task(self._timeloop())
 	def remove(self):
-		'''Quit timeloop (if it hasn't already exited). Exit client if last overlay.'''
+		'''
+		Quit timeloop (if it hasn't already exited).
+		Exit client if last overlay.
+		'''
 		super().remove()
 		self._pushtimes = False
 		if not self.index:
 			self.parent.active = False
+
 	@asyncio.coroutine
 	def resize(self,newx,newy):
 		'''Resize scrollable and maybe draw lines again if width changed'''
-		super().resize(newx,newy)
+		yield from super().resize(newx,newy)
 		if newx != self.parent.x:
-			self.redolines(newx,newy)
+			yield from self.redolines(newx,newy)
 
 	def clear(self):
 		'''Clear all lines and messages'''
@@ -959,18 +974,21 @@ class MainOverlay(TextOverlay):
 	def _timeloop(self):
 		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
 		i = 0
-		parent = self.parent
 		while self._pushtimes:
 			yield from asyncio.sleep(2)
 			i+=1
 			if time.time() - parent.last > 4:	#erase blurbs
-				parent.newBlurb()
+				self.parent.newBlurb()
 			#every 600 seconds
 			if not i % 300:
-				self.msgTime(time.time())
+				yield from self.msgTime(time.time())
 				i=0
+
 	def _replaceback(self):
-		'''Add a newline if the next character is n, or a tab if the next character is t'''
+		'''
+		Add a newline if the next character is n,
+		or a tab if the next character is t
+		'''
 		EscapeOverlay(self.parent,self.text).add()
 
 	#MESSAGE PUSHING BACKEND-----------------------------------
@@ -1115,6 +1133,7 @@ class MainOverlay(TextOverlay):
 		if x < len(self._INDENT):
 			pos += len(self._INDENT) - x
 		return msg,pos
+
 	#REAPPLY METHODS-----------------------------------------------------------
 	@asyncio.coroutine
 	def redolines(self, width = None, height = None):
@@ -1157,7 +1176,7 @@ class MainOverlay(TextOverlay):
 		newlines = []
 		numup,nummsg = 0,1
 		while (numup < height or nummsg <= self._selector) and \
-			nummsg <= len(self._allMessages):
+		nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
 			if not i[2]:	#don't decolor system messages
 				i[0].clear()
@@ -1171,19 +1190,22 @@ class MainOverlay(TextOverlay):
 				i[3] = b
 				numup += b
 		self._lines = newlines
-		self.parent.display()
+		yield from self.parent.display()
+
 	#MESSAGE ADDITION----------------------------------------------------------
-	#TODO coroutinize
+	@asyncio.coroutine
 	def msgSystem(self, base):
 		'''System message'''
 		base = Coloring(base)
 		base.insertColor(0,rawNum(1))
 		self._append(base,None,True)
-		self.parent.display()
+		yield from self.parent.display()
+	@asyncio.coroutine
 	def msgTime(self, numtime = None, predicate=""):
 		'''Push a system message of the time'''
 		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
-		self.msgSystem(predicate+dtime)
+		yield from self.msgSystem(predicate+dtime)
+	@asyncio.coroutine
 	def msgPost(self,post,*args):
 		'''Parse a message, apply colorizeMessage, and append'''
 		post = Coloring(post)
@@ -1191,21 +1213,24 @@ class MainOverlay(TextOverlay):
 		ret = self._append(post,list(args))
 		for i in self._examine:
 			i(self,post,*args)
-		self.parent.display()
+		yield from self.parent.display()
 		return ret
+	@asyncio.coroutine
 	def msgPrepend(self,post,*args):
 		'''Parse a message, apply colorizeMessage, and prepend'''
 		post = Coloring(post)
 		self.colorizeMessage(post,*args)
 		ret = self._prepend(post,list(args))
-		self.parent.display()
+		yield from self.parent.display()
 		return ret
+	@asyncio.coroutine
 	def msgDelete(self,number):
 		for i,j in enumerate(reversed(self._allMessages)):
 			if number == j[-1]:
 				del self._allMessages[-i-1]
-				self.redolines()
-				self.parent.display()
+				yield from self.redolines()
+				yield from self.parent.display()
+				return
 
 class _NScrollable(ScrollSuggest):
 	'''
@@ -1221,36 +1246,6 @@ class _NScrollable(ScrollSuggest):
 		self.parent.loop.create_task(self.parent.updateinput())
 
 #MAIN CLIENT--------------------------------------------------------------------
-class _Schedule:
-	'''Simple class for scheduling displays'''
-	def __init__(self):
-		self._scheduler = []
-		self._taskno = 0
-		self._debounce = False
-	def __call__(self,func,*args):
-		'''Run a function. If debounce is True, schedule it'''
-		if self._debounce:
-			self._scheduler.append((func,args))
-			return True
-		self._bounce(True)
-		func(*args)
-		self._bounce(False)
-	def _bounce(self,newbounce):
-		'''
-		Change the value of debounce. If bounce is on a falling edge,
-		run queued functions	
-		'''
-		prev = self._debounce
-		if not newbounce:
-			self._debounce = True
-			while self._taskno < len(self._scheduler):
-				task = self._scheduler[self._taskno]
-				task[0](*task[1])
-				self._taskno+=1
-			self._scheduler = []
-			self._taskno = 0
-		self._debounce = newbounce
-		return prev
 
 class Main:
 	'''Main class; handles all IO and defers to overlays'''
@@ -1266,12 +1261,9 @@ class Main:
 		#256 mode
 		if two56colors:
 			#the start of 256 color definitions
-			self._two56 = True
 			self.two56start = len(_COLORS) + rawNum(0)
 			def256colors()
-		else:
-			self._two56 = False
-		self.two56 = property(lambda: self._two56)
+		self._two56 = two56colors
 		#input/display stack
 		self._ins = []
 		self._scrolls = []
@@ -1279,6 +1271,9 @@ class Main:
 		self._lastReplace = 0
 		self._blurbQueue = []
 		self._bottom_edges = [" "," "]
+
+	two56 = property(lambda self: self._two56)
+
 	#Display Backends----------------------------------------------------------
 	@asyncio.coroutine
 	def display(self):
@@ -1296,11 +1291,12 @@ class Main:
 			return
 		#main display method: move to top of screen
 		_moveCursor()
-		print("\x1b[?25l",end="")
+		print(end="\x1b[?25l")
 		#draw each line in lines, deleting the rest of the garbage on the line
 		for i in lines:
 			print(i,end="\x1b[K\n\r") 
 		print(CHAR_RETURN_CURSOR,end="")
+
 	@asyncio.coroutine
 	def updateinput(self):
 		'''Input display backend'''
@@ -1309,6 +1305,7 @@ class Main:
 		string = format(self._scrolls[-1])
 		_moveCursor(self.y+1)
 		print("%s\x1b[K" % string,end=CHAR_RETURN_CURSOR)
+
 	@asyncio.coroutine
 	def _printblurb(self,blurb,time):
 		'''Blurb display backend'''
@@ -1421,6 +1418,7 @@ class Main:
 	@asyncio.coroutine
 	def _input(self):
 		'''Crux of input. Submain client loop'''
+		if not len(self._ins): return
 		chars = []
 		try:
 			next = -1
@@ -1433,45 +1431,40 @@ class Main:
 				chars.append(next)
 		except ControlZ:
 			chars.append('\26')
-		if not len(self._ins): return
 		return self._ins[-1].runkey(chars)
 	@asyncio.coroutine
 	def main_loop(self):
 		'''Main client loop'''
+		yield from self.resize()
+		while self.active:
+			inp = yield from self._input()
+			if inp:
+				if inp == -1:
+					self._ins[-1].remove()
+				yield from self.display()
+
+	def start(self,*args):
 		self._screen = curses.initscr()		#init screen
-		#sadly, I can't put this in main.loop to make it more readable
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
-
-		yield from self.resize()
 		try:
-			while self.active:
-				inp = yield from self._input()
-				if inp:
-					if inp == -1:
-						self._ins[-1].remove()
-					yield from self.display()
-		finally:
-			self.finish()
-
-	def start(self):
-		try:
+			for i in args: i()
 			self.loop.run_until_complete(self.main_loop())
 		except KeyboardInterrupt:
+			pass
+		finally:
 			self.active = False
-			self.finish()
-		self.loop.close()
-
-	def finish(self):
-		#return the terminal sane mode. undo what's in init
-		curses.echo(); curses.nocbreak(); self._screen.keypad(0)
-		curses.endwin()
-		self.active = False
-		#let overlays do cleanup
-		for i in self._ins:
-			try:
-				i.remove()
-			except: pass
+			#let overlays do cleanup
+			for i in self._ins:
+				try:
+					i.remove()
+				except: pass
+			#return to sane mode
+			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
+			curses.endwin()
+			#close async loop
+			self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+			self.loop.close()
 		
 	#Frontends------------------------------------------------------------------
 	@asyncio.coroutine
