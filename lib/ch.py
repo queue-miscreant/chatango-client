@@ -174,7 +174,6 @@ class ChatangoProtocol(asyncio.Protocol):
 		commands = self._rbuff.split(b'\x00')
 		for command in commands[:-1]:
 			args = command.decode('utf-8').rstrip("\r\n").split(':')
-			print(args)
 			try:
 				if command == b"":
 					self._canPing = True		#received ping on time
@@ -637,7 +636,3 @@ class Manager:
 			search = re.search("auth.chatango.com=(.*?);", i)
 			if search:
 				return search.group(1)
-
-	@asyncio.coroutine
-	def onMessage(self,group,post):
-		print(post)

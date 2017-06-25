@@ -10,6 +10,7 @@ from . import ch
 from . import client
 import os
 import re
+import asyncio
 
 __all__ = ["ChatBot","ChatangoOverlay","tabFile","convertTo256","getColor"]
 
@@ -57,6 +58,7 @@ class ChatBot(ch.Manager):
 		,"onFloodWarning": None}
 
 	def __init__(self,creds,parent):
+		super(ChatBot,self).__init__(creds["user"],creds["passwd"],loop=parent.loop)
 		self.creds = creds
 		self.channel = 0
 		self.isinited = 0
@@ -65,8 +67,8 @@ class ChatBot(ch.Manager):
 		self.joinedGroup = None
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
-		self.visited_links = []
-		#references
+		self.visited_links = [] #TODO move into ChatangoOverlay instead
+		#list references
 		self.ignores = self.creds["ignores"]
 		self.filtered_channels = self.creds["filtered_channels"]
 		self.options = self.creds["options"]
@@ -122,6 +124,7 @@ class ChatBot(ch.Manager):
 		if self.joinedGroup is None: return
 		self.joinedGroup.sendPost(text,self.channel)
 	
+	@asyncio.coroutine
 	def onConnect(self, group):
 		self.mainOverlay.msgSystem("Connected to "+group.name)
 		self.joinedGroup = group
@@ -134,11 +137,13 @@ class ChatBot(ch.Manager):
 		self.mainOverlay.msgTime()
 
 	#on removal from a group
+	@asyncio.coroutine
 	def onLeave(self,group):
 		'''On leave. No event because you can just use onDone'''
 		self.stop()
 		
 	#on message
+	@asyncio.coroutine
 	def onMessage(self, group, post):
 		'''On message. No event because you can just use ExamineMessage'''
 		#double check for anons
@@ -154,6 +159,7 @@ class ChatBot(ch.Manager):
 		self.members.promote(user.lower())
 		self.mainOverlay.msgPost(*msg)
 
+	@asyncio.coroutine
 	def onHistoryDone(self, group, history):
 		'''On retrieved initial history. No event because this is run on successful connect'''
 		for post in history:
@@ -165,27 +171,33 @@ class ChatBot(ch.Manager):
 			self.mainOverlay.msgPrepend(*msg)
 		self.mainOverlay.canselect = True
 
+	@asyncio.coroutine
 	def onFloodWarning(self, group):
 		self.mainOverlay.msgSystem("Flood ban warning issued")
 		self._runEvent("onFloodWarning",group)
 
+	@asyncio.coroutine
 	def onFloodBan(self, group, secs):
 		self.onFloodBanRepeat(group, secs)
 		self._runEvent("onFloodBan",group,secs)
 
+	@asyncio.coroutine
 	def onFloodBanRepeat(self, group, secs):
 		self.mainOverlay.msgSystem("You are banned for %d seconds"%secs)
 		self._runEvent("onFloodRepeat",group,secs)
 	
+	@asyncio.coroutine
 	def onParticipants(self, group):
 		'''On received joined members. No event because this is run on successful connect'''
 		self.members.extend(group.userlist)
 		self.mainOverlay.recolorlines()
 
+	@asyncio.coroutine
 	def onUsercount(self, group):
 		'''On user count changed. No event because this is run on member join/leave'''
 		self.mainOverlay.parent.updateinfo(str(group.usercount))
 
+	@asyncio.coroutine
 	def onMemberJoin(self, group, user):
 		if user != "anon":
 			self.members.append(user)
@@ -193,10 +205,12 @@ class ChatBot(ch.Manager):
 		self.mainOverlay.parent.newBlurb("%s has joined" % user)
 		self._runEvent("onMemberJoin",group,user)
 
+	@asyncio.coroutine
 	def onMemberLeave(self, group, user):
 		self.mainOverlay.parent.newBlurb("%s has left" % user)
 		self._runEvent("onMemberLeave",group,user)
 
+	@asyncio.coroutine
 	def onConnectionError(self, group, error):
 		if error == "lost":
 			message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")

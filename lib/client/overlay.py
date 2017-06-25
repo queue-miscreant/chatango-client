@@ -23,7 +23,8 @@ from .display import *
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
-			,"BlockingOverlay","MainOverlay","onDone","override","staticize"]
+			,"BlockingOverlay","MainOverlay","onDone","override","staticize"
+			,"Main"]
 
 lasterr = None
 RESERVE_LINES = 3
@@ -897,9 +898,7 @@ class MainOverlay(TextOverlay):
 		'''Start timeloop and add overlay'''
 		super().add()
 		if self._pushtimes:
-			times = Thread(target=self._timeloop)
-			times.daemon = True
-			times.start()
+			self.parent.loop.create_task(self._timeloop())
 	def remove(self):
 		'''Quit timeloop (if it hasn't already exited). Exit client if last overlay.'''
 		super().remove()
@@ -956,12 +955,13 @@ class MainOverlay(TextOverlay):
 		'''
 		return False
 
+	@asyncio.coroutine
 	def _timeloop(self):
 		'''Prints the current time every 10 minutes. Also handles erasing blurbs'''
 		i = 0
 		parent = self.parent
 		while self._pushtimes:
-			time.sleep(2)
+			yield from asyncio.sleep(2)
 			i+=1
 			if time.time() - parent.last > 4:	#erase blurbs
 				parent.newBlurb()
@@ -1218,7 +1218,7 @@ class _NScrollable(ScrollSuggest):
 		self.index = index
 	def _onchanged(self):
 		super(_NScrollable, self)._onchanged()
-		self.parent.updateinput()
+		self.parent.loop.create_task(self.parent.updateinput())
 
 #MAIN CLIENT--------------------------------------------------------------------
 class _Schedule:
@@ -1257,12 +1257,7 @@ class Main:
 	last = 0
 	def __init__(self,two56colors,loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
-		self._screen = curses.initscr()		#init screen
-		#sadly, I can't put this in main.loop to make it more readable
-		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
-		self._screen.nodelay(1)	#don't wait for enter to get input
 		#scheduler 
-		self._schedule = _Schedule()
 		self.active = True
 		self.candisplay = True
 		#guessed terminal dimensions
@@ -1365,7 +1360,6 @@ class Main:
 		'''Update screen bottom'''
 		self.loop.create_task(self._updateinfo(right,left))
 	#Overlay Frontends---------------------------------------------------------
-	@asyncio.coroutine
 	def addOverlay(self,new):
 		'''Add overlay'''
 		if not isinstance(new,OverlayBase): return
@@ -1373,8 +1367,7 @@ class Main:
 		self._ins.append(new)
 		if new.replace: self._lastReplace = new.index
 		#display is not strictly called beforehand, so better safe than sorry
-		yield from self.display()
-	@asyncio.coroutine
+		self.loop.create_task(self.display())
 	def popOverlay(self,overlay):
 		'''Pop the overlay `overlay`'''
 		del self._ins[overlay.index]
@@ -1386,7 +1379,7 @@ class Main:
 					newReplace = start
 					break
 			self._lastReplace = newReplace
-		yield from self.display()
+		self.loop.create_task(self.display())
 	def getOverlay(self,index):
 		'''
 		Get an overlay by its index in self._ins. Returns None
@@ -1438,16 +1431,19 @@ class Main:
 			while next != -1:
 				next = self._screen.getch()
 				chars.append(next)
-		except KeyboardInterrupt:
-			self.active = False
-			return
 		except ControlZ:
 			chars.append('\26')
 		if not len(self._ins): return
 		return self._ins[-1].runkey(chars)
 	@asyncio.coroutine
-	def loop(self):
+	def main_loop(self):
 		'''Main client loop'''
+		self._screen = curses.initscr()		#init screen
+		#sadly, I can't put this in main.loop to make it more readable
+		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
+		self._screen.nodelay(1)	#don't wait for enter to get input
+
+		yield from self.resize()
 		try:
 			while self.active:
 				inp = yield from self._input()
@@ -1456,15 +1452,27 @@ class Main:
 						self._ins[-1].remove()
 					yield from self.display()
 		finally:
-			#return the terminal sane mode. undo what's in init
-			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
-			curses.endwin()
+			self.finish()
+
+	def start(self):
+		try:
+			self.loop.run_until_complete(self.main_loop())
+		except KeyboardInterrupt:
 			self.active = False
-			#let overlays do cleanup
-			for i in self._ins:
-				try:
-					i.remove()
-				except: pass
+			self.finish()
+		self.loop.close()
+
+	def finish(self):
+		#return the terminal sane mode. undo what's in init
+		curses.echo(); curses.nocbreak(); self._screen.keypad(0)
+		curses.endwin()
+		self.active = False
+		#let overlays do cleanup
+		for i in self._ins:
+			try:
+				i.remove()
+			except: pass
+		
 	#Frontends------------------------------------------------------------------
 	@asyncio.coroutine
 	def resize(self):
