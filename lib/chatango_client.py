@@ -87,7 +87,6 @@ class ChatBot(ch.Manager):
 	def onInit(self):
 		#wait until now to initialize the object, since now the information is guaranteed to exist
 		if not self.isinited:
-			self.isinited = 0
 			super(ChatBot,self).__init__(self.creds["user"], self.creds["passwd"], False)
 			self.isinited = 1
 		self.mainOverlay.msgSystem("Connecting")
