@@ -249,7 +249,7 @@ class ChatangoProtocol(asyncio.Protocol):
 	def _recv_premium(self, args):
 		'''Receive premium command. Called for both PM and Group'''
 		#TODO write setBgMode and setRecordingMode
-		if float(args[1]) > asyncio.time():
+		if float(args[1]) > self._loop.time():
 			self._premium = True
 			if self._messageBackground: self.setBgMode(1)
 			if self._messageRecord: self.setRecordingMode(1)

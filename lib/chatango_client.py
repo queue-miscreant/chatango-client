@@ -102,6 +102,7 @@ class ChatBot(ch.Manager):
 	def changeGroup(self,newgroup):
 		yield from self.leaveGroup(self.joinedGroup)
 		self.creds["room"] = newgroup
+		self.mainOverlay.clear()
 		client.clearLinks()
 		yield from self.joinGroup(newgroup)
 

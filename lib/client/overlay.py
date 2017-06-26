@@ -722,7 +722,7 @@ class InputOverlay(TextOverlay,Box):
 		'''Attach a callback to the future'''
 		def callback(future):
 			if asyncio.iscoroutinefunction(func):
-				self.loop.create_task(func(future.result()))
+				self.parent.loop.create_task(func(future.result()))
 			else:
 				func(future.result())
 		self._future.add_done_callback(callback)
