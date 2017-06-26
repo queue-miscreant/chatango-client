@@ -61,7 +61,6 @@ class ChatBot(ch.Manager):
 		super(ChatBot,self).__init__(creds["user"],creds["passwd"],loop=parent.loop)
 		self.creds = creds
 		self.channel = 0
-		self.isinited = 0
 		#default to the given user name
 		self.me = creds.get("user") or None
 		self.joinedGroup = None
@@ -80,6 +79,7 @@ class ChatBot(ch.Manager):
 		try:
 			self._events[event](self,*args)
 		except TypeError: pass
+
 	@classmethod
 	def addEvent(cls,eventname,func):
 		if eventname in cls._events:
@@ -91,22 +91,19 @@ class ChatBot(ch.Manager):
 		yield from self.mainOverlay.msgSystem("Connecting")
 		yield from self.joinGroup(self.creds["room"])
 	
-	def stop(self):
-		if not self.isinited: return
-		super(ChatBot,self).stop()
-	
+	@asyncio.coroutine
 	def reconnect(self):
-		if not self.isinited: return
-		self.leaveGroup(self.joinedGroup)
+		yield from self.leaveGroup(self.joinedGroup)
 		self.mainOverlay.clear()
 		client.clearLinks()
-		self.onInit()
+		yield from self.onInit()
 	
+	@asyncio.coroutine
 	def changeGroup(self,newgroup):
-		self.leaveGroup(self.joinedGroup)
+		yield from self.leaveGroup(self.joinedGroup)
 		self.creds["room"] = newgroup
 		client.clearLinks()
-		self.joinGroup(newgroup)
+		yield from self.joinGroup(newgroup)
 
 	def setFormatting(self):
 		group = self.joinedGroup
@@ -203,9 +200,9 @@ class ChatBot(ch.Manager):
 	@asyncio.coroutine
 	def onConnectionError(self, group, error):
 		if error == "lost":
-			message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
+			yield from self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
 			client.BlockingOverlay(self.mainOverlay.parent,
-				self.reconnect,"connect").add()
+				self.reconnect(),"connect").add()
 		else:
 			self.mainOverlay.msgSystem("Connection error occurred. Try joining another room with ^T")
 
@@ -563,8 +560,7 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def reloadclient(self):
 		'''Reload current group'''
-		self.clear()
-		self.bot.reconnect()
+		self.parent.loop.create_task(self.bot.reconnect())
 
 	def openlastlink(self):
 		'''Open last link'''
@@ -580,7 +576,7 @@ class ChatangoOverlay(client.MainOverlay):
 		'''Join a new group'''
 		inp = client.InputOverlay(self.parent,"Enter group name")
 		inp.add()
-		inp.runOnDone(lambda x: self.clear() or self.bot.changeGroup(x))
+		inp.runOnDone(self.bot.changeGroup)
 
 	def filterMessage(self, post, isreply, ishistory):
 		return any((

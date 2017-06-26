@@ -1,5 +1,21 @@
+#!/usr/bin/env python3
+#ch.py
+'''
+A rewrite of the chatango library based on cellsheet's chlib.py and lumirayz's
+ch.py. Event based library for chatango rooms. Features channel support and 
+fetching history messages among all other necessary functionalities.
+'''
+#TODO	better modtools
+#TODO	property docstrings
+#TODO	I have no idea why, but PMs are failing in all implementations.
+#		Attempts to connect via websockets in a browser console also failed
+#		abandoning attempts to fix for a while
+#TODO	let protocol objecs handle responses, let group objects handle data
+#
+################################
+#Python Imports
+################################
 import os
-import time
 import random
 import re
 import urllib.request
@@ -147,8 +163,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		self._fColor = ""
 		self._fFace  = 0
 
-		self._canPing = False
-#		self.connected = False		TODO use a callback for connections lost instead
+		self._canPing = True
 
 	####################################
 	# Properties
@@ -189,8 +204,12 @@ class ChatangoProtocol(asyncio.Protocol):
 		self._rbuff = commands[-1]
 
 	def connection_lost(self, exc):
+		self._loop.call_soon(self._pingTask.cancel)
 		#TODO bind exc to names
-		self.callEvent(exc)
+		from .client import dbmsg
+		dbmsg(exc)
+		if not self._canPing:
+			self.callEvent("onConnectionError","lost")
 
 	#########################################
 	#	I/O
@@ -214,7 +233,6 @@ class ChatangoProtocol(asyncio.Protocol):
 		if self._transport:
 			self._transport.close()
 
-	"""
 	@asyncio.coroutine
 	def ping(self):
 		'''Send a ping, or fail and close the transport'''
@@ -224,23 +242,19 @@ class ChatangoProtocol(asyncio.Protocol):
 				self.sendCommand("")
 			else:
 				self._transport.close()
-				self.callEvent("onConnectionError","lost")
 			
 			yield from asyncio.sleep(self._pingDelay)
-	"""
 	
 	@asyncio.coroutine
 	def _recv_premium(self, args):
 		'''Receive premium command. Called for both PM and Group'''
 		#TODO write setBgMode and setRecordingMode
-		if float(args[1]) > time.time():
+		if float(args[1]) > asyncio.time():
 			self._premium = True
 			if self._messageBackground: self.setBgMode(1)
 			if self._messageRecord: self.setRecordingMode(1)
 		else:
 			self._premium = False
-
-#TODO create group name and stuff from method in manager
 
 class GroupProtocol(ChatangoProtocol):
 	_maxLength = 2000
@@ -298,8 +312,7 @@ class GroupProtocol(ChatangoProtocol):
 		self._uid = args[1]	
 		self._mods = set(mod.split(',')[0].lower() for mod in args[6].split(';'))
 
-		self._canPing = True
-#		self._loop.create_task(self.ping()) #create a ping
+		self._pingTask = self._loop.create_task(self.ping()) #create a ping
 
 	@asyncio.coroutine
 	def _recv_denied(self, args):

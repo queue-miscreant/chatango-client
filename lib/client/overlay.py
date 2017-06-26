@@ -19,7 +19,7 @@ import time
 import asyncio
 from .display import *
 
-__all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
+__all__ =	["CHAR_COMMAND","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
 			,"BlockingOverlay","MainOverlay","onDone","override","staticize"
@@ -720,7 +720,12 @@ class InputOverlay(TextOverlay,Box):
 		return self._future.result()
 	def runOnDone(self,func):
 		'''Attach a callback to the future'''
-		self._future.add_done_callback(lambda x: func(x.result()))
+		def callback(future):
+			if asyncio.iscoroutinefunction(func):
+				self.loop.create_task(func(future.result()))
+			else:
+				func(future.result())
+		self._future.add_done_callback(callback)
 
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands'''
@@ -820,7 +825,7 @@ class BlockingOverlay(OverlayBase):
 		self.tag = tag
 		def callback(*args):
 			if asyncio.iscoroutine(confirmfunc):
-				self.parent.loop.create_task(confirmfunc())
+				self.parent.loop.create_task(confirmfunc)
 			else:
 				self.parent.loop.call_soon(confirmfunc)
 			return -1
@@ -991,7 +996,6 @@ class MainOverlay(TextOverlay):
 			if not i % 300:
 				yield from self.msgTime(time.time())
 				i=0
-		dbmsg("task cancelled")
 
 	def _replaceback(self):
 		'''
