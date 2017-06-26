@@ -30,6 +30,7 @@ from lib import chatango_client as cc
 from lib import client
 import os
 import os.path as path
+import asyncio
 import sys
 import json
 
@@ -81,6 +82,7 @@ DEFAULT_FORMATTING = \
 	,"0"		#font face
 	,12]		#font size
 
+@asyncio.coroutine
 def runClient(main,creds):
 	#fill in credential holes
 	for num,i in enumerate(["user","passwd","room"]):
@@ -89,8 +91,8 @@ def runClient(main,creds):
 		inp = client.InputOverlay(main,"Enter your " + \
 			 ["username","password","room name"][num], num == 1,True)
 		inp.add()
-		creds[i] = inp.waitForInput()
-		if not main.active: return
+		creds[i] = yield from inp.waitForInput()
+		if creds[i] is None: main.stop()
 	#fill in formatting hole
 	if creds.get("formatting") is None:
 		#letting the program write into the constant would be stupid
@@ -115,13 +117,6 @@ def runClient(main,creds):
 	for i in DEFAULT_OPTIONS:
 		if creds["options"].get(i) is None:
 			creds["options"][i] = DEFAULT_OPTIONS[i]
-
-	main.toggleMouse(creds["options"]["mouse"])
-
-	#initialize chat bot
-	chatbot = cc.ChatBot(creds,main)
-	client.onDone(chatbot.stop)
-	chatbot.main()
 
 if __name__ == "__main__":
 	newCreds = {}
@@ -218,9 +213,15 @@ if __name__ == "__main__":
 		from custom import *
 
 	#start
+	main = client.Main(two56colors)
 	try:
-		client.start(runClient,newCreds,two56=two56colors)
+		cc.ChatBot(newCreds,main)
+		main.start()
+		main.loop.create_task(runClient(main,newCreds))
+		main.loop.run_forever()
 	finally:
+		main.loop.run_until_complete(main.loop.shutdown_asyncgens())
+		main.loop.close()
 		#save
 		try:
 			jsonData = {}

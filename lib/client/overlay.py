@@ -17,7 +17,6 @@ import os
 import signal #redirect ctrl-z
 import time
 import asyncio
-#from threading import Thread
 from .display import *
 
 __all__ =	["CHAR_COMMAND","start","soundBell","Box","command"
@@ -32,10 +31,9 @@ RESERVE_LINES = 3
 #escape has delay typically
 os.environ.setdefault("ESCDELAY", "25")
 
-#don't want to fire terminal stop, so just raise an exception to signal ctrl-z
-class ControlZ(Exception): pass
-def handler(signum, frame): raise ControlZ()
-signal.signal(signal.SIGTSTP,handler)
+#pass in the control keys for ctrl-c and ctrl-z
+signal.signal(signal.SIGINT,lambda signum,frame: curses.ungetch(3))
+signal.signal(signal.SIGTSTP,lambda signum,frame: curses.ungetch(26))
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -167,11 +165,14 @@ def _moveCursor(row = 0):
 	print("\x1b[%d;f" % row,end=CLEAR_FORMATTING)
 def soundBell():
 	'''Sound console bell. Just runs `print("\a",end="")`'''
-	print("\a",end="")
+	print(end="\a")
 
 quitlambda = lambda x: -1
 def staticize(func,*args):
-	'''Staticizes a function and its arguments into a function with one argument.'''
+	'''
+	Staticizes a function and its arguments into
+	a function with discarded arguments.
+	'''
 	def ret(*garbage):			#garbage args
 		return func(*args)
 	ret.__doc__ = func.__doc__	#preserve documentation text
@@ -226,8 +227,10 @@ class OverlayBase:
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
 		self._keys = {
-			27:	self._callalt		 #don't run post
-			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1 
+			3:		lambda x: self.parent.stop()
+			,27:	self._callalt
+			#no post on resize
+			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1
 			,curses.KEY_MOUSE:	self._callmouse
 		}
 		self._altkeys =	{-1: lambda: -1}
@@ -274,7 +277,7 @@ class OverlayBase:
 			ret = state in self._mouse and self._mouse[state](x,y)
 			chars = [i for i in chars if i != curses.KEY_MOUSE]
 			if chars[0] != -1:
-				return ret or self.runkey(chars)
+				return ret or self.parent.loop.create_task(self.runkey(chars))
 			return ret
 		except curses.error: pass
 	def _post(self):
@@ -284,6 +287,7 @@ class OverlayBase:
 		parent redraws
 		'''
 		return 1
+	@asyncio.coroutine
 	def runkey(self,chars):
 		'''
 		Run a key's callback. This expects a single argument: a list of
@@ -409,7 +413,7 @@ class TextOverlay(OverlayBase):
 		self.text.setwidth(newx)
 	def remove(self):
 		'''Pop scrollable on remove'''
-		super().remove()
+		super(TextOverlay,self).remove()
 		self.parent.popScrollable(self.text)
 	def controlHistory(self,history,scroll):
 		'''
@@ -461,7 +465,7 @@ class ListOverlay(OverlayBase,Box):
 			#borders
 			if not y in range(1,size+1): return
 			newit = (self.it//size)*size + (y - 1)
-			if newit > len(self.list): return
+			if newit >= len(self.list): return
 			self.it = newit
 			return tryEnter()
 		self._mouse.update(
@@ -665,13 +669,12 @@ class ColorSliderOverlay(OverlayBase,Box):
 class InputOverlay(TextOverlay,Box):
 	'''Replacement for input(). '''
 	replace = False
-	def __init__(self,parent,prompt,password = False,end = False):
+	def __init__(self,parent,prompt,password = False):
 		super(InputOverlay, self).__init__(parent)
-		self._done = False
-		self._prompt = Coloring(prompt)
+		self._future = parent.loop.create_future()
+		self._prompt = prompt if isinstance(prompt,Coloring) else Coloring(prompt)
 		self._prompts,self._numprompts = self._prompt.breaklines(parent.x-2)
 		self.text.password = password
-		self._end = end
 		self._keys.update({
 			10:		staticize(self._finish)
 			,127:	staticize(self._backspacewrap)
@@ -694,32 +697,30 @@ class InputOverlay(TextOverlay,Box):
 		if not str(self.text): return -1
 		self.text.backspace()
 	def _stop(self):
-		'''Premature stop. _done is not set'''
+		'''Premature stop. Cancel future'''
+		self._future.cancel()
 		return -1
 	def _finish(self):
 		'''Regular stop (i.e, with enter)'''
-		self._done = True
-		if hasattr(self,"ondone"): self.ondone(str(self.text))
+		self._future.set_result(str(self.text))
 		return -1
-	def remove(self):
-		'''Make parent inactive if the first overlay and prematurely stopped'''
-		if not self.index and not self._done:
-			self.parent.active = False
-		super().remove()
+
 	@asyncio.coroutine
 	def resize(self,newx,newy):
 		'''Resize prompts'''
-		super().resize(newx,newy)
+		super(InputOverlay,self).resize(newx,newy)
 		self._prompts,self._numprompts = self._prompt.breaklines(parent.x-2)
 
+	@asyncio.coroutine
 	def waitForInput(self):
-		'''All input is non-blocking, so we have to poll from another thread'''
-		while not self._done:
-			time.sleep(.1)
-		return str(self.text)
+		'''A coroutine to get input from the box'''
+		yield from self._future
+		if self._future.cancelled():
+			return None
+		return self._future.result()
 	def runOnDone(self,func):
-		'''Set function to run after valid poll'''
-		self.ondone = func
+		'''Attach a callback to the future'''
+		self._future.add_done_callback(lambda x: func(x.result()))
 
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands'''
@@ -735,8 +736,8 @@ class CommandOverlay(TextOverlay):
 			self.text.addCommand(i,j)
 		self.controlHistory(self.history,self.text)
 		self._keys.update({
-			10:		staticize(self._run)
-			,127:	staticize(self._backspacewrap)
+			10:		self._run
+			,127:	self._backspacewrap
 		})
 		self._altkeys.update({
 			127:	lambda: -1
@@ -749,12 +750,11 @@ class CommandOverlay(TextOverlay):
 			#get the highest mainOverlay
 			self.caller.text.append(CHAR_COMMAND)
 		return -1
-	def _backspacewrap(self):
+	def _backspacewrap(self,*args):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
 		self.text.backspace()
-	def _run(self):
-		#TODO use futures for command returns
+	def _run(self,*args):
 		'''Run command'''
 		text = str(self.text)
 		self.history.append(text)
@@ -763,17 +763,22 @@ class CommandOverlay(TextOverlay):
 			self.parent.newBlurb("Command \"{}\" not found".format(args[0]))
 			return -1
 		command = _commands[args[0]]
-		try:
-			add = command(self.parent,*args[1:])
-			if isinstance(add,OverlayBase):
-				self.swap(add)
-				return
-		except Exception as exc:
-			self.parent.newBlurb(
-				'an error occurred while running command {}'.format(args[0]))
-			dbmsg('{} occurred in command {}: {}'.format(
-				type(exc).__name__,args[0], exc))
-		except KeyboardInterrupt: pass
+
+		@asyncio.coroutine
+		def runCommand():
+			try:
+				result = command(self.parent,*args[1:])
+				if asyncio.iscoroutine(result):
+					result = yield from result
+				if isinstance(result,OverlayBase):
+					result.add()
+			except Exception as exc:
+				self.parent.newBlurb(
+					'an error occurred while running command {}'.format(args[0]))
+				dbmsg('{} occurred in command {}: {}'.format(
+					type(exc).__name__,args[0], exc))
+
+		self.parent.loop.create_task(runCommand())
 		return -1
 
 class EscapeOverlay(OverlayBase):
@@ -907,18 +912,21 @@ class MainOverlay(TextOverlay):
 			return 1
 	def add(self):
 		'''Start timeloop and add overlay'''
-		super().add()
+		super(MainOverlay,self).add()
 		if self._pushtimes:
-			self.parent.loop.create_task(self._timeloop())
+			self._pushTask = self.parent.loop.create_task(self._timeloop())
 	def remove(self):
 		'''
 		Quit timeloop (if it hasn't already exited).
 		Exit client if last overlay.
 		'''
-		super().remove()
-		self._pushtimes = False
+		if self._pushtimes:
+			#finish running the task
+			self._pushtimes = False
+			self.parent.loop.call_soon(self._pushTask.cancel)
 		if not self.index:
 			self.parent.active = False
+		super(MainOverlay,self).remove()
 
 	@asyncio.coroutine
 	def resize(self,newx,newy):
@@ -977,12 +985,13 @@ class MainOverlay(TextOverlay):
 		while self._pushtimes:
 			yield from asyncio.sleep(2)
 			i+=1
-			if time.time() - parent.last > 4:	#erase blurbs
+			if time.time() - self.parent.last > 4:	#erase blurbs
 				self.parent.newBlurb()
 			#every 600 seconds
 			if not i % 300:
 				yield from self.msgTime(time.time())
 				i=0
+		dbmsg("task cancelled")
 
 	def _replaceback(self):
 		'''
@@ -1254,7 +1263,7 @@ class Main:
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		#scheduler 
 		self.active = True
-		self.candisplay = True
+		self.candisplay = False
 		#guessed terminal dimensions
 		self.x = 40
 		self.y = 70
@@ -1278,8 +1287,7 @@ class Main:
 	@asyncio.coroutine
 	def display(self):
 		'''Display backend'''
-		if not self.active: return
-		if not self.candisplay: return
+		if not (self.active and self.candisplay): return
 		#justify number of lines
 		lines = ["" for i in range(self.y)]
 		#start with the last "replacing" overlay, then draw all overlays afterward
@@ -1420,38 +1428,31 @@ class Main:
 		'''Crux of input. Submain client loop'''
 		if not len(self._ins): return
 		chars = []
-		try:
-			next = -1
-			while next == -1:
-				next = self._screen.getch()
-				yield from asyncio.sleep(.01) #less CPU intensive
+		next = -1
+		while next == -1:
+			next = self._screen.getch()
+			yield from asyncio.sleep(.01) #less CPU intensive
+		chars.append(next)
+		while next != -1:
+			next = self._screen.getch()
 			chars.append(next)
-			while next != -1:
-				next = self._screen.getch()
-				chars.append(next)
-		except ControlZ:
-			chars.append('\26')
-		return self._ins[-1].runkey(chars)
+		ret = yield from self._ins[-1].runkey(chars)
+		return ret
 	@asyncio.coroutine
 	def main_loop(self):
 		'''Main client loop'''
-		yield from self.resize()
-		while self.active:
-			inp = yield from self._input()
-			if inp:
-				if inp == -1:
-					self._ins[-1].remove()
-				yield from self.display()
-
-	def start(self,*args):
 		self._screen = curses.initscr()		#init screen
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
+		yield from self.resize()
+		self.candisplay = True
 		try:
-			for i in args: i()
-			self.loop.run_until_complete(self.main_loop())
-		except KeyboardInterrupt:
-			pass
+			while self.active:
+				inp = yield from self._input()
+				if inp:
+					if inp == -1:
+						self._ins[-1].remove()
+					yield from self.display()
 		finally:
 			self.active = False
 			#let overlays do cleanup
@@ -1462,9 +1463,17 @@ class Main:
 			#return to sane mode
 			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
 			curses.endwin()
-			#close async loop
-			self.loop.run_until_complete(self.loop.shutdown_asyncgens())
-			self.loop.close()
+			self.loop.stop()
+			try:
+				for i,j in _afterDone:
+					i(*j)
+			except Exception as e: pass
+
+	def start(self):
+		return self.loop.create_task(self.main_loop())
+
+	def stop(self):
+		self.active = False
 		
 	#Frontends------------------------------------------------------------------
 	@asyncio.coroutine
@@ -1493,44 +1502,12 @@ class Main:
 	def toggleMouse(self,state):
 		'''Turn the mouse on or off'''
 		return curses.mousemask(state and _MOUSE_MASK)
-	def catcherr(self,func,*args):
-		'''Catch error and end client'''
-		def wrap():
-			global lasterr
-			try:
-				func(*args)
-			except Exception as e:
-				lasterr = e
-				self.active = False
-				curses.ungetch('\x1b')
-		return wrap
-
-#TODO work on how to start the Main instance
-def start(target,*args,two56=False):
-	'''Start the client. Run this!'''
-	if not (sys.stdin.isatty() and sys.stdout.isatty()): #check if terminal
-		raise IOError("This script is not intended to be piped")
-	main_instance = Main(two56)
-	main_instance.resize()
-	#daemonize functions bot_thread
-#	bot_thread = Thread(target=main_instance.catcherr(target,main_instance,*args))
-#	bot_thread.daemon = True
-#	bot_thread.start()
-	
-	main_instance.loop()	#main program loop
-	try:
-		for i,j in _afterDone:
-			i(*j)
-	except Exception as e:
-		raise Exception("Error occurred during shutdown") from e
-	if lasterr is not None:
-		raise lasterr
 
 #display list of defined commands
 @command("help")
 def listcommands(parent,*args):
 	def select(self):
-		new = CommandOverlay(parent,self.caller)
+		new = CommandOverlay(parent)
 		new.text.append(self.list[self.it])
 		self.swap(new)
 
@@ -1542,4 +1519,4 @@ def listcommands(parent,*args):
 
 @command("q")
 def quit(parent,*args):
-	parent.active = False
+	parent.stop()

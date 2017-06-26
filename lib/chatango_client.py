@@ -67,7 +67,6 @@ class ChatBot(ch.Manager):
 		self.joinedGroup = None
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
-		self.visited_links = [] #TODO move into ChatangoOverlay instead
 		#list references
 		self.ignores = self.creds["ignores"]
 		self.filtered_channels = self.creds["filtered_channels"]
@@ -205,9 +204,8 @@ class ChatBot(ch.Manager):
 	def onConnectionError(self, group, error):
 		if error == "lost":
 			message = self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
-			#XXX
 			client.BlockingOverlay(self.mainOverlay.parent,
-				client.daemonize(self.reconnect),"connect").add()
+				self.reconnect,"connect").add()
 		else:
 			self.mainOverlay.msgSystem("Connection error occurred. Try joining another room with ^T")
 
@@ -217,6 +215,7 @@ class ChatangoOverlay(client.MainOverlay):
 		super(ChatangoOverlay, self).__init__(parent)
 		self.bot = bot
 		self.canselect = False
+		self.visited_links = []
 		self.addKeys({	"enter":	self.onenter
 						,"a-enter":	self.onaltenter
 						,"tab":		self.ontab
@@ -251,8 +250,8 @@ class ChatangoOverlay(client.MainOverlay):
 		def openall():
 			for i in alllinks:
 				client.open_link(self.parent,i)
-				if i not in self.bot.visited_links:
-					self.bot.visited_links.append(i)
+				if i not in self.visited_links:
+					self.visited_links.append(i)
 			#don't recolor if the list is empty
 			#need to recolor ALL lines, not just this one
 			if alllinks: self.parent.loop.create_task(self.recolorlines())
@@ -278,7 +277,7 @@ class ChatangoOverlay(client.MainOverlay):
 				link = i.group()
 		if link:
 			client.open_link(self.parent,link)
-			self.bot.visited_links.append(link)
+			self.visited_links.append(link)
 			self.parent.loop.create_task(self.recolorlines())
 		return 1
 
@@ -326,8 +325,8 @@ class ChatangoOverlay(client.MainOverlay):
 			if not me.list: return
 			current = linksList[len(me.list)-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
-			if current not in self.bot.visited_links:
-				self.bot.visited_links.append(current)
+			if current not in self.visited_links:
+				self.visited_links.append(current)
 				self.parent.loop.create_task(self.recolorlines())
 			#exit
 			return -1
@@ -335,7 +334,7 @@ class ChatangoOverlay(client.MainOverlay):
 		def drawVisited(string,i,maxval):
 			linksList = client.getLinks()
 			current = linksList[maxval-i-1] #this enforces the wanted link is selected
-			if current in self.bot.visited_links and self.parent.two56:
+			if current in self.visited_links and self.parent.two56:
 				string.insertColor(0,245 + self.parent.two56start)
 
 		box = client.ListOverlay(self.parent,[i.replace("https://","").replace("http://","")
@@ -573,8 +572,8 @@ class ChatangoOverlay(client.MainOverlay):
 		if not linksList: return
 		last = linksList[-1]
 		client.open_link(self.parent,last)
-		if last not in self.bot.visited_links:
-			self.bot.visited_links.append(last)
+		if last not in self.visited_links:
+			self.visited_links.append(last)
 			self.parent.loop.create_task(self.recolorlines())
 
 	def joingroup(self):
@@ -610,7 +609,7 @@ class ChatangoOverlay(client.MainOverlay):
 
 		if self.parent.two56:
 			#links in white
-			linkColor = lambda x: (x in self.bot.visited_links and \
+			linkColor = lambda x: (x in self.visited_links and \
 				 self.parent.two56) and (245 + base256) or rawWhite
 			msg.colorByRegex(client.LINK_RE, linkColor, fontColor, 1)
 

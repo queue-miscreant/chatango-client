@@ -9,6 +9,7 @@ open_link expects an instance of display.Main as its first argument.
 '''
 #TODO add commandline arguments to IMG_PATH and MPV_PATH
 #		like (IMG_PATH, args)
+#TODO async versions of daemons
 
 import re
 import os #for stupid stdout/err hack
@@ -154,7 +155,6 @@ def daemonize(func):
 @opener("extension","jpg:large")
 @opener("extension","png")
 @opener("extension","png:large")
-@daemonize
 def images(main, link, ext):
 	if not IMG_PATH:
 		return browser(main,link)
@@ -162,14 +162,13 @@ def images(main, link, ext):
 	args = [IMG_PATH, link]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		displayProcess.communicate()
+		daemonize(displayProcess.communicate)()
 	except:
 		main.newBlurb("No viewer %s found"%IMG_PATH)
 	
 @opener("extension","webm")
 @opener("extension","mp4")
 @opener("extension","gif")
-@daemonize
 def videos(main, link, ext):
 	'''Start and daemonize mpv (or replaced video playing program)'''
 	if not MPV_PATH:
@@ -178,7 +177,7 @@ def videos(main, link, ext):
 	args = [MPV_PATH, link, "--pause"]
 	try:
 		displayProcess = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-		displayProcess.communicate()
+		daemonize(displayProcess.communicate)()
 	except:
 		main.newBlurb("No player %s found"%MPV_PATH)
 
