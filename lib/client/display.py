@@ -688,11 +688,11 @@ class Tokenize:
 			preflen = len(prefix)
 			if (incomplete[:preflen] == prefix):
 				search = incomplete[preflen:]
-				return Tokenize.collapseSugestion(search,suggestions[pno])[0]
+				return Tokenize.collapseSuggestion(search,suggestions[pno])[0]
 		return []
 
 	@staticmethod
-	def collapseSugestion(search,suggestion):
+	def collapseSuggestion(search,suggestion,addSpace=True):
 		'''
 		When a list of suggestions (or a callable that generates them) has
 		been found, cut the list down based on the length of the search
@@ -706,9 +706,13 @@ class Tokenize:
 				cut = 0
 		else:
 			suggest = [i for i in list(suggestion) if not i.find(search)]
-			if len(suggest) <= 1:
-				return [i[cut:]+' ' for i in suggest], truecut
-		return [i[cut:] for i in suggest], truecut
+
+		if addSpace:
+			addSpace = ' '
+		else:
+			addSpace = ''
+
+		return [i[cut:]+addSpace for i in suggest], truecut
 			
 
 class ScrollSuggest(Scrollable):
@@ -753,8 +757,8 @@ class ScrollSuggest(Scrollable):
 				verb, suggest = argsplit[0], argsplit[-1]
 				if verb in self._argumentComplete:
 					complete = self._argumentComplete[verb]
-					tempSuggest, temp = Tokenize.collapseSugestion(argsplit[-1],
-						complete)
+					tempSuggest, temp = Tokenize.collapseSuggestion(argsplit[-1],
+						complete,addSpace=False)
 					if tempSuggest and temp:
 						#-2 for both quotes being counted
 						startedWithQuote = self._str[-len(argsplit[-1])-2] == '"'

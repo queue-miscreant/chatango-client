@@ -83,7 +83,8 @@ DEFAULT_FORMATTING = \
 	,12]		#font size
 
 @asyncio.coroutine
-def runClient(main,creds):
+def prepareCreds(main,creds):
+	yield from main.prepared.wait()
 	#fill in credential holes
 	for num,i in enumerate(["user","passwd","room"]):
 		#skip if supplied
@@ -117,6 +118,10 @@ def runClient(main,creds):
 	for i in DEFAULT_OPTIONS:
 		if creds["options"].get(i) is None:
 			creds["options"][i] = DEFAULT_OPTIONS[i]
+
+	main.toggleMouse(creds["options"]["mouse"])
+
+	cc.ChatBot(creds,main)
 
 if __name__ == "__main__":
 	newCreds = {}
@@ -215,9 +220,8 @@ if __name__ == "__main__":
 	#start
 	main = client.Main(two56colors)
 	try:
-		cc.ChatBot(newCreds,main)
 		main.start()
-		main.loop.create_task(runClient(main,newCreds))
+		main.loop.run_until_complete(prepareCreds(main,newCreds))
 		main.loop.run_forever()
 	finally:
 		main.loop.run_until_complete(main.loop.shutdown_asyncgens())

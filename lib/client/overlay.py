@@ -28,13 +28,6 @@ __all__ =	["CHAR_COMMAND","soundBell","Box","command"
 lasterr = None
 RESERVE_LINES = 3
 
-#escape has delay typically
-os.environ.setdefault("ESCDELAY", "25")
-
-#pass in the control keys for ctrl-c and ctrl-z
-signal.signal(signal.SIGINT,lambda signum,frame: curses.ungetch(3))
-signal.signal(signal.SIGTSTP,lambda signum,frame: curses.ungetch(26))
-
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
 	"tab":		9
@@ -1268,6 +1261,7 @@ class Main:
 		#scheduler 
 		self.active = True
 		self.candisplay = False
+		self.prepared = asyncio.Event(loop=self.loop)
 		#guessed terminal dimensions
 		self.x = 40
 		self.y = 70
@@ -1449,7 +1443,17 @@ class Main:
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
 		yield from self.resize()
+
+		#escape has delay typically
+		os.environ.setdefault("ESCDELAY", "25")
+		#pass in the control keys for ctrl-c and ctrl-z
+		signal.signal(signal.SIGINT,lambda signum,frame: curses.ungetch(3))
+		signal.signal(signal.SIGTSTP,lambda signum,frame: curses.ungetch(26))
+
 		self.candisplay = True
+		self.prepared.set()
+		#done for now; call coroutines waiting for preparation
+		yield
 		try:
 			while self.active:
 				inp = yield from self._input()

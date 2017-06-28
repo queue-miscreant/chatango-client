@@ -589,6 +589,8 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def colorizeMessage(self, msg, post, isreply, ishistory):
 		rawWhite = client.rawNum(0)
+		#these names are important
+		base256 = 0
 		nameColor = rawWhite
 		fontColor = rawWhite
 		if not self.parent.two56 or not self.bot.options["htmlcolor"] or \
