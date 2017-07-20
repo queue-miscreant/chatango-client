@@ -3,7 +3,8 @@
 '''
 An asyncio rewrite of the chatango library based on cellsheet's chlib.py and
 lumirayz's ch.py. Event based library for chatango rooms. Features channel 
-support and fetching history messages among all other necessary functionalities.
+support and fetching history messages among all other functionalities provided
+by those versions.
 '''
 #TODO	better modtools
 #TODO	property docstrings
@@ -25,12 +26,84 @@ BigMessage_Multiple = 1
 
 POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([0-9a-fA-F]{2,8})=\"([0-9a-zA-Z]*)\">)?")
 XML_TAG_RE = re.compile("(<.*?>)")
-THUMBNAIL_FIX_RE = re.compile(r"(https?://ust.chatango.com/.+?/)t(_\d+.\w+)")
+THUMBNAIL_FIX_RE = re.compile(r"(https?://ust\.chatango\.com/.+?/)t(_\d+.\w+)")
 
 weights = [['5', 75], ['6', 75], ['7', 75], ['8', 75], ['16', 75], ['17', 75], ['18', 75], ['9', 95], ['11', 95], ['12', 95], ['13', 95], ['14', 95], ['15', 95], ['19', 110], ['23', 110], ['24', 110], ['25', 110], ['26', 110], ['28', 104], ['29', 104], ['30', 104], ['31', 104], ['32', 104], ['33', 104], ['35', 101], ['36', 101], ['37', 101], ['38', 101], ['39', 101], ['40', 101], ['41', 101], ['42', 101], ['43', 101], ['44', 101], ['45', 101], ['46', 101], ['47', 101], ['48', 101], ['49', 101], ['50', 101], ['52', 110], ['53', 110], ['55', 110], ['57', 110], ['58', 110], ['59', 110], ['60', 110], ['61', 110], ['62', 110], ['63', 110], ['64', 110], ['65', 110], ['66', 110], ['68', 95], ['71', 116], ['72', 116], ['73', 116], ['74', 116], ['75', 116], ['76', 116], ['77', 116], ['78', 116], ['79', 116], ['80', 116], ['81', 116], ['82', 116], ['83', 116], ['84', 116]]
 specials = {"de-livechat": 5, "ver-anime": 8, "watch-dragonball": 8, "narutowire": 10, "dbzepisodeorg": 10, "animelinkz": 20, "kiiiikiii": 21, "soccerjumbo": 21, "vipstand": 21, "cricket365live": 21, "pokemonepisodeorg": 22, "watchanimeonn": 22, "leeplarp": 27, "animeultimacom": 34, "rgsmotrisport": 51, "cricvid-hitcric-": 51, "tvtvanimefreak": 54, "stream2watch3": 56, "mitvcanal": 56, "sport24lt": 56, "ttvsports": 56, "eafangames": 56, "myfoxdfw": 67, "peliculas-flv": 69, "narutochatt": 70}
 
+HTML_CODES = [
+	("&#39;","'"),
+	("&gt;",'>'),
+	("&lt;",'<'),
+	("&quot;",'"'),
+	("&apos;","'"),
+	("&amp;",'&'),
+]
+def formatRaw(raw):
+	'''
+	Format a raw html string into one with newlines 
+	instead of <br>s and all tags formatted out
+	'''
+	if len(raw) == 0: return raw
+	#replace <br>s with actual line breaks
+	#otherwise, remove html
+	for i in XML_TAG_RE.findall(raw):
+		raw = raw.replace(i,i == "<br/>" and '\n' or "")
+	raw.replace("&nbsp;",' ')
+	for i,j in HTML_CODES:
+		raw = raw.replace(i,j)
+	#remove trailing \n's
+	while len(raw) and raw[-1] == "\n":
+		raw = raw[:-1]
+	#thumbnail fix in chatango
+	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2",raw)[0]
+	return raw
+
+class Post:
+	'''
+	Objects that represent messages in chatango
+	Post objects have support for channels and formatting parsing
+	'''
+	def __init__(self, raw, msgtype):
+		self.time = float(raw[0])
+		self.uid = raw[3]
+		self.unid = raw[4]
+		self.pnum = raw[5] if msgtype == 0 else None
+		self.msgid = raw[5] if msgtype == 1 else None
+		self.ip = raw[6]
+		self.post = formatRaw(':'.join(raw[9:]))
+
+		tag = POST_TAG_RE.search(raw[9])
+		if tag:
+			self.nColor = tag.group(2) or ''
+			sizeAndColor = tag.group(4)
+			if sizeAndColor:
+				if len(sizeAndColor) % 3 == 2:	#color only
+					self.fSize = int(sizeAndColor[:2])
+					self.fColor = sizeAndColor[2:]
+				else:
+					self.fColor = sizeAndColor
+					self.fSize = 12
+			else:
+				self.fColor = ''
+				self.fSize = 12
+			self.fFace = int(tag.group(5) or 0)
+		#user parsing
+		user = raw[1].lower()
+		if not user:
+			if raw[2] != "":
+				user = '#' + raw[2].lower()
+			else:
+				user = "!anon" + _Generate.aid(self.nColor, self.uid)
+			#nColor doesn't count for anons, because it changes their number
+			self.nColor = ''
+
+		self.user = user
+		channel = (int(raw[7]) >> 8) & 31
+		self.channel = channel&1|((channel&8)>>2)|((channel&16)>>3)
+
 class _Generate:
+	'''Generator functions for ids and server numbers'''
 	def uid():
 		'''Generate user ID'''
 		return str(int(random.randrange(10 ** 15, (10 ** 16) - 1)))
@@ -61,90 +134,70 @@ class _Generate:
 			gw += v / wt
 			if gw >= num2:
 				return i
-HTML_CODES = [
-	("&#39;","'"),
-	("&gt;",'>'),
-	("&lt;",'<'),
-	("&quot;",'"'),
-	("&apos;","'"),
-	("&amp;",'&'),
-]
-def formatRaw(raw):
-	'''
-	Format a raw html string into one with newlines 
-	instead of <br>s, and all tags formatted out
-	'''
-	if len(raw) == 0: return raw
-	#replace <br>s with actual line breaks
-	#otherwise, remove html
-	for i in XML_TAG_RE.findall(raw):
-		raw = raw.replace(i,i == "<br/>" and '\n' or "")
-	raw.replace("&nbsp;",' ')
-	for i,j in HTML_CODES:
-		raw = raw.replace(i,j)
-	#remove trailing \n's
-	while len(raw) and raw[-1] == "\n":
-		raw = raw[:-1]
-	#thumbnail fix in chatango
-	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2",raw)[0]
-	return raw
 
-def _formatMsg(raw, bori):
-	'''
-	Create a Post object from a raw b or i command received.
-	Post objects have support for channels and formatting parsing
-	'''
-	post = type("Post",(object,),
-		{"time":	float(raw[0])
-		,"user":	None
-		,"msgid":	None
-		,"uid":		raw[3]
-		,"unid":	raw[4]
-		,"pnum":	None
-		,"ip":		raw[6]
-		,"channel":	0
-		,"post":	formatRaw(':'.join(raw[9:]))
-		,"nColor":	''
-		,"fSize":	12
-		,"fFace":	0
-		,"fColor":	""})
+	def pmAuth(self):
+		'''Request auth cookie for PMs'''
+		login = urllib.request.urlopen("http://chatango.com/login",
+			  data = urllib.parse.urlencode({
+				 "user_id":		self.username
+				,"password":	self.password
+				,"storecookie":	"on"
+				,"checkerrors":	"yes" 
+				}).encode())
+		for i in login.headers.get_all("Set-Cookie"):
+			search = re.search("auth.chatango.com=(.*?);", i)
+			if search:
+				return search.group(1)
 
-	if bori == 'b':
-		post.pnum = raw[5]
-	elif bori == 'i':
-		post.msgid = raw[5]
+class _Multipart(urllib.request.Request):
+	'''Simplified version of requests.post for multipart/form-data'''
+	#code adapted from http://code.activestate.com/recipes/146306/
+	MULTI_BOUNDARY = '---------------iM-in-Ur-pr07oc01'
+	DISPOSITION = "Content-Disposition: form-data; name=\"%s\""
 
-	tag = POST_TAG_RE.search(raw[9])
-	if tag:
-		post.nColor = tag.group(2) or post.nColor
-		sizeAndColor = tag.group(4)
-		if sizeAndColor:
-			if len(sizeAndColor) % 3 == 2:	#color only
-				post.fSize = int(sizeAndColor[:2])
-				post.fColor = sizeAndColor[2:]
+	def __init__(self, url, data, headers = {}):
+		multiform = []
+		for k,v in data.items():
+			multiform.append("--" + self.MULTI_BOUNDARY) #add boundary
+			data = v
+			#the next part can have a (mime type, file) tuple
+			if isinstance(v,(tuple, list)):
+				if len(v) != 2:
+					raise ValueError("improper multipart file tuple formatting")
+				try:
+					#try to read the file first
+					data = v[1].read()
+					v[1].close()
+					#then set the filename to filename
+					multiform.append((self.DISPOSITION % k) + \
+						"; filename=\"%s\"" % os.path.basename(v[1].name))
+					multiform.append("Content-Type: %s" % v[0])
+				except AttributeError as ae:
+					raise ValueError("expected file-like object") from ae
 			else:
-				post.fColor = sizeAndColor
-		post.fFace = int(tag.group(5) or post.fFace)
-	#user parsing
-	user = raw[1].lower()
-	if not user:
-		if raw[2] != "":
-			user = '#' + raw[2].lower()
-		else:
-			user = "!anon" + _Generate.aid(post.nColor, post.uid)
-		post.nColor = ''
-	post.user = user
-	channel = (int(raw[7]) >> 8) & 31
-	post.channel = channel&1|((channel&8)>>2)|((channel&16)>>3)
+				#no mime type supplied
+				multiform.append(self.DISPOSITION % k)
+			multiform.append("")
+			multiform.append(data)
+		multiform.append("--" + self.MULTI_BOUNDARY + "--")
+		#encode multiform
+		request_body = (b"\r\n").join([isinstance(i,bytes) and i or i.encode() \
+			for i in multiform])
+		
+		headers.update(	{"content-length":	str(len(request_body))
+						,"content-type":	"multipart/form-data; boundary=%s"%\
+							self.MULTI_BOUNDARY})
 
-	return post
+		super(_Multipart, self).__init__(url, data = request_body, headers = headers)
 
 class ChatangoProtocol(asyncio.Protocol):
 	'''Virtual class interpreting chatango's protocol'''
+	_pingDelay = 15
 	def __init__(self, manager, storage, loop=None):
 		self._loop = manager.loop if loop is None else loop
 		self._storage = storage
 		self._manager = manager
+		self._pingTask = None
 		#socket stuff
 		self._transport = None
 		self.connected = False
@@ -170,9 +223,12 @@ class ChatangoProtocol(asyncio.Protocol):
 		self._rbuff = commands[-1]
 
 	def connection_lost(self, exc):
+		'''Cancel the ping task and fire onConnectionError'''
+		if self._pingTask:
+			self._loop.call_soon(self._pingTask.cancel)
 		#TODO bind exc to names
-		from .client import dbmsg
-		dbmsg(exc)
+		from client import dbmsg
+		dbmsg(exc,type(exc))
 		if self.connected: #connection lost if the transport closes abruptly
 			self.callEvent("onConnectionError","lost")
 
@@ -194,11 +250,23 @@ class ChatangoProtocol(asyncio.Protocol):
 			self._loop.create_task(event(self._storage, *args, **kw))
 		except AttributeError: pass
 
+	@asyncio.coroutine
 	def disconnect(self):
 		'''Safely close the transport. Prevents firing onConnectionError 'lost' '''
 		if self._transport:
 			self._transport.close()
+		#cancel the ping task now
+		if self._pingTask:
+			self._pingTask.cancel()
+			self._pingTask = None
 		self.connected = False
+
+	@asyncio.coroutine
+	def ping(self):
+		'''Send a ping to keep the transport alive'''
+		while True:
+			self.sendCommand("")
+			yield from asyncio.sleep(self._pingDelay)
 
 	@asyncio.coroutine
 	def _recv_premium(self, args):
@@ -212,15 +280,16 @@ class ChatangoProtocol(asyncio.Protocol):
 			self._storage._premium = False
 
 class GroupProtocol(ChatangoProtocol):
+	'''Protocol interpreter for Chatango group commands'''
 	def __init__(self, room, manager, loop=None):
 		super(GroupProtocol,self).__init__(manager,Group(self,room),loop=loop)
-
 		#intermediate message stuff and aux data for commands
 		self._messages = {}
 		self._history = []
 		self._last = 0
 
 	def connection_made(self, transport):
+		'''Begins communication with the server and connects to the room'''
 		#if i cared, i'd put this property-setting in a super method
 		self._transport = transport
 		self.connected = True
@@ -238,23 +307,25 @@ class GroupProtocol(ChatangoProtocol):
 			self.sendCommand("blogin", self._manager.username)
 		elif args[2] != 'M': #unsuccesful login
 			self.callEvent("onLoginFail")
-			self.disconnect()
+			yield from self.disconnect()
 			return
 		#shouldn't be necessary, but if the room assigns us a new id
 		self._uid = args[1]
 		self._storage._owner = args[0]
 		self._storage._mods = set(mod.split(',')[0].lower()
 			for mod in args[6].split(';'))
+		#create a ping
+		self._pingTask = self._loop.create_task(self.ping())
 
 	@asyncio.coroutine
 	def _recv_denied(self, args):
 		'''Acknowledgement that login was denied'''
 		self.callEvent("onDenied")
-		self.disconnect()
+		yield from self.disconnect()
 	
 	@asyncio.coroutine
 	def _recv_inited(self, args):
-		'''Command fired on room inited, after recent messages have sent'''
+		'''Room inited, after recent messages have sent'''
 		#TODO weed out null commands
 		self.sendCommand("gparticipants")	#open up feed for members joining/leaving
 		self.sendCommand("getpremium", '1')	#try to turn on premium
@@ -273,12 +344,11 @@ class GroupProtocol(ChatangoProtocol):
 			person = person.split(':')
 			if person[3] != "None" and person[4] == "None":
 				self._storage._users.append(person[3].lower())
-				self._storage._userSessions[person[2]] = person[3].lower()
 		self.callEvent("onParticipants")
 
 	@asyncio.coroutine
 	def _recv_participant(self, args):
-		'''Command fired on new member join'''
+		'''New member joined or left'''
 		bit = args[0]
 		if bit == '0':	#left
 			user = args[3].lower()
@@ -311,15 +381,15 @@ class GroupProtocol(ChatangoProtocol):
 		
 	@asyncio.coroutine
 	def _recv_b(self, args):
-		'''Command fired on message received'''
-		post = _formatMsg(args, 'b') #TODO use numbers instead of strings
+		'''Message received'''
+		post = Post(args, 0)
 		if post.time > self._last:
 			self._last = post.time
 		self._messages[post.pnum] = post
 
 	@asyncio.coroutine
 	def _recv_u(self,args):
-		'''Command fired on update message'''
+		'''Message updated'''
 		post = self._messages.get(args[0])
 		if post:
 			del self._messages[args[0]]
@@ -330,37 +400,37 @@ class GroupProtocol(ChatangoProtocol):
 
 	@asyncio.coroutine
 	def _recv_i(self,args):
-		'''Command fired on historical message'''
-		post = _formatMsg(args, 'i')
+		'''Historical message'''
+		post = Post(args, 1)
 		if post.time > self._last:
 			self._last = post.time
 		self._history.append(post)
 
 	@asyncio.coroutine
 	def _recv_gotmore(self, args):
-		'''Command fired on finished history get'''
+		'''Received all historical messages'''
 		self.callEvent("onHistoryDone", list(self._history))
 		self._history.clear()
 		self._storage._timesGot += 1
 
 	@asyncio.coroutine
 	def _recv_show_fw(self, args):
-		'''Command fired on flood warning'''
+		'''Flood warning'''
 		self.callEvent("onFloodWarning")
 
 	@asyncio.coroutine
 	def _recv_show_tb(self, args):
-		'''Command fired on flood ban'''
+		'''Flood ban'''
 		self.callEvent("onFloodBan",int(args[0]))
 
 	@asyncio.coroutine
 	def _recv_tb(self, args):
-		'''Command fired on flood ban reminder'''
+		'''Flood ban reminder'''
 		self.callEvent("onFloodBanRepeat",int(args[0]))
 
 	@asyncio.coroutine
 	def _recv_blocklist(self, args):
-		'''Command fired on list of banned users'''
+		'''Received list of banned users'''
 		self._storage._banlist.clear()
 		sections = ':'.join(args).split(';')
 		for section in sections:
@@ -378,7 +448,7 @@ class GroupProtocol(ChatangoProtocol):
 
 	@asyncio.coroutine
 	def _recv_blocked(self, args):
-		'''Command fired on user banned'''
+		'''User banned'''
 		if args[2] == "": return
 		target = args[2]
 		user = args[3]
@@ -388,7 +458,7 @@ class GroupProtocol(ChatangoProtocol):
 
 	@asyncio.coroutine
 	def _recv_unblocked(self, args):
-		'''Command fired on user unbanned'''
+		'''User unbanned'''
 		if args[2] == "": return
 		target = args[2]
 		user = args[3]
@@ -397,7 +467,7 @@ class GroupProtocol(ChatangoProtocol):
 
 	@asyncio.coroutine
 	def _recv_mods(self, args):
-		'''Command fired on mod change'''
+		'''Moderators changed'''
 		mods = set(map(lambda x: x.lower(), args))
 		premods = self._storage._mods
 		for user in mods - premods: #modded
@@ -410,12 +480,12 @@ class GroupProtocol(ChatangoProtocol):
 
 	@asyncio.coroutine
 	def _recv_delete(self, args):
-		'''Command fired on message delete'''
+		'''Message deleted'''
 		self.callEvent("onMessageDelete", args[0])
 
 	@asyncio.coroutine
 	def _recv_deleteall(self, args):
-		'''Command fired on message delete (multiple)'''
+		'''Message delete (multiple)'''
 		for msgid in args:
 			self.callEvent("onMessageDelete", msgid)
 	#--------------------------------------------------------------------------
@@ -424,6 +494,7 @@ class GroupProtocol(ChatangoProtocol):
 		self.sendCommand("blocklist", "block", "", "next", "500")
 
 class Connection:
+	'''Virtual class for storing responses from protocols'''
 	def __init__(self, protocol):
 		self._protocol = protocol
 
@@ -460,6 +531,7 @@ class Connection:
 		
 
 class Group(Connection):
+	'''Class for high-level group communication and storing group information'''
 	_maxLength = 2000
 	def __init__(self,protocol,room):
 		super(Group,self).__init__(protocol)
@@ -517,32 +589,32 @@ class Group(Connection):
 	def flag(self, message):
 		'''
 		Flag a message
-		Argument `message` must be a `Post` object (generated by _formatMsg)
+		Argument `message` must be a `Post` object
 		'''
-		self._protocol.sendCommand("g_flag", message.pnum)
+		self._protocol.sendCommand("g_flag", message.msgid)
 
 	def delete(self, message):
 		'''
 		Delete a message (Mod)
-		Argument `message` must be a `Post` object (generated by _formatMsg)
+		Argument `message` must be a `Post` object
 		'''
-		if self.getLevel(self.user) > 0:
-			self._protocol.sendCommand("delmsg", message.pnum)
+		if self.getLevel(self.username) > 0:
+			self._protocol.sendCommand("delmsg", message.msgid)
 
 	def clearUser(self, message):
 		'''
 		Delete all of a user's messages (Mod)
-		Argument `message` must be a `Post` object (generated by _formatMsg)
+		Argument `message` must be a `Post` object
 		'''
-		if self.getLevel(self.user) > 0:
+		if self.getLevel(self.username) > 0:
 			self._protocol.sendCommand("delallmsg", message.unid)
 
 	def ban(self, message):
 		'''
 		Ban a user from a message (Mod)
-		Argument `message` must be a `Post` object (generated by _formatMsg)
+		Argument `message` must be a `Post` object
 		'''
-		if self.getLevel(self.user) > 0:
+		if self.getLevel(self.username) > 0:
 			self._protocol.sendCommand("block", message.user, message.ip, message.unid)
   
 	def unban(self, user):
@@ -573,7 +645,7 @@ class Group(Connection):
 
 	def clearall(self):
 		'''Clear all messages (Owner)'''
-		if self.getLevel(self.user) == 2:
+		if self.getLevel(self.username) == 2:
 			self._protocol.sendCommand("clearall")
 
 	def getLevel(self, user):
@@ -584,11 +656,21 @@ class Group(Connection):
 		
 
 class Manager:
+	'''
+	Factory that creates and manages connections to chatango.
+	This class also propogates all events from groups
+	'''
 	def __init__(self, username, password, loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
-		self._groups = set()
+		self._groups = []
 		self.username = username
 		self.password = password
+
+	def __del__(self):
+		if self.loop.is_closed(): return
+		for i in self._groups:
+			#disconnect (and cancel all ping tasks)
+			self.loop.run_until_complete(i._protocol.disconnect())
 
 	@asyncio.coroutine
 	def joinGroup(self, groupName, port=443):
@@ -598,26 +680,40 @@ class Manager:
 		server = _Generate.serverNum(groupName)
 		if server is None: raise Exception("Malformed room token: " + room)
 
-		if groupName != self.username:
+		#already joined group
+		if groupName != self.username and groupName not in self._groups:
 			ret = GroupProtocol(groupName, self)
 			yield from self.loop.create_connection(lambda: ret,
 				"s{}.chatango.com".format(server), port)
-			self._groups.add(ret._storage)
+			self._groups.append(ret._storage)
 			return ret._storage
+		else:
+			raise Exception("Attempted to join group multiple times")
 
 	@asyncio.coroutine
 	def leaveGroup(self, groupName):
 		'''Leave group `groupName`'''
-		if isinstance(groupName,GroupProtocol): groupName = groupName.name
-		for group in self._groups:
+		if isinstance(groupName,Group): groupName = groupName.name
+		find = -1
+		for index,group in enumerate(self._groups):
 			if group.name == groupName:
-				group.disconnect()
+				yield from group._protocol.disconnect()
+				find = index
+		if find != -1:
+			self._groups.pop(index)
+
+	@asyncio.coroutine
+	def leaveAll(self):
+		'''Disconnect from all groups'''
+		for group in self._groups:
+			yield from group._protocol.disconnect()
+		self._groups.clear()
 
 	def uploadAvatar(self, path):
 		'''Upload an avatar with path `path`'''
 		extension = path[path.rfind('.')+1:].lower()
 		if extension == "jpg": extension = "jpeg"
-		elif extension not in ["png","jpeg"]:
+		elif extension not in ("png","jpeg"):
 			return False
 
 		urllib.request.urlopen(_Multipart('http://chatango.com/updateprofile',
@@ -630,17 +726,3 @@ class Manager:
 				,"Filedata":	("image/%s" % extension, open(path,"br"))
 			}))
 		return True
-
-	def pmAuth(self):
-		'''Request auth cookie for PMs'''
-		login = urllib.request.urlopen("http://chatango.com/login",
-			  data = urllib.parse.urlencode({
-				 "user_id":		self.username
-				,"password":	self.password
-				,"storecookie":	"on"
-				,"checkerrors":	"yes" 
-				}).encode())
-		for i in login.headers.get_all("Set-Cookie"):
-			search = re.search("auth.chatango.com=(.*?);", i)
-			if search:
-				return search.group(1)

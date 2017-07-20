@@ -6,17 +6,22 @@ system of overlays, pulling input from the topmost
 one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
-#TODO one last try for less lazy redolines?
+#TODO lazy capabilities for MainOverlay/HistoryOverlay
+#	on invisible message remove
+#	on invisible message blocked
+#	on invisible message recolored
+#store highest indices for each of these routines used (for remove, log the message ids to remove)
 
 try:
 	import curses
 except ImportError:
-	raise ImportError("ERROR IMPORTING CURSES, is this running on Windows cmd?")
+	raise ImportError("Could not import curses; is this running on Windows cmd?")
 import sys
 import os
-import signal #redirect ctrl-z
-import time
 import asyncio
+from signal import SIGTSTP,SIGINT #redirect ctrl-z and ctrl-c
+from functools import partial as staticize
+from time import time,localtime,strftime as format_time
 from .display import *
 
 __all__ =	["CHAR_COMMAND","soundBell","Box","command"
@@ -25,7 +30,6 @@ __all__ =	["CHAR_COMMAND","soundBell","Box","command"
 			,"BlockingOverlay","MainOverlay","onDone","override","staticize"
 			,"Main"]
 
-lasterr = None
 RESERVE_LINES = 3
 
 #KEYBOARD KEYS------------------------------------------------------------------
@@ -61,10 +65,12 @@ for i in range(32,256):
 	_VALID_KEYNAMES[chr(i)] = i
 
 #MOUSE BUTTONS
+#getch tends to hang on nodelay if PRESSED buttons are part of the mask,
+#but RELEASED aren't
 _MOUSE_BUTTONS = {
-	"left":			curses.BUTTON1_PRESSED
-	,"middle":		curses.BUTTON2_PRESSED
-	,"right":		curses.BUTTON3_PRESSED
+	"left":			curses.BUTTON1_CLICKED
+	,"middle":		curses.BUTTON2_CLICKED
+	,"right":		curses.BUTTON3_CLICKED
 	,"wheel-up":	curses.BUTTON4_PRESSED
 	,"wheel-down":	2**21
 }
@@ -106,15 +112,15 @@ def command(commandname,complete=[]):
 			
 	return wrapper
 def onDone(func,*args):
-	_afterDone.append((func,args))
+	if asyncio.iscoroutinefunction(func):
+		raise Exception("Please pass a coroutine, not a generator into onDone")
+	elif not asyncio.iscoroutine(func):
+		func = asyncio.coroutine(func)(*args)
+	_afterDone.append(func)
 	return func
 
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_COMMAND = '`'
-
-def centered(string,width):
-	'''Center some text'''
-	return string.rjust((width+len(string))//2).ljust(width)
 
 class History:
 	'''Container class for historical entries, similar to an actual shell'''
@@ -124,23 +130,37 @@ class History:
 	def __init__(self):
 		self.history = []
 		self._selhis = 0
-		self.temp = ""
-	def nexthist(self):
+		self.bottom = None
+	def nexthist(self,replace=""):
 		'''Next historical entry (less recent)'''
 		if self.history:
+			if replace:
+				if not self._selhis:
+					#at the bottom, starting history
+					self.bottom = replace
+				else:
+					#else, update the entry
+					self.history[-self._selhis] = replace
+			#go backward in history
 			self._selhis += (self._selhis < (len(self.history)))
+			#return what we just retrieved
 			return self.history[-self._selhis]
 		return ""
-	def prevhist(self):
+	def prevhist(self,replace=""):
 		'''Previous historical entry (more recent)'''
 		if self.history:
+			if replace and self._selhis: #not at the bottom already
+				self.history[-self._selhis] = replace
+			#go forward in history
 			self._selhis -= (self._selhis > 0)
-			#the next element or an empty string
-			return self._selhis and self.history[-self._selhis] or ""
+			#return what we just retreived
+			return (self._selhis and self.history[-self._selhis]) or self.bottom or ""
 		return ""
 	def append(self,new):
 		'''Add new entry in history and maintain a size of at most 50'''
-		self.history.append(new)
+		if not self.bottom:
+			#not already added from history manipulation
+			self.history.append(new)
 		self.history = self.history[-50:]
 		self._selhis = 0
 
@@ -161,15 +181,6 @@ def soundBell():
 	print(end="\a")
 
 quitlambda = lambda x: -1
-def staticize(func,*args):
-	'''
-	Staticizes a function and its arguments into
-	a function with discarded arguments.
-	'''
-	def ret(*garbage):			#garbage args
-		return func(*args)
-	ret.__doc__ = func.__doc__	#preserve documentation text
-	return ret
 def override(func,ret=0):
 	'''Create a new function that returns `ret`. Use to override firing _post'''
 	def retfunc(*args):
@@ -230,6 +241,7 @@ class OverlayBase:
 		self._mouse = {}
 		if (hasattr(self,"_addOnInit")):
 			self.addKeys(self._addOnInit)
+
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
 		ret = []
@@ -253,6 +265,7 @@ class OverlayBase:
 			ret.append(formatString.format(i,docstring))
 		ret.sort()
 		return ret
+
 	@asyncio.coroutine
 	def __call__(self,lines):
 		'''
@@ -260,19 +273,28 @@ class OverlayBase:
 		to display from main
 		'''
 		pass
+
 	def _callalt(self,chars):
 		'''Run a alt-key's callback'''
 		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
+
 	def _callmouse(self,chars):
 		'''Run a mouse's callback'''
+		ret = None
 		try:
 			_,x,y,_,state = curses.getmouse()
-			ret = state in self._mouse and self._mouse[state](x,y)
-			chars = [i for i in chars if i != curses.KEY_MOUSE]
-			if chars[0] != -1:
-				return ret or self.parent.loop.create_task(self.runkey(chars))
-			return ret
+			if state in self._mouse:
+				try:
+					ret = self._mouse[state](x,y)
+				except TypeError:
+					ret = self._mouse[state]()
 		except curses.error: pass
+		chars = [i for i in chars if i != curses.KEY_MOUSE]
+		if chars[0] != -1:
+			self.parent.loop.create_task(self.runkey(chars))
+				
+		return ret
+
 	def _post(self):
 		'''
 		Run after a keypress if the associated function returns boolean false
@@ -280,38 +302,49 @@ class OverlayBase:
 		parent redraws
 		'''
 		return 1
+
 	@asyncio.coroutine
 	def runkey(self,chars):
 		'''
 		Run a key's callback. This expects a single argument: a list of
 		numbers terminated by -1
 		'''
-		ret = 0
 		try:
 			char = _KEY_LUT[chars[0]]
 		except: char = chars[0]
 			
 		#ignore the command character and trailing -1
 		#second clause ignores heading newlines
+		fun, args = None, None
 		if (char in self._keys) and (char == 27 or len(chars) <= 2 or char > 255):
-			return self._keys[char](chars[1:] or [-1]) or self._post()
-		if -1 in self._keys and (char in (9,10,13) or char in range(32,255)):
-			return self._keys[-1](chars[:-1]) or self._post()
+			fun, args = self._keys[char], chars[1:] or [-1]
+		elif -1 in self._keys and (char in (9,10,13) or char in range(32,255)):
+			fun, args = self._keys[-1],chars[:-1]
+		if fun is not None and args is not None:
+			try:
+				return fun(args) or self._post()
+			except TypeError:
+				return fun() or self._post()
+
 	@asyncio.coroutine
 	def resize(self,newx,newy):
 		'''Overridable function. On resize event, all added overlays have this called'''
 		pass
+
 	#frontend methods----------------------------
 	def add(self):
-		'''Safe method to run when the overlay needs to be added. '''
+		'''Finalize setup and add overlay'''
 		self.parent.addOverlay(self)
+
 	def remove(self):
-		'''Safe method to run when the overlay needs to be removed'''
+		'''Finalize overlay and pop'''
 		self.parent.popOverlay(self)
+
 	def swap(self,new):
-		'''Safe method to pop overlay and add new one in succession.'''
+		'''Pop overlay and add new one in succession.'''
 		self.remove()
 		new.add()
+
 	def addKeys(self,newFunctions = {},areMethods = 0):
 		'''
 		Nice method to add keys after instantiation. Support for
@@ -347,6 +380,16 @@ class OverlayBase:
 				self._keys[i] = staticize(j)
 			else:
 				self._keys[i] = staticize(j,self)
+
+	def nomouse(self):
+		'''Unbind the mouse from _keys'''
+		if curses.KEY_MOUSE in self._keys:
+			del self._keys[curses.KEY_MOUSE]
+
+	def noalt(self):
+		'''Unbind alt keys'''
+		if 27 in self._keys:
+			del self._keys[27]
 
 	@classmethod
 	def addKey(cls,key):
@@ -385,6 +428,7 @@ class TextOverlay(OverlayBase):
 			,127:			self.text.delword
 			,330:			self.text.delnextword	#tmux alternative
 		})
+
 	def _input(self,chars):
 		'''
 		Safe appending to scrollable. Takes out invalid ASCII (chars above 256)
@@ -413,8 +457,8 @@ class TextOverlay(OverlayBase):
 		Add key definitions for standard controls for History `history`
 		and scrollable `scroll`
 		'''
-		nexthist = lambda: scroll.setstr(history.nexthist())
-		prevhist = lambda: scroll.setstr(history.prevhist())
+		nexthist = lambda: scroll.setstr(history.nexthist(str(self.text)))
+		prevhist = lambda: scroll.setstr(history.prevhist(str(self.text)))
 		#preserve docstrings for getKeynames
 		nexthist.__doc__ = history.nexthist.__doc__
 		prevhist.__doc__ = history.prevhist.__doc__
@@ -530,9 +574,9 @@ class ColorOverlay(ListOverlay,Box):
 			initcolor = [int(initcolor[i*2:(i+1)*2],16) for i in range(3)]
 		if type(initcolor) is list and len(initcolor) == 3:
 			self.initcolor = initcolor
-			divs = [divmod(i*6/255,1) for i in initcolor]
+			divs = [divmod(i*6/255,1)[1] for i in initcolor]
 			#if each error is low enough to be looked for
-			if all([i[1] < .05 for i in divs]):
+			if all([i < .05 for i in divs]):
 				for i,j in enumerate(self._spectrum[:3]):
 					find = j.index([k[0] for k in divs])
 					if find+1:
@@ -545,15 +589,18 @@ class ColorOverlay(ListOverlay,Box):
 
 	def drawColors(self,string,i,maxval):
 		#4 is reserved for color sliders
-		if self.parent.two56 and i < 12:
-			color = None
+		if i == 12: return
+		color = None
+		try:
 			which = self._spectrum[self.mode][i]
 			if self.mode == 3: #grayscale
 				color = (which * 2) + 232
 			else:
 				color = sum(map(lambda x,y:x*y,which,[36,6,1])) + 16
-			string.insertColor(-1,self.parent.two56start + color)
+			string.insertColor(-1,self.parent.get256color(color))
 			string.effectRange(-1,0,0)
+		except DisplayException:
+			pass
 
 	def getColor(self,typ = str):
 		which = self._spectrum[self.mode][self.it]
@@ -638,8 +685,8 @@ class ColorSliderOverlay(OverlayBase,Box):
 			if i == self._rgb:
 				names += SELECT
 				vals += SELECT
-			names += centered(self.NAMES[i],wide) + CLEAR_FORMATTING
-			vals += centered(str(self.color[i]),wide) + CLEAR_FORMATTING
+			names += self.NAMES[i].center(wide) + CLEAR_FORMATTING
+			vals += str(self.color[i]).center(wide) + CLEAR_FORMATTING
 		lines[-5] = self.box_part(names) #4 lines
 		lines[-4] = self.box_part(vals) #3 line
 		lines[-3] = sep #2 lines
@@ -660,9 +707,9 @@ class ColorSliderOverlay(OverlayBase,Box):
 		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
 
 class InputOverlay(TextOverlay,Box):
-	'''Replacement for input(). '''
+	'''Creates a future for the contents of a Scrollable input'''
 	replace = False
-	def __init__(self,parent,prompt,password = False):
+	def __init__(self, parent, prompt, callback = None, password = False):
 		super(InputOverlay, self).__init__(parent)
 		self._future = parent.loop.create_future()
 		self._prompt = prompt if isinstance(prompt,Coloring) else Coloring(prompt)
@@ -672,9 +719,11 @@ class InputOverlay(TextOverlay,Box):
 			10:		staticize(self._finish)
 			,127:	staticize(self._backspacewrap)
 		})
-		self._altkeys.update({
-			None:	self._stop
-		})
+		if callable(callback):
+			self.runOnDone(callback)
+
+	result = property(lambda self: self._future)
+
 	@asyncio.coroutine
 	def __call__(self,lines):
 		'''Display the text in roughly the middle, in a box'''
@@ -685,35 +734,33 @@ class InputOverlay(TextOverlay,Box):
 			lines[start+i+1] = self.box_part(j)
 		#preserve the cursor position save
 		lines[end+1] = self.box_bottom()
+
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
 		self.text.backspace()
-	def _stop(self):
-		'''Premature stop. Cancel future'''
-		self._future.cancel()
-		return -1
+
 	def _finish(self):
 		'''Regular stop (i.e, with enter)'''
 		self._future.set_result(str(self.text))
 		return -1
 
+	def remove(self):
+		'''Cancel future unless future completed'''
+		if not self._future.done():
+			self._future.cancel()
+		super(InputOverlay,self).remove()
+
 	@asyncio.coroutine
 	def resize(self,newx,newy):
 		'''Resize prompts'''
-		super(InputOverlay,self).resize(newx,newy)
-		self._prompts,self._numprompts = self._prompt.breaklines(parent.x-2)
+		yield from super(InputOverlay,self).resize(newx,newy)
+		self._prompts,self._numprompts = self._prompt.breaklines(self.parent.x-2)
 
-	@asyncio.coroutine
-	def waitForInput(self):
-		'''A coroutine to get input from the box'''
-		yield from self._future
-		if self._future.cancelled():
-			return None
-		return self._future.result()
 	def runOnDone(self,func):
 		'''Attach a callback to the future'''
 		def callback(future):
+			if future.cancelled(): return
 			if asyncio.iscoroutinefunction(func):
 				self.parent.loop.create_task(func(future.result()))
 			else:
@@ -740,18 +787,22 @@ class CommandOverlay(TextOverlay):
 		self._altkeys.update({
 			127:	lambda: -1
 		})
+
 	@asyncio.coroutine
 	def __call__(self,lines):
 		lines[-1] = "COMMAND"
+
 	def _onSentinel(self):
 		if self.caller:
 			#get the highest mainOverlay
 			self.caller.text.append(CHAR_COMMAND)
 		return -1
+
 	def _backspacewrap(self,*args):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
 		self.text.backspace()
+
 	def _run(self,*args):
 		'''Run command'''
 		text = str(self.text)
@@ -761,7 +812,7 @@ class CommandOverlay(TextOverlay):
 			self.parent.newBlurb("Command \"{}\" not found".format(args[0]))
 			return -1
 		command = _commands[args[0]]
-
+		
 		@asyncio.coroutine
 		def runCommand():
 			try:
@@ -792,6 +843,8 @@ class EscapeOverlay(OverlayBase):
 			,ord('\\'):	override(staticize(scroll.append,'\\'),-1)
 			,ord('t'):	override(staticize(scroll.append,'\t'),-1)
 		})
+		self.nomouse()
+		self.noalt()
 
 class ConfirmOverlay(OverlayBase):
 	'''Overlay to confirm selection confirm y/n (no slash)'''
@@ -800,7 +853,7 @@ class ConfirmOverlay(OverlayBase):
 		super(ConfirmOverlay, self).__init__(parent)
 		def callback(*args):
 			if asyncio.iscoroutine(confirmfunc):
-				self.parent.loop.create_task(confirmfunc())
+				self.parent.loop.create_task(confirmfunc)
 			else:
 				self.parent.loop.call_soon(confirmfunc)
 			self.parent.releaseBlurb()
@@ -809,6 +862,8 @@ class ConfirmOverlay(OverlayBase):
 			{ord('y'):	callback
 			,ord('n'):	override(staticize(self.parent.releaseBlurb),-1)
 		})
+		self.nomouse()
+		self.noalt()
 
 class BlockingOverlay(OverlayBase):
 	'''Block until any input is received'''
@@ -823,6 +878,8 @@ class BlockingOverlay(OverlayBase):
 				self.parent.loop.call_soon(confirmfunc)
 			return -1
 		self._keys.update({-1: callback})
+		self.nomouse()
+		self.noalt()
 
 	def add(self):
 		if self.tag:
@@ -856,8 +913,8 @@ class MainOverlay(TextOverlay):
 			,ord('j'):		self.selectdown
 		})
 		self._mouse.update({
-			_MOUSE_BUTTONS["wheel-up"]:		staticize(self.selectup)
-			,_MOUSE_BUTTONS["wheel-down"]:	staticize(self.selectdown)
+			_MOUSE_BUTTONS["wheel-up"]:		self.selectup
+			,_MOUSE_BUTTONS["wheel-down"]:	self.selectdown
 		})
 		examiners = self._monitors.get(type(self).__name__)
 		if examiners is not None:
@@ -921,7 +978,8 @@ class MainOverlay(TextOverlay):
 		if self._pushtimes:
 			#finish running the task
 			self._pushtimes = False
-			self.parent.loop.call_soon(self._pushTask.cancel)
+#			self.parent.loop.call_soon(self._pushTask.cancel)
+			self._pushTask.cancel()
 		if not self.index:
 			self.parent.active = False
 		super(MainOverlay,self).remove()
@@ -930,8 +988,7 @@ class MainOverlay(TextOverlay):
 	def resize(self,newx,newy):
 		'''Resize scrollable and maybe draw lines again if width changed'''
 		yield from super().resize(newx,newy)
-		if newx != self.parent.x:
-			yield from self.redolines(newx,newy)
+		yield from self.redolines(newx,newy)
 
 	def clear(self):
 		'''Clear all lines and messages'''
@@ -983,11 +1040,11 @@ class MainOverlay(TextOverlay):
 		while self._pushtimes:
 			yield from asyncio.sleep(2)
 			i+=1
-			if time.time() - self.parent.last > 4:	#erase blurbs
+			if self.parent.loop.time() - self.parent.last > 4:	#erase blurbs
 				self.parent.newBlurb()
 			#every 600 seconds
 			if not i % 300:
-				yield from self.msgTime(time.time())
+				yield from self.msgTime()
 				i=0
 
 	def _replaceback(self):
@@ -1092,7 +1149,8 @@ class MainOverlay(TextOverlay):
 		if downMsg:
 			self._linesup = max(0,self._linesup-curLines-1)
 		if not self._selector:
-			self.parent.updateinput()	#move the cursor back
+			#move the cursor back
+			self.parent.loop.create_task(self.parent.updateinput())
 		return 1
 
 	#FRONTENDS--------------------------------------------------
@@ -1176,7 +1234,7 @@ class MainOverlay(TextOverlay):
 	@asyncio.coroutine
 	def recolorlines(self):
 		'''Re-apply colorizeMessage and redraw all visible lines'''
-		self._lastrecolor = time.time()
+		self._lastrecolor = time()
 		width = self.parent.x
 		height = self.parent.y
 		newlines = []
@@ -1209,7 +1267,7 @@ class MainOverlay(TextOverlay):
 	@asyncio.coroutine
 	def msgTime(self, numtime = None, predicate=""):
 		'''Push a system message of the time'''
-		dtime = time.strftime("%H:%M:%S",time.localtime(numtime or time.time()))
+		dtime = format_time("%H:%M:%S",localtime(numtime or time()))
 		yield from self.msgSystem(predicate+dtime)
 	@asyncio.coroutine
 	def msgPost(self,post,*args):
@@ -1256,21 +1314,16 @@ class _NScrollable(ScrollSuggest):
 class Main:
 	'''Main class; handles all IO and defers to overlays'''
 	last = 0
-	def __init__(self,two56colors,loop=None):
+	def __init__(self,loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		#scheduler 
 		self.active = True
 		self.candisplay = False
 		self.prepared = asyncio.Event(loop=self.loop)
+		self.exited = asyncio.Event(loop=self.loop)
 		#guessed terminal dimensions
 		self.x = 40
 		self.y = 70
-		#256 mode
-		if two56colors:
-			#the start of 256 color definitions
-			self.two56start = len(_COLORS) + rawNum(0)
-			def256colors()
-		self._two56 = two56colors
 		#input/display stack
 		self._ins = []
 		self._scrolls = []
@@ -1278,8 +1331,6 @@ class Main:
 		self._lastReplace = 0
 		self._blurbQueue = []
 		self._bottom_edges = [" "," "]
-
-	two56 = property(lambda self: self._two56)
 
 	#Display Backends----------------------------------------------------------
 	@asyncio.coroutine
@@ -1307,7 +1358,7 @@ class Main:
 	def updateinput(self):
 		'''Input display backend'''
 		if not (self.active and self.candisplay): return
-		if not self._scrolls: return	#no textoverlays added, but how are you firing this
+		if not self._scrolls: return	#no textoverlays added
 		string = format(self._scrolls[-1])
 		_moveCursor(self.y+1)
 		print("%s\x1b[K" % string,end=CHAR_RETURN_CURSOR)
@@ -1335,30 +1386,35 @@ class Main:
 		print("{}\x1b[K".format(blurb),end=CHAR_RETURN_CURSOR)
 
 	@asyncio.coroutine
-	def _updateinfo(self,right,left):
+	def _updateinfo(self,right=None,left=None):
 		'''Info window backend'''
 		if not (self.active and self.candisplay): return
-		_moveCursor(self.y+3)
-		self._bottom_edges[0] = left or self._bottom_edges[0]
-		self._bottom_edges[1] = right or self._bottom_edges[1]
+		self._bottom_edges[0] = str(left or self._bottom_edges[0])
+		self._bottom_edges[1] = str(right or self._bottom_edges[1])
 		room = self.x - collen(self._bottom_edges[0]) - collen(self._bottom_edges[1])
 		if room < 1: return
+
+		_moveCursor(self.y+3)
 		#selected, then turn off
 		print("\x1b[7m{}{}{}\x1b[0m".format(self._bottom_edges[0],
 			" "*room,self._bottom_edges[1]),end=CHAR_RETURN_CURSOR)
+
 	#Display Frontends----------------------------------------------------------
 	def newBlurb(self,message = ""):
 		'''Add blurb. Use in conjunction with MainOverlay to erase'''
-		self.loop.create_task(self._printblurb(message,time.time()))
+		self.loop.create_task(self._printblurb(message,self.loop.time()))
+
 	def holdBlurb(self,message):
 		'''Hold blurb. Sets self.last to -1, making newBlurb not draw'''
 		self.loop.create_task(self._printblurb(message,-1))
+
 	def releaseBlurb(self):
 		'''
 		Release blurb. Sets self.last to a valid time, making newBlurb
 		start drawing again.
 		'''
-		self.loop.create_task(self._printblurb(message,"",time.time()))
+		self.loop.create_task(self._printblurb(message,"",self.loop.time()))
+
 	def updateinfo(self,right = None,left = None):
 		'''Update screen bottom'''
 		self.loop.create_task(self._updateinfo(right,left))
@@ -1371,6 +1427,7 @@ class Main:
 		if new.replace: self._lastReplace = new.index
 		#display is not strictly called beforehand, so better safe than sorry
 		self.loop.create_task(self.display())
+
 	def popOverlay(self,overlay):
 		'''Pop the overlay `overlay`'''
 		del self._ins[overlay.index]
@@ -1383,6 +1440,7 @@ class Main:
 					break
 			self._lastReplace = newReplace
 		self.loop.create_task(self.display())
+
 	def getOverlay(self,index):
 		'''
 		Get an overlay by its index in self._ins. Returns None
@@ -1391,6 +1449,7 @@ class Main:
 		if len(self._ins) and index < len(self._ins):
 			return self._ins[index]
 		return None
+
 	def getOverlaysByClassName(self,name,highest=0):
 		'''
 		Like getElementsByClassName in a browser.
@@ -1410,12 +1469,14 @@ class Main:
 			if name in [j.__name__ for j in type(overlay).mro()]:
 				ret.append(overlay)
 		return ret
+
 	def addScrollable(self):
 		'''Add a new scrollable and return it'''
 		newScroll = _NScrollable(self.x,self,len(self._scrolls))
 		self._scrolls.append(newScroll)
 		self.loop.create_task(self.updateinput())
 		return newScroll
+
 	def popScrollable(self,which):
 		'''Pop a scrollable added from addScrollable'''
 		del self._scrolls[which.index]
@@ -1424,63 +1485,70 @@ class Main:
 	@asyncio.coroutine
 	def _input(self):
 		'''Crux of input. Submain client loop'''
-		if not len(self._ins): return
-		chars = []
-		next = -1
-		while next == -1:
-			next = self._screen.getch()
-			yield from asyncio.sleep(.01) #less CPU intensive
-		chars.append(next)
-		while next != -1:
-			next = self._screen.getch()
-			chars.append(next)
+		nextch = -1
+		while nextch == -1:
+			nextch = self._screen.getch()
+			yield from asyncio.sleep(.01)
+
+		#we need this here so that _input doesn't lock up the rest of the loop
+		#and at least one return to the control of the loop is guaranteed
+		if not self._ins: return
+
+		chars = [nextch]
+		while nextch != -1:
+			nextch = self._screen.getch()
+			chars.append(nextch)
 		ret = yield from self._ins[-1].runkey(chars)
+
 		return ret
+
 	@asyncio.coroutine
-	def main_loop(self):
+	def run(self):
 		'''Main client loop'''
 		self._screen = curses.initscr()		#init screen
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
-		yield from self.resize()
+		self._screen.getch() #the first getch clears the screen
 
 		#escape has delay typically
 		os.environ.setdefault("ESCDELAY", "25")
-		#pass in the control keys for ctrl-c and ctrl-z
-		signal.signal(signal.SIGINT,lambda signum,frame: curses.ungetch(3))
-		signal.signal(signal.SIGTSTP,lambda signum,frame: curses.ungetch(26))
+		#pass in the control chars for ctrl-c and ctrl-z
+		self.loop.add_signal_handler(SIGINT,lambda: curses.ungetch(3))
+		self.loop.add_signal_handler(SIGTSTP,lambda: curses.ungetch(26))
 
-		self.candisplay = True
+		yield from self.resize()
 		self.prepared.set()
-		#done for now; call coroutines waiting for preparation
-		yield
+
 		try:
+			#done for now; call coroutines waiting for preparation
 			while self.active:
 				inp = yield from self._input()
-				if inp:
+				if inp:	
 					if inp == -1:
 						self._ins[-1].remove()
 					yield from self.display()
+		except asyncio.CancelledError: pass	#catch cancellations
 		finally:
 			self.active = False
 			#let overlays do cleanup
-			for i in self._ins:
+			for i in reversed(self._ins):
 				try:
 					i.remove()
 				except: pass
 			#return to sane mode
 			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
 			curses.endwin()
-			self.loop.stop()
-			try:
-				for i,j in _afterDone:
-					i(*j)
-			except Exception as e: pass
+			self.loop.remove_signal_handler(SIGINT)
+			self.loop.remove_signal_handler(SIGTSTP)
+			for i in _afterDone:
+				yield from i
+			self.exited.set()
 
 	def start(self):
-		return self.loop.create_task(self.main_loop())
+		return self.loop.create_task(self.run())
 
 	def stop(self):
+		curses.ungetch(27)
 		self.active = False
 		
 	#Frontends------------------------------------------------------------------
@@ -1498,18 +1566,41 @@ class Main:
 			return
 		self.x,self.y = newx,newy
 		self.candisplay = 1
-		self.updateinfo()
-		yield from self.updateinput()
 		yield from self.display()
+		yield from self._updateinfo()
+		yield from self.updateinput()
+
 	def toggle256(self,value):
 		'''Turn the mode to 256 colors, and if undefined, define colors'''
 		self._two56 = value
 		if value and not hasattr(self,"two56start"): #not defined on startup
-			self.two56start = len(_COLORS) + rawNum(0)
+			self._two56start = len(_COLORS) + rawNum(0)
 			def256colors()
+
 	def toggleMouse(self,state):
 		'''Turn the mouse on or off'''
 		return curses.mousemask(state and _MOUSE_MASK)
+
+	def get256color(self,color):
+		'''
+		Convert a hex string to 256 color variant or get
+		color as a pre-caluclated number from `color`
+		Raises DisplayException if not running in 256 color mode
+		'''
+		if not self._two56: raise DisplayException("Not running in 256 color mode")
+
+		if isinstance(color,int):
+			return self._two56start + color
+			
+		if color is None or len(color) < 3 or len(color) % 3:
+			return rawNum(0)
+		partsLen = len(color)//3
+		in216 = [int(int(color[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))
+			 for i in range(3)]
+		#too white or too black
+		if sum(in216) < 2 or sum(in216) > 34:
+			return rawNum(0)
+		return self._two56start + 16 + sum(map(lambda x,y: x*y,in216,[36,6,1]))
 
 #display list of defined commands
 @command("help")
