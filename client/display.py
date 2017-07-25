@@ -538,7 +538,7 @@ class Scrollable:
 				endwidth = self._width
 			else:
 				endwidth -= 1
-			return self._nonscroll+('*'*endwidth,CHAR_CURSOR)+\
+			return self._nonscroll+('*'*endwidth)+CHAR_CURSOR+\
 				('*'*(width-endwidth))
 		text = self._nonscroll+self._str[start:self._pos]+\
 			CHAR_CURSOR+self._str[self._pos:end]

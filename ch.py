@@ -226,14 +226,8 @@ class ChatangoProtocol(asyncio.Protocol):
 		'''Cancel the ping task and fire onConnectionError'''
 		if self._pingTask:
 			self._loop.call_soon(self._pingTask.cancel)
-		#TODO bind exc to names
-		from client import dbmsg
-		dbmsg(exc,type(exc))
 		if self.connected: #connection lost if the transport closes abruptly
-			self.callEvent("onConnectionError","lost")
-
-	#########################################
-	#	I/O
+			self.callEvent("onConnectionError",exc)
 	#########################################
 
 	def sendCommand(self, *args, firstcmd = False):

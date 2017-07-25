@@ -124,13 +124,12 @@ CHAR_COMMAND = '`'
 
 class History:
 	'''Container class for historical entries, similar to an actual shell'''
-	#TODO when nexthist and prevhist are modified, save the current entry
-	#use either modifications in TextOverlays with History or
-	#pass in argument to prevhist/nexthist
 	def __init__(self):
 		self.history = []
 		self._selhis = 0
+		#storage for next entry, so that you can scroll up, then down again
 		self.bottom = None
+
 	def nexthist(self,replace=""):
 		'''Next historical entry (less recent)'''
 		if self.history:
@@ -146,6 +145,7 @@ class History:
 			#return what we just retrieved
 			return self.history[-self._selhis]
 		return ""
+
 	def prevhist(self,replace=""):
 		'''Previous historical entry (more recent)'''
 		if self.history:
@@ -156,6 +156,7 @@ class History:
 			#return what we just retreived
 			return (self._selhis and self.history[-self._selhis]) or self.bottom or ""
 		return ""
+
 	def append(self,new):
 		'''Add new entry in history and maintain a size of at most 50'''
 		if not self.bottom:
@@ -323,8 +324,11 @@ class OverlayBase:
 		if fun is not None and args is not None:
 			try:
 				return fun(args) or self._post()
-			except TypeError:
-				return fun() or self._post()
+			except TypeError as exc:
+				try:
+					return fun() or self._post()
+				except TypeError:
+					raise exc
 
 	@asyncio.coroutine
 	def resize(self,newx,newy):
@@ -440,18 +444,27 @@ class TextOverlay(OverlayBase):
 			chars[0] == self._sentinel:
 			return self._onSentinel()
 		#allow unicode input with the bytes().decode()
-		return self.text.append(bytes([i for i in chars if i<256]).decode())
+		#take out characters that can't be decoded
+		uni = bytes([i for i in chars if i<256]).decode()
+		return self.text.append(self._transformPaste(uni))
+
 	def _onSentinel(self):
 		'''Function run when sentinel character is typed at the beginning of the line'''
 		pass
+
+	def _transformPaste(self,string):
+		return string
+
 	@asyncio.coroutine
 	def resize(self,newx,newy):
 		'''Adjust scrollable on resize'''
 		self.text.setwidth(newx)
+
 	def remove(self):
 		'''Pop scrollable on remove'''
 		super(TextOverlay,self).remove()
 		self.parent.popScrollable(self.text)
+
 	def controlHistory(self,history,scroll):
 		'''
 		Add key definitions for standard controls for History `history`

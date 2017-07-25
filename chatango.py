@@ -26,44 +26,17 @@ Useful Key Bindings:
 	^R:		Refresh current group
 	^T:		Switch to new group
 '''
-import ch
-import client
-
-import asyncio
-from functools import partial
-
-import re
-
-#from lib import chatango_client as cc
 import os
 import os.path as path
 import asyncio
-import sys
+import re
 import json
 
+import ch
+import client
+from functools import partial
+
 __all__ = ["ChatBot","ChatangoOverlay","tabFile","convertTo256","getColor","getClient"]
-
-#SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
-#custom and credential saving setup
-CREDS_FILENAME = "chatango_creds"
-HOME_DIR = path.expanduser('~')
-CUSTOM_PATH = path.join(HOME_DIR,".cubecli")
-#save
-DEPRECATED_SAVE_PATH = path.join(HOME_DIR,".%s"%CREDS_FILENAME)
-SAVE_PATH = path.join(CUSTOM_PATH,CREDS_FILENAME)
-#init code to import everything in custom
-CUSTOM_INIT = '''
-#code ripped from stackoverflow questions/1057431
-#ensures the `from custom import *` in chatango.py will import all python files
-#in the directory
-
-from os.path import dirname, basename, isfile
-import glob
-modules = glob.glob(dirname(__file__)+"/*.py")
-__all__ = [basename(f)[:-3] for f in modules \
-			if not f.endswith("__init__.py") and isfile(f)]
-'''
-IMPORT_CUSTOM = True
 
 #entire creds from file
 creds_entire = {} 
@@ -134,14 +107,12 @@ def parsePost(post, me, ishistory):
 class ChatBot(ch.Manager):
 	'''Bot for interacting with the chat'''
 	members = client.PromoteSet()
-	lastlinks = [] #TODO move with visited_links
 	#event hookup
 
 	def __init__(self, parent, creds):
 		super(ChatBot,self).__init__(creds["user"],creds["passwd"],loop=parent.loop)
 
 		self.creds = creds
-
 		#default to the given user name
 		self.me = creds.get("user") or None
 		#list references
@@ -152,8 +123,10 @@ class ChatBot(ch.Manager):
 		self.joinedGroup = None
 		self.channel = 0
 
+		client.dbmsg('1')
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
+		client.dbmsg('2')
 
 		#disconnect from all groups on done
 		client.onDone(self.leaveAll())
@@ -182,7 +155,6 @@ class ChatBot(ch.Manager):
 	def reconnect(self):
 		yield from self.leaveGroup(self.joinedGroup)
 		self.mainOverlay.clear()
-		self.lastlinks.clear()
 		yield from self.connect()
 	
 	@asyncio.coroutine
@@ -190,7 +162,6 @@ class ChatBot(ch.Manager):
 		yield from self.leaveGroup(self.joinedGroup)
 		self.creds["room"] = newgroup
 		self.mainOverlay.clear()
-		self.lastlinks.clear()
 		yield from self.joinGroup(newgroup)
 
 	def setFormatting(self):
@@ -218,9 +189,9 @@ class ChatBot(ch.Manager):
 				newLinks.append(i)
 		if prepend:
 			newLinks.reverse()
-			self.lastlinks = newLinks + self.lastlinks
+			self.mainOverlay.lastlinks = newLinks + self.mainOverlay.lastlinks
 		else:
-			self.lastlinks.extend(newLinks)
+			self.mainOverlay.lastlinks.extend(newLinks)
 	
 	@asyncio.coroutine
 	def onConnect(self, group):
@@ -279,13 +250,13 @@ class ChatBot(ch.Manager):
 	
 	@asyncio.coroutine
 	def onParticipants(self, group):
-		'''On received joined members. No event because this is run on successful connect'''
+		'''On received joined members.'''
 		self.members.extend(group.userlist)
 		yield from self.mainOverlay.recolorlines()
 
 	@asyncio.coroutine
 	def onUsercount(self, group):
-		'''On user count changed. No event because this is run on member join/leave'''
+		'''On user count changed.'''
 		self.mainOverlay.parent.updateinfo(str(group.usercount))
 
 	@asyncio.coroutine
@@ -301,7 +272,7 @@ class ChatBot(ch.Manager):
 
 	@asyncio.coroutine
 	def onConnectionError(self, group, error):
-		if error == "lost":
+		if isinstance(error,ConnectionResetError) or error == None:
 			yield from self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
 			client.BlockingOverlay(self.mainOverlay.parent,
 				self.reconnect(),"connect").add()
@@ -311,10 +282,13 @@ class ChatBot(ch.Manager):
 #OVERLAY EXTENSION--------------------------------------------------------------
 class ChatangoOverlay(client.MainOverlay):
 	def __init__(self,parent,bot):
+		#XXX not sure why, but lastlinks after the super raises an exception
+		self.lastlinks = []
+		self.visited_links = []
+
 		super(ChatangoOverlay, self).__init__(parent)
 		self.bot = bot
 		self.canselect = False
-		self.visited_links = []
 		self.addKeys({	"enter":	self.onenter
 						,"a-enter":	self.onaltenter
 						,"tab":		self.ontab
@@ -339,6 +313,10 @@ class ChatangoOverlay(client.MainOverlay):
 			group.getMore()
 			#wait until we're done getting more
 			self.parent.newBlurb("Fetching more messages")
+
+	def clear(self):
+		super(ChatangoOverlay, self).clear()
+		self.lastlinks.clear()
 	
 	def openSelectedLinks(self):
 		message = self.getselected()
@@ -417,7 +395,7 @@ class ChatangoOverlay(client.MainOverlay):
 	
 	def linklist(self):
 		'''List accumulated links'''
-		linksList = self.bot.lastlinks
+		linksList = self.lastlinks
 
 		#enter key
 		def select(me):
@@ -431,8 +409,7 @@ class ChatangoOverlay(client.MainOverlay):
 			return -1
 
 		def drawVisited(string,i,maxval):
-			linksList = self.bot.lastlinks
-			current = linksList[maxval-i-1] #this enforces the wanted link is selected
+			current = self.lastlinks[maxval-i-1] #this enforces the wanted link is selected
 			try:
 				if current in self.visited_links:
 					string.insertColor(0,self.parent.get256color(245))
@@ -558,7 +535,7 @@ class ChatangoOverlay(client.MainOverlay):
 			return -1
 		def ontab(me):
 			self.bot.filtered_channels[me.it] = \
-				 not self.bot.filtered_channels[me.it]
+				not self.bot.filtered_channels[me.it]
 			self.redolines()
 		def drawActive(string,i,maxval):
 			if self.bot.filtered_channels[i]: return
@@ -676,7 +653,7 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def openlastlink(self):
 		'''Open last link'''
-		linksList = self.bot.lastlinks
+		linksList = self.lastlinks
 		if not linksList: return
 		last = linksList[-1]
 		client.open_link(self.parent,last)
@@ -712,7 +689,7 @@ class ChatangoOverlay(client.MainOverlay):
 				raise Exception()
 			nameColor = self.parent.get256color(post.nColor)
 			fontColor = self.parent.get256color(post.fColor)
-		except Exception as exc:
+		except Exception:
 			nameColor = getColor(post.user)
 			fontColor = getColor(post.user)
 			
@@ -754,16 +731,16 @@ def getColor(name,init = 6,split = 109,rot = 6):
 
 def tabFile(path):
 	'''A file tabbing utility'''
-	findpart = path.rfind(os.path.sep)
+	findpart = path.rfind(path.sep)
 	#offset how much we remove
 	numadded = 0
 	initpath,search = path[:findpart+1], path[findpart+1:]
 	try:
 		if not path or path[0] not in "~/": #try to generate full path
-			newpath = os.path.join(os.getcwd(),initpath)
-			ls = os.listdir(newpath)
+			newpath = path.join(os.getcwd(),initpath)
+			ls = listdir(newpath)
 		else:
-			ls = os.listdir(os.path.expanduser(initpath))
+			ls = listdir(path.expanduser(initpath))
 	except (NotADirectoryError, FileNotFoundError):
 		client.dbmsg("error occurred, aborting")
 		return [],0
@@ -853,12 +830,11 @@ def startClient(loop,creds):
 		'''Upload the file as the user avatar'''
 		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
 		if not chatOverlay: return
-		path = os.path.expanduser(' '.join(args))
+		path = path.expanduser(' '.join(args))
 		path = path.replace("\ ",' ')
 		chatOverlay[-1].bot.uploadAvatar(path)
 
 	#done preparing client constants-------------------------------------------------
-
 	main = client.Main(loop=loop)
 	mainTask = main.start()
 	yield from main.prepared.wait()
@@ -918,7 +894,32 @@ def startClient(loop,creds):
 	_client = ChatBot(main,creds)
 	return main.exited #the future to exit the loop
 
+#SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
+#custom and credential saving setup
+CREDS_FILENAME = "chatango_creds"
+HOME_DIR = path.expanduser('~')
+CUSTOM_PATH = path.join(HOME_DIR,".cubecli")
+#save
+DEPRECATED_SAVE_PATH = path.join(HOME_DIR,".%s"%CREDS_FILENAME)
+SAVE_PATH = path.join(CUSTOM_PATH,CREDS_FILENAME)
+#init code to import everything in custom
+CUSTOM_INIT = '''
+#code ripped from stackoverflow questions/1057431
+#ensures the `from custom import *` in chatango.py will import all python files
+#in the directory
+
+from os.path import dirname, basename, isfile
+import glob
+modules = glob.glob(dirname(__file__)+"/*.py")
+__all__ = [basename(f)[:-3] for f in modules \
+			if not f.endswith("__init__.py") and isfile(f)]
+'''
+IMPORT_CUSTOM = True
+
 if __name__ == "__main__":
+	#parse arguments and start client
+	import sys
+
 	newCreds = {}
 	importCustom = True
 	readCredsFlag = True
@@ -967,9 +968,9 @@ if __name__ == "__main__":
 			newCreds["room"] = arg
 			groupArgFlag = 0
 	#anon and improper arguments
-	if credsArgFlag >= 1:	#null name means anon
+	if credsArgFlag == 1:	#null password means temporary name
 		newCreds["user"] = ""
-	elif credsArgFlag == 2:	#null password means temporary name
+	if credsArgFlag >= 1:	#null name means anon
 		newCreds["passwd"] = ""
 	if groupArgFlag:
 		raise Exception("Improper argument formatting: -g without argument")
@@ -1011,6 +1012,8 @@ if __name__ == "__main__":
 		endFuture = loop.run_until_complete(start)
 		if endFuture:
 			loop.run_until_complete(endFuture.wait())
+	except Exception as exc:
+		client.dbmsg(exc)
 	finally:
 		loop.run_until_complete(loop.shutdown_asyncgens())
 		#close all loop IO
