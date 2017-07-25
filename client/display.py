@@ -11,8 +11,9 @@ from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT"
-			,"_COLORS","SELECT_AND_MOVE","dbmsg","def256colors","getColor","rawNum"
-			,"collen","Coloring","Scrollable","Tokenize","ScrollSuggest"]
+			,"_COLORS","SELECT_AND_MOVE","dbmsg","DisplayException"
+			,"def256colors","getColor","rawNum","collen","Coloring"
+			,"Scrollable","Tokenize","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
@@ -67,7 +68,7 @@ def dbmsg(*args):
 
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
-	'''Exception for client.display'''
+	'''Exception for handling errors from Coloring or Scrollable manipulation'''
 	pass
 
 def defColor(fore,back = "none",intense = False):
@@ -84,7 +85,7 @@ def defColor(fore,back = "none",intense = False):
 	else:
 		pair += ";4%d" % _COLOR_NAMES.index(back)
 	_COLORS.append(pair+"m")
-	return len(_COLORS)-1-_NUM_PREDEFINED
+
 def defEffect(on,off):
 	'''Define a new effect, turned on with `on`, and off with `off`'''
 	if not _CAN_DEFINE_EFFECTS:
@@ -97,7 +98,6 @@ def defEffect(on,off):
 def def256colors():
 	for i in range(256):
 		defColor(i)
-	return len(_COLORS) - 256 - _NUM_PREDEFINED
 
 def getColor(c):
 	'''insertColor without position or coloring object'''
@@ -124,17 +124,21 @@ class Coloring:
 		self._positions = []
 		self._formatting = []
 		self._maxpos = -1
+
 	def clear(self):
 		'''Clear all positions and formatting'''
 		self._maxpos = -1
 		self._positions.clear()
 		self._formatting.clear()
+
 	def __repr__(self):
-		'''Get the string contained'''
-		return "Coloring({}, positions = {}, formatting = {})".format(
+		return "<object Coloring string = {}, positions = {}, formatting = {})>".format(
 			repr(self._str),self._positions,self._formatting)
+
 	def __str__(self):
+		'''Get the string contained'''
 		return self._str
+
 	def __format__(self,*args):
 		'''Colorize the string'''
 		ret = ""
@@ -155,14 +159,17 @@ class Coloring:
 			lastEffect = nextEffect
 		ret += self._str[tracker:]
 		return ret + CLEAR_FORMATTING
+
 	def __getitem__(self,sliced):
 		'''Set the string to a slice of itself'''
 		self._str = self._str[sliced]
 		return self
+
 	def __add__(self,other):
 		'''Set string to concatenation'''
 		self._str = self._str + other
 		return self
+
 	def __radd__(self,other):
 		'''__add__ but from the other side'''
 		self._str = other + self._str
@@ -433,7 +440,7 @@ class PromoteSet:
 			for i in iterable:
 				self.append(i)
 	def __repr__(self):
-		return "promoteSet({})".format(repr(self._list))
+		return "PromoteSet({})".format(repr(self._list))
 	def __iter__(self):
 		return iter(self._list)
 	def __len__(self):
@@ -489,11 +496,14 @@ class Scrollable:
 		self._nonscroll = ""
 		self._nonscroll_width = 0
 		self.password = False
+
 	def __repr__(self):
-		return repr(self._str)
+		return "Scollable({},{})".format(self._width,repr(self._str))
+
 	def __str__(self):
 		'''Return the raw text contained'''
 		return self._str
+
 	def __format__(self,*args):
 		'''Display text contained with cursor'''
 		#iteration variables
@@ -528,10 +538,10 @@ class Scrollable:
 				endwidth = self._width
 			else:
 				endwidth -= 1
-			return "%s%s%s%s"%(self._nonscroll,'*'*endwidth,CHAR_CURSOR,
-				'*'*(width-endwidth))
-		text = "%s%s%s%s"%(self._nonscroll,self._str[start:self._pos],
-			CHAR_CURSOR,self._str[self._pos:end])
+			return self._nonscroll+('*'*endwidth)+CHAR_CURSOR+\
+				('*'*(width-endwidth))
+		text = self._nonscroll+self._str[start:self._pos]+\
+			CHAR_CURSOR+self._str[self._pos:end]
 		#actually replace the lengths I asserted earlier
 		return text.replace('\n','\\n').replace('\r',
 			'\\r').replace('\t',' '*_TABLEN)
@@ -539,13 +549,15 @@ class Scrollable:
 	def _onchanged(self):
 		'''
 		Since this class is meant to take a 'good' slice of a string,
-		it's useful to have this method when that slice is updated
+		this method is a useful callback for when the slice updates
 		'''
 		pass
+
 	def setstr(self,new):
 		'''Set content of scrollable'''
 		self._str = new
 		self.end()
+
 	def setnonscroll(self,new):
 		'''Set nonscrolling characters of scrollable'''
 		check = collen(new)
@@ -554,12 +566,14 @@ class Scrollable:
 		self._nonscroll = new
 		self._nonscroll_width = min(check,MAX_NONSCROLL_WIDTH)
 		self._onchanged()
+
 	def setwidth(self,new):
 		'''Set width of the scrollable'''
 		if new <= 0:
 			raise DisplayException()
 		self._width = new
 		self._onchanged()
+
 	#TEXTBOX METHODS-----------------------------------------------------------
 	def movepos(self,dist):
 		'''Move cursor by distance (can be negative). Adjusts display position'''
@@ -574,16 +588,19 @@ class Scrollable:
 		elif (curspos+1) >= self._width: #right hand side
 			self._disp = min(self._pos-self._width+1,self._disp+dist)
 		self._onchanged()
+
 	def home(self):
 		'''Return to the beginning'''
 		self._pos = 0
 		self._disp = 0
 		self._onchanged()
+
 	def end(self):
 		'''Move to the end'''
 		self._pos = 0
 		self._disp = 0
 		self.movepos(len(self._str))
+
 	def wordback(self):
 		'''Go back to the last word'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
@@ -594,6 +611,7 @@ class Scrollable:
 			self.movepos(pos.end(1)-self._pos-1)
 		else:
 			self.home()
+
 	def wordnext(self):
 		'''Advance to the next word'''
 		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
@@ -602,6 +620,7 @@ class Scrollable:
 			self.movepos(span)
 		else:
 			self.end()
+
 	#CHARACTER INSERTION--------------------------------------------------------
 	def append(self,new):
 		'''Append string at cursor'''
@@ -613,10 +632,12 @@ class Scrollable:
 		if not self._pos: return #don't backspace at the beginning of the line
 		self._str = self._str[:self._pos-1] + self._str[self._pos:]
 		self.movepos(-1)
+
 	def delchar(self):
 		'''Delete one char ahead of cursor'''
 		self._str = self._str[:self._pos] + self._str[self._pos+1:]
 		self._onchanged()
+
 	def delword(self):
 		'''Delete word behind cursor, like in sane text boxes'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
@@ -631,6 +652,7 @@ class Scrollable:
 			self._disp = 0
 			self._pos = 0
 			self._onchanged()
+
 	def delnextword(self):
 		'''Delete word ahead of cursor, like in sane text boxes'''
 		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
@@ -641,10 +663,12 @@ class Scrollable:
 		else:
 			self._str = self._str[:self._pos]
 		self._onchanged()
+
 	def clear(self):
 		'''Clear cursor and string'''
 		self._str = ""
 		self.home()
+
 	def undo(self):
 		#TODO populate a list of changes since some interval
 		#or after pressing space
@@ -690,28 +714,32 @@ class Tokenize:
 			preflen = len(prefix)
 			if (incomplete[:preflen] == prefix):
 				search = incomplete[preflen:]
-				return Tokenize.collapseSugestion(search,suggestions[pno])[0]
+				return Tokenize.collapseSuggestion(search,suggestions[pno])[0]
 		return []
 
 	@staticmethod
-	def collapseSugestion(search,suggestion):
+	def collapseSuggestion(search,suggestion,addSpace=True):
 		'''
 		When a list of suggestions (or a callable that generates them) has
 		been found, cut the list down based on the length of the search
 		'''
-		cut = len(search)
-		truecut = 0
+		truecut = 0			#how far to go back
+		cut = len(search)	#the current depth into the suggestion
 		if callable(suggestion):
 			suggest,cut = suggestion(search)
+			#if we want to back up the cursor instead of go into the suggestion
 			if cut < 0:
 				truecut = cut
 				cut = 0
 		else:
 			suggest = [i for i in list(suggestion) if not i.find(search)]
-			if len(suggest) <= 1:
-				return [i[cut:]+' ' for i in suggest], truecut
-		return [i[cut:] for i in suggest], truecut
-			
+
+		if addSpace:
+			addSpace = ' '
+		else:
+			addSpace = ''
+
+		return [i[cut:]+addSpace for i in suggest], truecut
 
 class ScrollSuggest(Scrollable):
 	'''
@@ -729,8 +757,18 @@ class ScrollSuggest(Scrollable):
 		#storage vars
 		self._lastdisp = None
 		self._lastpos = None
+
+	def _onchanged(self):
+		'''Get rid of stored suggestions'''
+		if not self._keepSuggest:
+			self._suggestNum = -1
+			self._suggestList.clear()
+			self._lastpos,self._lastdisp = None,None
+		self._keepSuggest = False
+
 	def addCommand(self,command,suggestion):
 		self._argumentComplete[command] = suggestion
+
 	def complete(self):
 		'''Complete the last word before the cursor'''
 		#need to generate list
@@ -744,22 +782,28 @@ class ScrollSuggest(Scrollable):
 			lexicon.quotes = '"' #no single quotes
 			lexicon.wordchars += ''.join(self.completer.localPrefix) + \
 				''.join(self.completer.prefixes) + '/~' #add in predefined characters
-			#TODO go back to old method
 			argsplit = []
 			lastToken = lexicon.get_token()
 			while lastToken:
 				argsplit.append(lastToken)
 				lastToken = lexicon.get_token()
 
-			if len(argsplit) > 1 and self._argumentComplete:
-				verb, suggest = argsplit[0], argsplit[-1]
+			#last character was a space
+			completedWord = self._str[self._pos-1:self._pos] == ' '
+
+			if (completedWord or len(argsplit) > 1) and self._argumentComplete:
+				verb, suggest = argsplit[0], '' if completedWord else argsplit[-1]
+				
 				if verb in self._argumentComplete:
+
 					complete = self._argumentComplete[verb]
-					tempSuggest, temp = Tokenize.collapseSugestion(argsplit[-1],
-						complete)
-					if tempSuggest and temp:
+					tempSuggest, temp = Tokenize.collapseSuggestion(suggest,
+						complete,addSpace=False)
+
+					#temp is the amount of characters to keep for the suggestion
+					if tempSuggest:
 						#-2 for both quotes being counted
-						startedWithQuote = self._str[-len(argsplit[-1])-2] == '"'
+						startedWithQuote = self._str[-len(suggest)-1] == '"'
 						if startedWithQuote or closeQuote:
 							#if we're closing a quote, then we only need to account
 							#for one quote
@@ -771,11 +815,12 @@ class ScrollSuggest(Scrollable):
 						self.movepos(temp)
 						self._suggestList = tempSuggest
 
+
 			#just use a prefix
 			if len(argsplit) > 0 and not self._suggestList:
 				search = argsplit[-1]
-				if self._str[self._pos-1:self._pos] == ' ':
-					#no need to try to complete if there's a space after the word
+				if completedWord:
+					#no need to try to complete if the word has been completed by a space
 					return
 				if len(argsplit) == 1: search = self._nonscroll + search
 				self._suggestList = self.completer.complete(search)
@@ -794,6 +839,7 @@ class ScrollSuggest(Scrollable):
 					self._pos,self._disp = self._lastpos,self._lastdisp
 			self.append(suggestion)
 			return True
+
 	def backcomplete(self):
 		'''Complete, but backwards. Assumes already generated list'''
 		if self._suggestList:
@@ -807,10 +853,3 @@ class ScrollSuggest(Scrollable):
 				self._pos,self._disp = self._lastpos,self._lastdisp
 			self.append(suggestion)
 			return True
-	def _onchanged(self):
-		'''Get rid of stored suggestions'''
-		if not self._keepSuggest:
-			self._suggestNum = -1
-			self._suggestList.clear()
-			self._lastpos,self._lastdisp = None,None
-		self._keepSuggest = False
