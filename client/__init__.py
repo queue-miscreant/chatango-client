@@ -3,5 +3,5 @@
 
 from .overlay import *
 from .linkopen import *
-from .display import rawNum,defColor,def256colors,dbmsg,Tokenize,PromoteSet
+from .display import rawNum,defColor,dbmsg,Coloring,Tokenize,PromoteSet
 

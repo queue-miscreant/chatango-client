@@ -6,7 +6,7 @@ system of overlays, pulling input from the topmost
 one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
-#TODO lazy capabilities for MainOverlay/HistoryOverlay
+#TODO lazy capabilities for MainOverlay
 #	on invisible message remove
 #	on invisible message blocked
 #	on invisible message recolored
@@ -27,7 +27,7 @@ from .display import *
 __all__ =	["CHAR_COMMAND","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
-			,"BlockingOverlay","MainOverlay","onDone","override","staticize"
+			,"BlockingOverlay","MainOverlay","DisplayOverlay","onDone","override"
 			,"Main"]
 
 RESERVE_LINES = 3
@@ -476,8 +476,8 @@ class TextOverlay(OverlayBase):
 		nexthist.__doc__ = history.nexthist.__doc__
 		prevhist.__doc__ = history.prevhist.__doc__
 		self._keys.update({
-			curses.KEY_UP:		staticize(nexthist)
-			,curses.KEY_DOWN:	staticize(prevhist)
+			curses.KEY_UP:		nexthist
+			,curses.KEY_DOWN:	prevhist
 		})
 
 class ListOverlay(OverlayBase,Box):
@@ -748,6 +748,12 @@ class InputOverlay(TextOverlay,Box):
 		#preserve the cursor position save
 		lines[end+1] = self.box_bottom()
 
+	@asyncio.coroutine
+	def resize(self,newx,newy):
+		'''Resize prompts'''
+		yield from super(InputOverlay,self).resize(newx,newy)
+		self._prompts,self._numprompts = self._prompt.breaklines(self.parent.x-2)
+
 	def _backspacewrap(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text): return -1
@@ -764,12 +770,6 @@ class InputOverlay(TextOverlay,Box):
 			self._future.cancel()
 		super(InputOverlay,self).remove()
 
-	@asyncio.coroutine
-	def resize(self,newx,newy):
-		'''Resize prompts'''
-		yield from super(InputOverlay,self).resize(newx,newy)
-		self._prompts,self._numprompts = self._prompt.breaklines(self.parent.x-2)
-
 	def runOnDone(self,func):
 		'''Attach a callback to the future'''
 		def callback(future):
@@ -779,6 +779,48 @@ class InputOverlay(TextOverlay,Box):
 			else:
 				func(future.result())
 		self._future.add_done_callback(callback)
+
+class DisplayOverlay(OverlayBase,Box):
+	'''Overlay that displays a string in a box'''
+	replace = True
+	def __init__(self,parent,string,outdent="",keepEmpty=False):
+		super(DisplayOverlay,self).__init__(parent)
+		if isinstance(string,Coloring):
+			self._string = string
+		else:
+			self._string = Coloring(string)
+		self.strings, self._numprompts = \
+			self._string.breaklines(self.parent.x-2,outdent=outdent
+			,keepEmpty=keepEmpty)
+
+		self.begin = 0	#begin from this prompt
+		self._keys.update({
+			curses.KEY_UP:		staticize(self.scroll,1)
+			,curses.KEY_DOWN:	staticize(self.scroll,-1)
+			,ord('k'):			staticize(self.scroll,1)
+			,ord('j'):			staticize(self.scroll,-1)
+			,ord('q'):			quitlambda
+		})
+	
+	@asyncio.coroutine
+	def __call__(self,lines):
+		lines[0] = self.box_top()
+		i = 0
+		for i in range(self.begin,min(self._numprompts,len(lines)-2-self.begin)):
+			lines[i+1] = self.box_part(self.strings[i])
+		while i < len(lines)-3:
+			lines[i+2] = self.box_part("")
+			i+=1
+		lines[-1] = self.box_bottom()
+
+	@asyncio.coroutine
+	def resize(self,newx,newy):
+		self.strings, self._numprompts = self._string.breaklines(newx-2)
+
+	def scroll(self,amount):
+		maxlines = self.parent.y-2
+		if (self._numprompts <= maxlines): return
+		self.begin = min(max(0,self.begin+amount),maxlines-self._numprompts)
 
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands'''
@@ -968,6 +1010,7 @@ class MainOverlay(TextOverlay):
 	def _onSentinel(self):
 		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''
 		CommandOverlay(self.parent,self).add()
+
 	def _post(self):
 		'''Stop selecting'''
 		if self._selector:
@@ -978,11 +1021,13 @@ class MainOverlay(TextOverlay):
 			#put the cursor back
 			self.parent.loop.create_task(self.parent.updateinput())
 			return 1
+
 	def add(self):
 		'''Start timeloop and add overlay'''
 		super(MainOverlay,self).add()
 		if self._pushtimes:
 			self._pushTask = self.parent.loop.create_task(self._timeloop())
+
 	def remove(self):
 		'''
 		Quit timeloop (if it hasn't already exited).
@@ -1000,7 +1045,7 @@ class MainOverlay(TextOverlay):
 	@asyncio.coroutine
 	def resize(self,newx,newy):
 		'''Resize scrollable and maybe draw lines again if width changed'''
-		yield from super().resize(newx,newy)
+		yield from super(MainOverlay,self).resize(newx,newy)
 		yield from self.redolines(newx,newy)
 
 	def clear(self):
@@ -1009,15 +1054,17 @@ class MainOverlay(TextOverlay):
 		#these two REALLY should be private
 		self._allMessages = []
 		self._lines = []
+		self._msgID = 0				#next message id
 		#these too because they select the previous two
 		self._selector = 0			#messages from the bottom
 		self._unfiltup = 0			#ALL messages from the bottom, incl filtered
 		self._linesup = 0			#lines up from the bottom, incl MSGSPLIT
 		self._innerheight = 0		#inner message height, for ones too big
 		#recolor
-		self._lastrecolor = 0		#last recolor time
-		self._messageAdjust = 0		#adjuster for resize
-		self._linesAdjust = 0		#adjuster for lines
+		self._lastRecolor = 0		#highest recolor ID (updated on recolorlines)
+		self._lastFilter = 0		#highest filter ID (updated on redolines)
+		self._lazyDelete = []		#list of message ids to delete when they become visible
+		
 	#VIRTUAL FILTERING------------------------------------------
 	@classmethod
 	def examineMessage(cls,className):
@@ -1071,24 +1118,25 @@ class MainOverlay(TextOverlay):
 	def _prepend(self,newline,args = None,isSystem = False):
 		'''Prepend new message. Use msgPrepend instead'''
 		#run filters early so that the message can be selected up to properly
-		msg = [newline, args, isSystem, not self.filterMessage(*args)
-			,self._lastrecolor, len(self._allMessages)]
+		msg = [newline, args, not self.filterMessage(*args), self._msgID]
+		self._msgID += 1
 		self._allMessages.insert(0,msg)
 		#we actually need to draw it
 		if (self._linesup - self._unfiltup) < (self.parent.y-1):
 			#ignore the hacky thing I'm using lines length for
-			if isSystem or msg[3]:
+			if isSystem or msg[2]:
 				a,b = newline.breaklines(self.parent.x,self._INDENT)
 				a.append(self._MSGSPLIT)
 				self._lines = a + self._lines
-				msg[3] = b
+				msg[2] = b
 
 		return msg[-1]
 		
 	def _append(self,newline,args = None,isSystem = False):
 		'''Add new message. Use msgPost instead'''
 		#undisplayed messages have length zero
-		msg = [newline,args,isSystem,0,self._lastrecolor,len(self._allMessages)]
+		msg = [newline,args,0,self._msgID]
+		self._msgID += 1
 		self._allMessages.append(msg)
 		#before we filter it
 		self._selector += (self._selector>0)
@@ -1098,7 +1146,7 @@ class MainOverlay(TextOverlay):
 		a,b = newline.breaklines(self.parent.x,self._INDENT)
 		a.append(self._MSGSPLIT)
 		self._lines += a
-		msg[3] = b
+		msg[2] = b
 		#keep the right message selected
 		if self._selector:
 			self._linesup += b+1
@@ -1112,7 +1160,7 @@ class MainOverlay(TextOverlay):
 		if step > 0 and self._innerheight:
 			self._innerheight -= 1
 			return 0
-		tooBig = self._allMessages[-self._selector][3] - (self.parent.y-1)
+		tooBig = self._allMessages[-self._selector][2] - (self.parent.y-1)
 		#downward, so try to scroll the message downward
 		if step < 0 and tooBig > 0:
 			if self._innerheight < tooBig:
@@ -1123,7 +1171,13 @@ class MainOverlay(TextOverlay):
 		addlines = 0
 		#get the next non-filtered message
 		while not addlines and select <= len(self._allMessages):
-			addlines = self._allMessages[-select][3]
+			message = self._allMessages[-select]
+			if (message[1] is not None) and message[3] == self._lastFilter and \
+			self.filterMessage(*message[1]):
+				message[2] = 0
+				if select < len(self._allMessages):
+					self._lastFilter = self._allMessages[-select-1]
+			addlines = message[2]
 			select += step
 		#if we're even "going" anywhere
 		if select - step - self._selector:
@@ -1144,12 +1198,15 @@ class MainOverlay(TextOverlay):
 			self._linesup += upmsg+1
 			if self._linesup > len(self._lines):	#don't forget the new lines
 				cur = self._allMessages[-self._selector]
-				if (not cur[2]) and cur[4] < self._lastrecolor:
-					self.colorizeMessage(cur[0],*cur[1])
+				if (cur[1] is not None):
+					if (cur[1] is not None) and cur[3] == self._lastRecolor:
+						self.colorizeMessage(cur[0],*cur[1])
+						if self._selector < len(self._allMessages):
+							self._lastRecolor = self._allMessages[-self._selector-1]
 				a,b = cur[0].breaklines(self.parent.x,self._INDENT)
 				a.append(self._MSGSPLIT)
 				self._lines = a + self._lines
-				cur[3] = b
+				cur[2] = b
 				#IMPERATIVE to get the correct length up
 				self._linesup += (b - upmsg)
 		return 1
@@ -1157,7 +1214,7 @@ class MainOverlay(TextOverlay):
 		'''Select message down'''
 		if not self.canselect: return 1
 		#go down the number of lines of the currently selected message
-		curLines = self._allMessages[-self._selector][3]
+		curLines = self._allMessages[-self._selector][2]
 		downMsg = self._getnextmessage(-1)
 		if downMsg:
 			self._linesup = max(0,self._linesup-curLines-1)
@@ -1172,10 +1229,10 @@ class MainOverlay(TextOverlay):
 		return bool(self._selector)
 	def getselected(self):
 		'''
-		Frontend for getting the selected message. Returns a 6-list:
-		[0]: the message (in a coloring object), [1] an argument tuple,
-		[2]: if it's a system message, [3] how many lines it occupies,
-		[4]: the last time the message was colored, [5]: its ID in _allMessages
+		Frontend for getting the selected message. Returns a 4-list:
+		[0]: the message (in a coloring object); [1] an argument tuple, which
+		is None for system messages; [2] the number of lines it occupies;
+		[3]: its messageID
 		'''
 		return self._allMessages[-self._selector]
 
@@ -1194,15 +1251,15 @@ class MainOverlay(TextOverlay):
 			y = self.parent.y - y
 		#find message until we exceed the height
 		while msgNo >= -len(self._allMessages) and height < (y+direction):
-			height += self._allMessages[msgNo][3]
+			height += self._allMessages[msgNo][2]
 			msgNo += direction
 		msg = self._allMessages[msgNo-direction]
 		#do some logic for finding the line clicked
 		linesDeep = (y-height)*direction + 1
 		firstLine = (height * direction) + msgNo + 1
 		if direction + 1:
-			firstLine -= msg[3] + self._linesup - self._selector + 2
-			linesDeep += msg[3] - 1 + self._innerheight
+			firstLine -= msg[2] + self._linesup - self._selector + 2
+			linesDeep += msg[2] - 1 + self._innerheight
 		#adjust the position
 		pos = x 
 		for i in range(linesDeep):
@@ -1226,21 +1283,22 @@ class MainOverlay(TextOverlay):
 		#feels dirty and slow, but this will also resize all messages below
 		#the selection
 		while (nummsg <= self._selector or numup < height) and \
-			nummsg <= len(self._allMessages):
+		nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
 			#check if the message should be drawn
-			if (not i[2]) and self.filterMessage(*i[1]):
-				i[3] = 0
+			if (i[1] is not None) and self.filterMessage(*i[1]):
+				i[2] = 0
 				nummsg += 1
 				continue
 			a,b = i[0].breaklines(width,self._INDENT)
 			a.append(self._MSGSPLIT)
 			newlines = a + newlines
-			i[3] = b
+			i[2] = b
 			numup += b
 			if nummsg == self._selector: #invalid always when self._selector = 0
 				self._linesup = numup + self._unfiltup
 			nummsg += 1
+		self._lastFilter = self._allMessages[-nummsg+1][3]
 		self._lines = newlines
 		self.canselect = True
 
@@ -1255,17 +1313,17 @@ class MainOverlay(TextOverlay):
 		while (numup < height or nummsg <= self._selector) and \
 		nummsg <= len(self._allMessages):
 			i = self._allMessages[-nummsg]
-			if not i[2]:	#don't decolor system messages
+			if i[1] is not None:	#don't decolor system messages
 				i[0].clear()
 				self.colorizeMessage(i[0],*i[1])
-				i[4] = self._lastrecolor
 			nummsg += 1
-			if i[3]: #unfiltered (non zero lines)
+			if i[2]: #unfiltered (non zero lines)
 				a,b = i[0].breaklines(width,self._INDENT)
 				a.append(self._MSGSPLIT)
 				newlines = a + newlines
-				i[3] = b
+				i[2] = b
 				numup += b
+		self._lastRecolor = self._allMessages[-nummsg+1][3]
 		self._lines = newlines
 		yield from self.parent.display()
 
@@ -1302,8 +1360,9 @@ class MainOverlay(TextOverlay):
 		return ret
 	@asyncio.coroutine
 	def msgDelete(self,number):
+		#TODO 
 		for i,j in enumerate(reversed(self._allMessages)):
-			if number == j[-1]:
+			if number == j[3]:
 				del self._allMessages[-i-1]
 				yield from self.redolines()
 				yield from self.parent.display()

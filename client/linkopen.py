@@ -114,8 +114,8 @@ class opener:
 		elif self._type == "pattern":
 			open_link._sites[self._argument] = func
 		elif self._type == "lambda":
-			open_link.link_opener.lambdas.append(self._argument)
-			open_link.link_opener.lambdalut.append(func)
+			open_link._lambdas.append(self._argument)
+			open_link._lambdalut.append(func)
 		#allow stacking wrappers
 		return func
 

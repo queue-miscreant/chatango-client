@@ -299,7 +299,7 @@ class Coloring:
 		for find in regex.finditer(self._str+' '):
 			self.effectRange(find.start(group),find.end(group),effect)
 
-	def breaklines(self,length,outdent=""):
+	def breaklines(self,length,outdent="",keepEmpty=True):
 		'''
 		Break string (courteous of spaces) into a list of strings spanning
 		up to `length` columns
@@ -347,7 +347,7 @@ class Coloring:
 			elif j == '\n':
 				#add the new line
 				lineBuffer += self._str[start:pos]
-				if lineBuffer.rstrip() != outdent.rstrip():
+				if (lineBuffer.rstrip() != outdent.rstrip()) or keepEmpty:
 					broken.append(lineBuffer + CLEAR_FORMATTING)
 				#refresh variables
 				lineBuffer = outdent

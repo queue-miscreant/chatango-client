@@ -123,10 +123,8 @@ class ChatBot(ch.Manager):
 		self.joinedGroup = None
 		self.channel = 0
 
-		client.dbmsg('1')
 		self.mainOverlay = ChatangoOverlay(parent,self)
 		self.mainOverlay.add()
-		client.dbmsg('2')
 
 		#disconnect from all groups on done
 		client.onDone(self.leaveAll())
@@ -302,7 +300,7 @@ class ChatangoOverlay(client.MainOverlay):
 						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
 				,"mouse-left":		self.clickOnLink
-				,"mouse-middle":	client.override(client.staticize(self.openSelectedLinks),1)
+				,"mouse-middle":	client.override(self.openSelectedLinks,1)
 		},1)	#these are methods, so they're defined on __init__
 
 	def _maxselect(self):
@@ -438,13 +436,13 @@ class ChatangoOverlay(client.MainOverlay):
 			if current not in self.bot.ignores:
 				self.bot.ignores.append(current)
 			else:
-
 				self.bot.ignores.remove(current)
-			self.redolines()
+			self.parent.loop.create_task(self.redolines())
 
 		users = self.bot.joinedGroup.userlist
 		dispList = {i:users.count(i) for i in users}
-		dispList = sorted([i+(j-1 and " (%d)"%j or "") for i,j in dispList.items()])
+		dispList = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
+			for i,j in dispList.items()])
 		def drawIgnored(string,i,maxval):
 			selected = dispList[i]
 			if selected.split(' ')[0] not in self.bot.ignores: return
