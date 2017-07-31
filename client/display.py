@@ -17,7 +17,6 @@ __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT"
 
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
-_LAST_COLOR_RE =	re.compile('\x1b'+r"\[[^m]*3[^m]*m")	#find last color inserted (contains a 3)
 _UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
 _NEXT_WORD_RE =	re.compile("([{0}]*[^{0}]+)".format(_SANE_TEXTBOX))	#sane textbox word-delete
 _LINE_BREAKING = "- 　"	#line breaking characters

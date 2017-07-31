@@ -437,6 +437,7 @@ class ChatangoOverlay(client.MainOverlay):
 				self.bot.ignores.append(current)
 			else:
 				self.bot.ignores.remove(current)
+			client.dbmsg("redoing lines")
 			self.parent.loop.create_task(self.redolines())
 
 		users = self.bot.joinedGroup.userlist
@@ -534,7 +535,7 @@ class ChatangoOverlay(client.MainOverlay):
 		def ontab(me):
 			self.bot.filtered_channels[me.it] = \
 				not self.bot.filtered_channels[me.it]
-			self.redolines()
+			self.parent.loop.create_task(self.redolines())
 		def drawActive(string,i,maxval):
 			if self.bot.filtered_channels[i]: return
 			col = i and i+12 or 16
@@ -641,7 +642,7 @@ class ChatangoOverlay(client.MainOverlay):
 				if name[0] in "!#": name = name[1:]
 				if name in self.bot.ignores: return
 				self.bot.ignores.append(name)
-				self.redolines()
+				self.parent.loop.create_task(self.redolines())
 			except: pass
 		return
 
@@ -793,7 +794,7 @@ def startClient(loop,creds):
 		if '@' == person[0]: person = person[1:]
 		if person in chatbot.ignores: return
 		chatbot.ignores.append(person)
-		if chatOverlay: chatOverlay[-1].redolines()
+		if chatOverlay: parent.loop.create_task(chatOverlay[-1].redolines())
 
 	@client.command("unignore")
 	def unignore(parent,person,*args):
@@ -804,12 +805,12 @@ def startClient(loop,creds):
 		if '@' == person[0]: person = person[1:]
 		if person == "all" or person == "everyone":
 			chatbot.ignores.clear()
-			if chatOverlay: chatOverlay[-1].redolines()
+			if chatOverlay: parent.loop.create_task(chatOverlay[-1].redolines())
 			return
 		if person not in chatbot.ignores: return
 		chatbot.ignores.remove(person)
 		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-		if chatOverlay: chatOverlay[-1].redolines()
+		if chatOverlay: parent.loop.create_task(chatOverlay[-1].redolines())
 
 	@client.command("keys")
 	def listkeys(parent,*args):

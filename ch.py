@@ -328,7 +328,7 @@ class GroupProtocol(ChatangoProtocol):
 		'''Room inited, after recent messages have sent'''
 		#TODO weed out null commands
 		self.sendCommand("gparticipants")	#open up feed for members joining/leaving
-		self.sendCommand("getpremium", '1')	#try to turn on premium
+		self.sendCommand("getpremium", '1')	#try to turn on premium features
 		self.sendCommand("getbannedwords")	#what it says on the tin
 		self.sendCommand("getratelimit")	#i dunno
 		self.callEvent("onConnect")
@@ -340,10 +340,12 @@ class GroupProtocol(ChatangoProtocol):
 		'''Command that contains information of current room members'''
 		#gparticipants splits people by ;
 		people = ':'.join(args[1:]).split(';')
-		for person in people:
-			person = person.split(':')
-			if person[3] != "None" and person[4] == "None":
-				self._storage._users.append(person[3].lower())
+		#room is empty except anons
+		if people != ['']:
+			for person in people:
+				person = person.split(':')
+				if person[3] != "None" and person[4] == "None":
+					self._storage._users.append(person[3].lower())
 		self.callEvent("onParticipants")
 
 	@asyncio.coroutine
