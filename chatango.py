@@ -250,7 +250,7 @@ class ChatBot(ch.Manager):
 	def onParticipants(self, group):
 		'''On received joined members.'''
 		self.members.extend(group.userlist)
-		yield from self.mainOverlay.recolorlines()
+		self.mainOverlay.recolorlines()
 
 	@asyncio.coroutine
 	def onUsercount(self, group):
@@ -271,6 +271,7 @@ class ChatBot(ch.Manager):
 	@asyncio.coroutine
 	def onConnectionError(self, group, error):
 		if isinstance(error,ConnectionResetError) or error == None:
+			self.mainOverlay.messages.stopSelect()
 			yield from self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
 			client.BlockingOverlay(self.mainOverlay.parent,
 				self.reconnect(),"connect").add()
@@ -317,7 +318,7 @@ class ChatangoOverlay(client.MainOverlay):
 		self.lastlinks.clear()
 	
 	def openSelectedLinks(self):
-		message = self.getselected()
+		message = self.messages.getselected()
 		try:	#don't bother if it's a system message (or one with no "post")
 			msg = message[1][0].post
 		except: return
@@ -329,7 +330,7 @@ class ChatangoOverlay(client.MainOverlay):
 					self.visited_links.append(i)
 			#don't recolor if the list is empty
 			#need to recolor ALL lines, not just this one
-			if alllinks: self.parent.loop.create_task(self.recolorlines())
+			if alllinks: self.recolorlines()
 				
 		if len(alllinks) >= self.bot.options["linkwarn"]:
 			self.parent.holdBlurb(
@@ -339,9 +340,8 @@ class ChatangoOverlay(client.MainOverlay):
 			openall()
 
 	def clickOnLink(self,x,y):
-		msg = self.clickMessage(x,y)
-		if not msg: return 1
-		msg, pos = msg
+		msg, pos = self.messages.getMessageFromPosition(x,y)
+		if pos == -1: return 1
 		link = ""
 		smallest = -1
 		for i in LINK_RE.finditer(str(msg[0])):
@@ -353,12 +353,12 @@ class ChatangoOverlay(client.MainOverlay):
 		if link:
 			client.open_link(self.parent,link)
 			self.visited_links.append(link)
-			self.parent.loop.create_task(self.recolorlines())
+			self.recolorlines()
 		return 1
 
 	def onenter(self):
 		'''Open selected message's links or send message'''
-		if self.isselecting():
+		if self.messages.getselected():
 			self.openSelectedLinks()
 			return
 		text = str(self.text)
@@ -372,22 +372,22 @@ class ChatangoOverlay(client.MainOverlay):
 	
 	def onaltenter(self):
 		'''Open link and don't stop selecting'''
-		if self.isselecting():
+		if self.messages.getselected():
 			self.openSelectedLinks()
 		return 1
 
 	def ontab(self):
 		'''Reply to selected message or complete'''
-		if self.isselecting():
+		message = self.messages.getselected()
+		if message:
 			try:
 				#allmessages contain the colored message and arguments
-				message = self.getselected()
 				msg,name = message[1][0].post, message[1][0].user
 				if name[0] in "!#": name = name[1:]
 				if self.bot.me:
 					msg = msg.replace("@"+self.bot.me,"")
 				self.text.append("@{}: `{}`".format(name, msg.replace('`',"")))
-			except Exception as e: client.dbmsg(e)
+			except Exception as e: client.perror(e)
 			return 
 		self.text.complete()
 	
@@ -402,7 +402,7 @@ class ChatangoOverlay(client.MainOverlay):
 			client.open_link(self.parent,current,me.mode)
 			if current not in self.visited_links:
 				self.visited_links.append(current)
-				self.parent.loop.create_task(self.recolorlines())
+				self.recolorlines()
 			#exit
 			return -1
 
@@ -437,8 +437,7 @@ class ChatangoOverlay(client.MainOverlay):
 				self.bot.ignores.append(current)
 			else:
 				self.bot.ignores.remove(current)
-			client.dbmsg("redoing lines")
-			self.parent.loop.create_task(self.redolines())
+			self.redolines()
 
 		users = self.bot.joinedGroup.userlist
 		dispList = {i:users.count(i) for i in users}
@@ -535,7 +534,7 @@ class ChatangoOverlay(client.MainOverlay):
 		def ontab(me):
 			self.bot.filtered_channels[me.it] = \
 				not self.bot.filtered_channels[me.it]
-			self.parent.loop.create_task(self.redolines())
+			self.redolines()
 		def drawActive(string,i,maxval):
 			if self.bot.filtered_channels[i]: return
 			col = i and i+12 or 16
@@ -578,13 +577,13 @@ class ChatangoOverlay(client.MainOverlay):
 			elif me.it == 4:	#256 colors
 				self.bot.options["256color"] ^= 1
 				self.parent.toggle256(self.bot.options["256color"])
-				self.parent.loop.create_task(self.recolorlines())
+				self.recolorlines()
 			elif me.it == 5:	#html colors
 				self.bot.options["htmlcolor"] ^= 1
-				self.parent.loop.create_task(self.recolorlines())
+				self.recolorlines()
 			elif me.it == 6:	#colored anons
 				self.bot.options["anoncolor"] ^= 1
-				self.parent.loop.create_task(self.recolorlines())
+				self.recolorlines()
 			
 		def drawOptions(string,i,maxval):
 			if i == 0:		#mouse
@@ -634,15 +633,15 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def addignore(self):
 		'''Add ignore from selected message'''
-		if self.isselecting():
+		message = self.messages.getselected()
+		if message:
 			try:
 				#allmessages contain the colored message and arguments
-				message = self.getselected()
 				name = message[1][0].user
 				if name[0] in "!#": name = name[1:]
 				if name in self.bot.ignores: return
 				self.bot.ignores.append(name)
-				self.parent.loop.create_task(self.redolines())
+				self.redolines()
 			except: pass
 		return
 
@@ -658,7 +657,7 @@ class ChatangoOverlay(client.MainOverlay):
 		client.open_link(self.parent,last)
 		if last not in self.visited_links:
 			self.visited_links.append(last)
-			self.parent.loop.create_task(self.recolorlines())
+			self.recolorlines()
 
 	def joingroup(self):
 		'''Join a new group'''
@@ -741,7 +740,7 @@ def tabFile(path):
 		else:
 			ls = listdir(path.expanduser(initpath))
 	except (NotADirectoryError, FileNotFoundError):
-		client.dbmsg("error occurred, aborting")
+		client.perror("error occurred, aborting")
 		return [],0
 		
 	suggestions = []
@@ -787,38 +786,36 @@ def startClient(loop,creds):
 	#COMMANDS-------------------------------------------------------------------
 	@client.command("ignore")
 	def ignore(parent,person,*args):
-		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-		if not chatOverlay: return
-		chatbot = chatOverlay[-1].bot
+		chatbot = getClient()
+		if not chatbot: return
 
 		if '@' == person[0]: person = person[1:]
 		if person in chatbot.ignores: return
 		chatbot.ignores.append(person)
-		if chatOverlay: parent.loop.create_task(chatOverlay[-1].redolines())
+		chatbot.mainOverlay.redolines()
 
 	@client.command("unignore")
 	def unignore(parent,person,*args):
-		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-		if not chatOverlay: return
-		chatbot = chatOverlay[-1].bot
+		chatbot = getClient()
+		if not chatbot: return
 
 		if '@' == person[0]: person = person[1:]
 		if person == "all" or person == "everyone":
 			chatbot.ignores.clear()
-			if chatOverlay: parent.loop.create_task(chatOverlay[-1].redolines())
+			chatbot.mainOverlay.redolines()
 			return
 		if person not in chatbot.ignores: return
 		chatbot.ignores.remove(person)
-		chatOverlay = parent.getOverlaysByClassName('ChatangoOverlay')
-		if chatOverlay: parent.loop.create_task(chatOverlay[-1].redolines())
+		chatbot.mainOverlay.redolines()
 
 	@client.command("keys")
 	def listkeys(parent,*args):
 		'''Get list of the ChatangoOverlay's keys'''
 		#keys are instanced at runtime
-		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-		if not chatOverlay: return
-		keysList = client.ListOverlay(parent,dir(chatOverlay[-1]))
+		chatbot = getClient()
+		if not chatbot: return
+
+		keysList = client.ListOverlay(parent,dir(chatbot.mainOverlay))
 		keysList.addKeys({
 			"enter": lambda x: -1
 		})
@@ -827,11 +824,12 @@ def startClient(loop,creds):
 	@client.command("avatar",tabFile)
 	def avatar(parent,*args):
 		'''Upload the file as the user avatar'''
-		chatOverlay = parent.getOverlaysByClassName("ChatangoOverlay")
-		if not chatOverlay: return
+		chatbot = getClient()
+		if not chatbot: return
+
 		path = path.expanduser(' '.join(args))
 		path = path.replace("\ ",' ')
-		chatOverlay[-1].bot.uploadAvatar(path)
+		chatbot.uploadAvatar(path)
 
 	#done preparing client constants-------------------------------------------------
 	main = client.Main(loop=loop)
@@ -1012,7 +1010,7 @@ if __name__ == "__main__":
 		if endFuture:
 			loop.run_until_complete(endFuture.wait())
 	except Exception as exc:
-		client.dbmsg(exc)
+		client.perror(exc)
 	finally:
 		loop.run_until_complete(loop.shutdown_asyncgens())
 		#close all loop IO

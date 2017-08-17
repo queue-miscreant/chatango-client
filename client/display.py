@@ -5,14 +5,15 @@ Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.
 '''
+import sys
 import re
 from shlex import shlex
 from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
-__all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT"
-			,"_COLORS","SELECT_AND_MOVE","dbmsg","DisplayException"
-			,"def256colors","getColor","rawNum","collen","Coloring"
+__all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT","_COLORS"
+			,"SELECT_AND_MOVE","perror","DisplayException","def256colors"
+			,"getColor","rawNum","collen","numdrawing","columnslice","Coloring"
 			,"Scrollable","Tokenize","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
@@ -55,15 +56,14 @@ _TABLEN = 4
 MAX_NONSCROLL_WIDTH = 5
 
 #DEBUG STUFF--------------------------------------------------------------------
-def dbmsg(*args):
+def perror(*args,**kwargs):
 	'''
-	Since the client runs in a contained curses session, printing more
-	is out of the question. So just print to file `debug`
+	The client runs in a curses session, so screen printing must be done
+	cautiously. overlay.py sets up logging to /etc/client.log if sterr is not
+	redirected with 2>[file]
 	'''
-	with open("debug","a+") as a:
-		for i in args:
-			a.write(str(i)+'\t')
-		a.write('\n')
+	print(*args,**kwargs,file=sys.stderr)
+	sys.stderr.flush()
 
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
@@ -131,7 +131,7 @@ class Coloring:
 		self._formatting.clear()
 
 	def __repr__(self):
-		return "<object Coloring string = {}, positions = {}, formatting = {})>".format(
+		return "<Coloring string = {}, positions = {}, formatting = {}>".format(
 			repr(self._str),self._positions,self._formatting)
 
 	def __str__(self):
@@ -394,7 +394,7 @@ class Coloring:
 		if lineBuffer.rstrip() != outdent.rstrip():
 			broken.append(lineBuffer+CLEAR_FORMATTING)
 
-		return broken,len(broken)
+		return broken
 
 def collen(string):
 	'''Column width of a string'''
@@ -412,7 +412,25 @@ def collen(string):
 		escape = temp
 	return a
 
-def columnslice(string,length):
+def numdrawing(string):
+	'''
+	Number of drawing characters in the string.
+	Ostensibly the number of non-escape sequence characters
+	'''
+	escape = False
+	a = 0
+	for i in string:
+		temp = (i == '\x1b') or escape
+		#not escaped and not transitioning to escape
+		if not temp:
+			a += 1
+		elif i.isalpha(): #is escaped and i is alpha
+			escape = False
+			continue
+		escape = temp
+	return a
+
+def columnslice(string,width):
 	'''Fit string to column width'''
 	escape = False
 	#number of columns passed, number of chars passed
@@ -423,7 +441,7 @@ def columnslice(string,length):
 		if not temp:
 			char = wcwidth(i)
 			trace += (char>0) and char
-			if trace > length:
+			if trace > width:
 				return lentr
 		elif i.isalpha(): #is escaped and i is alpha
 			escape = False
