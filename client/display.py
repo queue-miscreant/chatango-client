@@ -304,18 +304,20 @@ class Coloring:
 		up to `length` columns
 		'''
 		outdentLen = collen(outdent)
-		TABSPACE = length - outdentLen
-		THRESHOLD = length >> 1
-		broken = []
+		TABSPACE = length - outdentLen	#the number of columns sans the outdent
+		THRESHOLD = length >> 1	#number of columns before we break on a nice
+								#character rather than slicing a word in half
+		broken = []		#array of broken lines with formatting
 
-		start = 0
-		space = length
-		lineBuffer = ""
+		start = 0		#start at 0
+		space = length	#number of columns left
+		lineBuffer = ""	#broken line with formatting; emptied into `broken`
 
-		formatPos = 0
-		getFormat = bool(len(self._positions))
-		lastColor = 0
-		lastEffect = 0
+		formatPos = 0	#self.formatting iterator
+		getFormat = bool(len(self._positions))	#is there a next color?
+		lastColor = 0	#last color used; used to continue it after line breaks
+		lastEffect = 0	#last effect used; //
+		lastcol = 0		#last possible breaking character position
 		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
 			lenj = wcwidth(j)
 			#if we have a 'next color', and we're at that position
@@ -390,6 +392,7 @@ class Coloring:
 				lastcol = 0
 				space = TABSPACE - lenj
 
+		#empty the buffer one last time
 		lineBuffer += self._str[start:]
 		if lineBuffer.rstrip() != outdent.rstrip():
 			broken.append(lineBuffer+CLEAR_FORMATTING)

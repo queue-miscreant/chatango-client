@@ -14,11 +14,6 @@ except ImportError:
 	raise ImportError("Could not import curses; is this running on Windows cmd?")
 
 import sys
-if not (sys.stdin.isatty() and sys.stdout.isatty()):
-	raise ImportError("Cannot import overlay.py without interactive stdin/stdout")
-if sys.stderr.isatty():
-	sys.stderr = open("/tmp/client.log","a+")
-
 import os
 import asyncio
 from signal import SIGTSTP,SIGINT #redirect ctrl-z and ctrl-c
@@ -358,6 +353,7 @@ class OverlayBase:
 		'''
 		for i,j in newFunctions.items():
 			if isinstance(i,str):
+				#alt buttons
 				if not i.lower().find("a-"):
 					i = i[2:]
 					if i in _VALID_KEYNAMES:
@@ -368,6 +364,7 @@ class OverlayBase:
 							self._altkeys[i] = lambda: j(self)
 						continue
 					else: raise KeyException("key alt-{} invalid".format(i))
+				#mouse buttons
 				elif not i.lower().find("mouse-"):
 					i = i[6:]
 					if i in _MOUSE_BUTTONS:
@@ -378,10 +375,12 @@ class OverlayBase:
 							self._mouse[i] = lambda x,y: j(self,x,y)
 						continue
 					else: raise KeyException("key mouse-{} invalid".format(i))
+				#everything else
 				else:
 					try:
 						i = _VALID_KEYNAMES[i]
 					except: raise KeyException("key {} invalid".format(i))
+			#everything else after strings have been converted to valid numbers
 			if areMethods:
 				self._keys[i] = staticize(j)
 			else:
@@ -1219,7 +1218,9 @@ class Messages:
 			if nummsg == self.selector: #invalid always when self.selector = 0
 				self.linesup = numup
 			nummsg += 1
-		self.lastFilter = -1	if nummsg == len(self.allMessages) \
+		perror(nummsg,self.allMessages)
+		#nummsg starts at 1, so to compare with allMessages, 1 less
+		self.lastFilter = -1	if nummsg-1 == len(self.allMessages) \
 								else self.allMessages[-nummsg][3]
 		self.lines = newlines
 		self.canselect = True
@@ -1243,7 +1244,7 @@ class Messages:
 				newlines[0:0] = new
 				i[2] = len(new)
 				numup += i[2]
-		self.lastRecolor = -1	if nummsg == len(self.allMessages) \
+		self.lastRecolor = -1	if nummsg-1 == len(self.allMessages) \
 								else self.allMessages[-nummsg][3]
 		self.lines = newlines
 
@@ -1463,7 +1464,7 @@ class Main:
 	last = 0
 	def __init__(self,loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
-		#scheduler 
+		#general state
 		self.active = True
 		self.candisplay = False
 		self.prepared = asyncio.Event(loop=self.loop)
@@ -1650,12 +1651,18 @@ class Main:
 	@asyncio.coroutine
 	def run(self):
 		'''Main client loop'''
+		#interactivity when using a main instance
+		if not (sys.stdin.isatty() and sys.stdout.isatty()):
+			raise ImportError("interactive stdin/stdout required to run Main")
+		if sys.stderr.isatty():
+			sys.stderr = open("/tmp/client.log","a+")
+		#curses input setup
 		self._screen = curses.initscr()		#init screen
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
 		self._screen.getch() #the first getch clears the screen
 
-		#escape has delay typically
+		#escape has delay, not that this matters since I embed this in tmux
 		os.environ.setdefault("ESCDELAY", "25")
 		#pass in the control chars for ctrl-c and ctrl-z
 		self.loop.add_signal_handler(SIGINT,lambda: curses.ungetch(3))

@@ -29,6 +29,7 @@ Useful Key Bindings:
 import os
 import os.path as path
 import asyncio
+from socket import gaierror
 import re
 import json
 
@@ -51,6 +52,7 @@ creds_readwrite = {
 	,"ignores":	1
 	,"filtered_channels":	3
 }
+disconnected_error = None
 
 #-------------------------------------------------------------------------------
 #constants for chatango
@@ -147,7 +149,11 @@ class ChatBot(ch.Manager):
 	def connect(self):
 		self.members.clear()
 		yield from self.mainOverlay.msgSystem("Connecting")
-		yield from self.joinGroup(self.creds["room"])
+		try:
+			yield from self.joinGroup(self.creds["room"])
+		except gaierror:
+			self.mainOverlay.msgSystem("Failed to connect to room '%s'" %
+				self.creds["room"])
 	
 	@asyncio.coroutine
 	def reconnect(self):
@@ -727,18 +733,18 @@ def getColor(name,init = 6,split = 109,rot = 6):
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-def tabFile(path):
+def tabFile(patharg):
 	'''A file tabbing utility'''
-	findpart = path.rfind(path.sep)
+	findpart = patharg.rfind(path.sep)
 	#offset how much we remove
 	numadded = 0
-	initpath,search = path[:findpart+1], path[findpart+1:]
+	initpath,search = patharg[:findpart+1], patharg[findpart+1:]
 	try:
-		if not path or path[0] not in "~/": #try to generate full path
+		if not patharg or patharg[0] not in "~/": #try to generate full path
 			newpath = path.join(os.getcwd(),initpath)
-			ls = listdir(newpath)
+			ls = os.listdir(newpath)
 		else:
-			ls = listdir(path.expanduser(initpath))
+			ls = os.listdir(path.expanduser(initpath))
 	except (NotADirectoryError, FileNotFoundError):
 		client.perror("error occurred, aborting")
 		return [],0
@@ -754,7 +760,13 @@ def tabFile(path):
 
 	if not suggestions:
 		return [],0
-	return suggestions,-len(path) + numadded
+	return suggestions,numadded - len(patharg)
+
+@client.onDone
+def connectionError():
+	global disconnected_error
+	if disconnected_error:
+		print("disconnected due to %s" % disconnected_error)
 
 #stuff to do on startup
 @asyncio.coroutine
@@ -889,7 +901,7 @@ def startClient(loop,creds):
 
 	global _client
 	_client = ChatBot(main,creds)
-	return main.exited #the future to exit the loop
+	return mainTask,main.exited #the future to exit the loop
 
 #SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
 #custom and credential saving setup
@@ -1004,14 +1016,20 @@ if __name__ == "__main__":
 
 	#start
 	loop = asyncio.get_event_loop()
+	mainTask = None
 	try:
 		start = startClient(loop,newCreds)
-		endFuture = loop.run_until_complete(start)
+		mainTask,endFuture = loop.run_until_complete(start)
 		if endFuture:
 			loop.run_until_complete(endFuture.wait())
-	except Exception as exc:
-		client.perror(exc)
+	except gaierror as exc:
+		disconnected_error = exc
+	except Exception:
+		import traceback
+		traceback.print_exc()
 	finally:
+		if mainTask != None and not mainTask.done():
+			mainTask.cancel()
 		loop.run_until_complete(loop.shutdown_asyncgens())
 		#close all loop IO
 		loop.close()
