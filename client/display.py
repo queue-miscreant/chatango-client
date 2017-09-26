@@ -790,7 +790,7 @@ class ScrollSuggest(Scrollable):
 		self._argumentComplete[command] = suggestion
 
 	def complete(self):
-		'''Complete the last word before the cursor'''
+		'''Complete the last word before the cursor or go to next suggestion'''
 		#need to generate list
 		if not self._suggestList:
 			closeQuote = False
@@ -861,7 +861,7 @@ class ScrollSuggest(Scrollable):
 			return True
 
 	def backcomplete(self):
-		'''Complete, but backwards. Assumes already generated list'''
+		'''Return to previous entry in tab list'''
 		if self._suggestList:
 			self._suggestNum = (self._suggestNum-1)%len(self._suggestList)
 			suggestion = self._suggestList[self._suggestNum]

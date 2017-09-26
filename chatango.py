@@ -122,6 +122,7 @@ class ChatBot(ch.Manager):
 		self.filtered_channels = self.creds["filtered_channels"]
 		self.options = self.creds["options"]
 
+		self.connecting = False
 		self.joinedGroup = None
 		self.channel = 0
 
@@ -147,6 +148,8 @@ class ChatBot(ch.Manager):
 	
 	@asyncio.coroutine
 	def connect(self):
+		if self.connecting: return
+		self.connecting = True
 		self.members.clear()
 		yield from self.mainOverlay.msgSystem("Connecting")
 		try:
@@ -154,6 +157,8 @@ class ChatBot(ch.Manager):
 		except gaierror:
 			self.mainOverlay.msgSystem("Failed to connect to room '%s'" %
 				self.creds["room"])
+		finally:
+			self.connecting = False
 	
 	@asyncio.coroutine
 	def reconnect(self):
@@ -393,7 +398,7 @@ class ChatangoOverlay(client.MainOverlay):
 				if self.bot.me:
 					msg = msg.replace("@"+self.bot.me,"")
 				self.text.append("@{}: `{}`".format(name, msg.replace('`',"")))
-			except Exception as e: client.perror(e)
+			except: pass
 			return 
 		self.text.complete()
 	
@@ -403,8 +408,9 @@ class ChatangoOverlay(client.MainOverlay):
 
 		#enter key
 		def select(me):
+			'''Open link with selected opener'''
 			if not me.list: return
-			current = linksList[len(me.list)-me.it-1] #this enforces the wanted link is selected
+			current = me.raw[len(me.list)-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			if current not in self.visited_links:
 				self.visited_links.append(current)
@@ -412,17 +418,27 @@ class ChatangoOverlay(client.MainOverlay):
 			#exit
 			return -1
 
-		def drawVisited(string,i,maxval):
-			current = self.lastlinks[maxval-i-1] #this enforces the wanted link is selected
+		def regen(me):
+			'''Update list of links'''
+			#new copy
+			me.raw = linksList[:]
+			me.list = buildList(me.raw)
+
+		def drawVisited(me,string,i):
+			current = me.raw[len(me.list)-i-1] #this enforces the wanted link is selected
 			try:
 				if current in self.visited_links:
 					string.insertColor(0,self.parent.get256color(245))
 			except: pass
 
-		box = client.ListOverlay(self.parent,[i.replace("https://","").replace("http://","")
-			for i in reversed(linksList)], drawVisited, client.getDefaults())
-		box.addKeys({"enter":select
-					,"tab": client.override(select)})
+		buildList = lambda raw: [i.replace("https://","").replace("http://","")
+			for i in reversed(raw)]
+
+		box = client.ListOverlay(self.parent, (buildList,linksList[:]),
+			drawVisited, client.getDefaults())
+		box.addKeys({"enter":	select
+					,"tab": 	client.override(select)
+					,"^r":		regen})
 		box.add()
 
 	def listmembers(self):
@@ -449,8 +465,8 @@ class ChatangoOverlay(client.MainOverlay):
 		dispList = {i:users.count(i) for i in users}
 		dispList = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
 			for i,j in dispList.items()])
-		def drawIgnored(string,i,maxval):
-			selected = dispList[i]
+		def drawIgnored(me,string,i):
+			selected = me.list[i]
 			if selected.split(' ')[0] not in self.bot.ignores: return
 			string[:-1]+'i'
 			string.insertColor(-1,3)
@@ -541,7 +557,7 @@ class ChatangoOverlay(client.MainOverlay):
 			self.bot.filtered_channels[me.it] = \
 				not self.bot.filtered_channels[me.it]
 			self.redolines()
-		def drawActive(string,i,maxval):
+		def drawActive(me,string,i):
 			if self.bot.filtered_channels[i]: return
 			col = i and i+12 or 16
 			string.insertColor(-1,col)
@@ -591,7 +607,7 @@ class ChatangoOverlay(client.MainOverlay):
 				self.bot.options["anoncolor"] ^= 1
 				self.recolorlines()
 			
-		def drawOptions(string,i,maxval):
+		def drawOptions(me,string,i):
 			if i == 0:		#mouse
 				string[:-1]+(self.bot.options["mouse"] and "y" or "n")
 				string.insertColor(-1,self.bot.options["mouse"] and 11 or 3)
@@ -746,7 +762,7 @@ def tabFile(patharg):
 		else:
 			ls = os.listdir(path.expanduser(initpath))
 	except (NotADirectoryError, FileNotFoundError):
-		client.perror("error occurred, aborting")
+		client.perror("error occurred, aborting tab attempt on ", patharg)
 		return [],0
 		
 	suggestions = []
@@ -827,11 +843,7 @@ def startClient(loop,creds):
 		chatbot = getClient()
 		if not chatbot: return
 
-		keysList = client.ListOverlay(parent,dir(chatbot.mainOverlay))
-		keysList.addKeys({
-			"enter": lambda x: -1
-		})
-		return keysList
+		return chatbot.mainOverlay.getHelpOverlay()
 
 	@client.command("avatar",tabFile)
 	def avatar(parent,*args):
@@ -1007,7 +1019,7 @@ if __name__ == "__main__":
 	except (FileNotFoundError, ValueError):
 		pass
 	except Exception as exc:
-		raise IOError("Error reading creds! Aborting...") from exc
+		raise IOError("Fatal error reading creds! Aborting...") from exc
 
 	#finally import custom
 	if IMPORT_CUSTOM:
@@ -1026,6 +1038,7 @@ if __name__ == "__main__":
 		disconnected_error = exc
 	except Exception:
 		import traceback
+		print("\x1b[31mFatal error occurred\x1b[m")
 		traceback.print_exc()
 	finally:
 		if mainTask != None and not mainTask.done():
@@ -1047,4 +1060,4 @@ if __name__ == "__main__":
 		except KeyError:
 			pass
 		except Exception as exc:
-			raise IOError("Error writing creds!") from exc
+			raise IOError("Fatal error writing creds!") from exc
