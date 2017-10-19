@@ -397,6 +397,10 @@ class Coloring:
 		if lineBuffer.rstrip() != outdent.rstrip():
 			broken.append(lineBuffer+CLEAR_FORMATTING)
 
+		#guarantee that a broken empty string is a singleton of an empty string
+		if not len(broken):
+			broken = [""]
+
 		return broken
 
 def collen(string):

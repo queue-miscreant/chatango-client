@@ -418,14 +418,8 @@ class ChatangoOverlay(client.MainOverlay):
 			#exit
 			return -1
 
-		def regen(me):
-			'''Update list of links'''
-			#new copy
-			me.raw = linksList[:]
-			me.list = buildList(me.raw)
-
 		def drawVisited(me,string,i):
-			current = me.raw[len(me.list)-i-1] #this enforces the wanted link is selected
+			current = me.raw[len(me.list)-i-1]
 			try:
 				if current in self.visited_links:
 					string.insertColor(0,self.parent.get256color(245))
@@ -434,11 +428,10 @@ class ChatangoOverlay(client.MainOverlay):
 		buildList = lambda raw: [i.replace("https://","").replace("http://","")
 			for i in reversed(raw)]
 
-		box = client.ListOverlay(self.parent, (buildList,linksList[:]),
+		box = client.ListOverlay(self.parent, (buildList,linksList),
 			drawVisited, client.getDefaults())
 		box.addKeys({"enter":	select
-					,"tab": 	client.override(select)
-					,"^r":		regen})
+					,"tab": 	client.override(select)})
 		box.add()
 
 	def listmembers(self):
