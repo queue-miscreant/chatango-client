@@ -355,6 +355,7 @@ class ChatangoOverlay(client.MainOverlay):
 		if pos == -1: return 1
 		link = ""
 		smallest = -1
+		#look over all link matches; take the middle and find the smallest delta
 		for i in LINK_RE.finditer(str(msg[0])):
 			linkpos = (i.start() + i.end()) // 2
 			distance = abs(linkpos - pos)

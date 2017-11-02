@@ -419,9 +419,9 @@ def collen(string):
 		escape = temp
 	return a
 
-def numdrawing(string):
+def numdrawing(string,width=-1):
 	'''
-	Number of drawing characters in the string.
+	Number of drawing characters in the string (up to width).
 	Ostensibly the number of non-escape sequence characters
 	'''
 	escape = False
@@ -431,6 +431,8 @@ def numdrawing(string):
 		#not escaped and not transitioning to escape
 		if not temp:
 			a += 1
+			if a == width:
+				return a
 		elif i.isalpha(): #is escaped and i is alpha
 			escape = False
 			continue

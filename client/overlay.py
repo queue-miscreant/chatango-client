@@ -877,8 +877,6 @@ class DisplayOverlay(OverlayBase,Box):
 		#flattened list of broken strings
 		self.formatted = [j	for i in self.rawlist
 			for j in i.breaklines(self.parent.x-2,outdent=outdent)]
-		[perror(repr(i)) for i in strings]
-		[perror(repr(i)) for i in self.formatted]
 		self._numprompts = len(self.formatted)
 		#bigger than the box holding it
 		if self._numprompts > self.parent.y-2:
@@ -1342,10 +1340,11 @@ class Messages:
 		#adjust the position
 		pos = 0
 		for i in range(depth):
-			pos += numdrawing(self.lines[i-firstLine]) - len(self._INDENT)
-		if x >= collen(self._INDENT):
+			#only subtract from the length of the previous line if it's not the first one
+			pos += numdrawing(self.lines[i-firstLine]) - (i and len(self._INDENT))
+		if x >= collen(self._INDENT) or not depth:
 			#try to get a slice up to the position 'x'
-			pos += columnslice(self.lines[depth-firstLine],x)
+			pos += numdrawing(self.lines[depth-firstLine],x)
 			
 		return msg,pos
 

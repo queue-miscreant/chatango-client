@@ -67,7 +67,13 @@ class open_link:
 					return
 			#check for patterns
 			for i,j in self._sites.items():
-				if 1+link.find(i):
+				found = False
+				#compiled regex
+				if isinstance(i,type(_POST_FORMAT_RE)):
+					found = i.search(link)
+				elif isinstance(i,str):
+					found = 1+link.find(i)
+				if found: 
 					client.loop.create_task(j(client,link))
 					return
 			#check for lambdas
