@@ -62,7 +62,8 @@ def perror(*args,**kwargs):
 	cautiously. overlay.py sets up logging to /etc/client.log if sterr is not
 	redirected with 2>[file]
 	'''
-	print(*args,**kwargs,file=sys.stderr)
+	kwargs.update("file",sys.stderr)
+	print(*args,**kwargs)
 	sys.stderr.flush()
 
 #COLORING STUFF-----------------------------------------------------------------

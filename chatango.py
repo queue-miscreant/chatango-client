@@ -1004,6 +1004,8 @@ if __name__ == "__main__":
 
 	#start
 	loop = asyncio.get_event_loop()
+	if not hasattr(loop,"create_future"):
+		setattr(loop,"create_future",lambda: asyncio.Future(loop=loop))
 	try:
 		start = startClient(loop,newCreds)
 		endFuture = loop.run_until_complete(start)
@@ -1012,7 +1014,9 @@ if __name__ == "__main__":
 	except Exception as exc:
 		client.perror(exc)
 	finally:
-		loop.run_until_complete(loop.shutdown_asyncgens())
+		try:
+				loop.run_until_complete(loop.shutdown_asyncgens())
+		except: pass
 		#close all loop IO
 		loop.close()
 		#save

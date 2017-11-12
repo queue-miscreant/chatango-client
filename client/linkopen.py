@@ -128,7 +128,8 @@ class opener:
 def images(main, link, ext):
 	'''Start feh (or replaced image viewer) in main.loop'''
 	if not IMG_PATH:
-		return browser(main,link)
+		ret = yield from browser(main,link)
+		return ret
 	main.newBlurb("Displaying image... ({})".format(ext))
 	args = [IMG_PATH, link]
 	try:
@@ -143,7 +144,8 @@ def images(main, link, ext):
 def videos(main, link, ext):
 	'''Start mpv (or replaced video player) in main.loop'''
 	if not MPV_PATH:
-		return browser(main,link)
+		ret = yield from browser(main,link)
+		return ret
 	main.newBlurb("Playing video... ({})".format(ext))
 	args = [MPV_PATH, link, "--pause"]
 	try:
