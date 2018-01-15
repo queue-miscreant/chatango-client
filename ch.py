@@ -711,9 +711,9 @@ class Manager:
 			yield from group._protocol.disconnect()
 		self._groups.clear()
 
-	def uploadAvatar(self, path):
-		'''Upload an avatar with path `path`'''
-		extension = path[path.rfind('.')+1:].lower()
+	def uploadAvatar(self, location):
+		'''Upload an avatar with path `location`'''
+		extension = location[location.rfind('.')+1:].lower()
 		if extension == "jpg": extension = "jpeg"
 		elif extension not in ("png","jpeg"):
 			return False
@@ -725,6 +725,6 @@ class Manager:
 				,"arch":		"h5"
 				,"src":			"group"
 				,"action":		"fullpic"
-				,"Filedata":	("image/%s" % extension, open(path,"br"))
+				,"Filedata":	("image/%s" % extension, open(location,"br"))
 			}))
 		return True

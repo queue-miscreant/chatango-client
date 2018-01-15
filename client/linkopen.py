@@ -135,7 +135,7 @@ def images(main, link, ext):
 	'''Start feh (or replaced image viewer) in main.loop'''
 	if not IMG_PATH:
 		return browser(main,link)
-	main.newBlurb("Displaying image... ({})".format(ext))
+	main.newBlurb("Displaying image... (%s)" % ext)
 	args = [IMG_PATH, link]
 	try:
 		yield from asyncio.create_subprocess_exec(*args

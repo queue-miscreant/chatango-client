@@ -23,8 +23,8 @@ from time import time,localtime,strftime as format_time
 from .display import *
 
 __all__ =	["CHAR_COMMAND","soundBell","Box","command"
-			,"OverlayBase","TextOverlay","ListOverlay","ColorOverlay"
-			,"ColorSliderOverlay","InputOverlay","ConfirmOverlay"
+			,"OverlayBase","TextOverlay","ListOverlay","VisualListOverlay"
+			,"ColorOverlay","ColorSliderOverlay","InputOverlay","ConfirmOverlay"
 			,"BlockingOverlay","MainOverlay","DisplayOverlay","onDone"
 			,"override","staticize","Main"]
 
@@ -651,6 +651,56 @@ class ListOverlay(OverlayBase,Box):
 			self.list = self.builder(self.raw)
 			self._numentries = len(self.list)
 
+class VisualListOverlay(ListOverlay,Box):
+	'''Listoverlay with visual mode like in vim: can select multiple rows'''
+	replace = True
+
+	def __init__(self,parent,outList,drawOther = None,modes = [""]):
+		#new draw method that adds an underline to selected elements
+		def draw(me,row,pos):
+			if pos in me.selectedList():
+				row.addGlobalEffect(1)
+			drawOther(me,row,pos)
+		super(VisualListOverlay,self).__init__(parent,outList,draw,modes)
+
+		self.clear()	#clear/initialize the selected data
+		
+		self._keys.update(
+			{ord('s'):	self.toggle
+			,ord('v'):	self.toggleSelect
+		})
+
+	def toggle(self,*args):
+		self._selected = self._selected.symmetric_difference((self.it,))
+	
+	def toggleSelect(self,*args):
+		if self._startSelect + 1:	#already selecting
+			#canonize the select
+			self._selected = \
+				self._selected.symmetric_difference(self._selectBuffer)
+			self._selectBuffer = set()
+			self._startSelect = -1
+			return
+#		self.toggle() #toggle the current element
+		self._startSelect = self.it
+
+	def increment(self,amt):
+		super(VisualListOverlay,self).increment(amt)
+		if self._startSelect + 1: #already selecting
+			if self.it < self._startSelect:
+				#+1 because toggleselect already toggles the element
+				self._selectBuffer = set(range(self.it,self._startSelect+1))
+			else:
+				self._selectBuffer = set(range(self._startSelect,self.it+1))
+
+	def clear(self):
+		self._selected = set()	#list of indices selected by visual mode
+		self._selectBuffer = set()
+		self._startSelect = -1
+
+	def selectedList(self):
+		return self._selected.symmetric_difference(self._selectBuffer)
+
 class ColorOverlay(ListOverlay,Box):
 	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
 	replace = True
@@ -1028,9 +1078,10 @@ class CommandOverlay(TextOverlay):
 
 	def _run(self,*args):
 		'''Run command'''
-		text = str(self.text)
-		self.history.append(text)
-		args = text.split(' ')
+		#parse arguments like a command line: quotes enclose single args
+		args = escapeText(self.text)
+		self.history.append(self.text)
+
 		if args[0] not in _commands:
 			self.parent.newBlurb("Command \"{}\" not found".format(args[0]))
 			return -1
@@ -1302,7 +1353,6 @@ class Messages:
 		while nummsg <= bound:
 			if (test(self.allMessages[-nummsg],result)):
 				del self.allMessages[-nummsg]
-				return
 			nummsg += 1
 
 		self.lazyDelete.append(test,result)
@@ -1323,10 +1373,13 @@ class Messages:
 			y = y + 1
 		#find message until we exceed the height
 		msg = self.allMessages[-msgNo]
-		while msgNo <= len(self.allMessages) and height < y:
+		while height < y:
 			msg = self.allMessages[-msgNo]
 			height += msg[2]
+			#advance the message number, or return if we go too far
 			msgNo += direction
+			if msgNo > len(self.allMessages):
+				return "",-1
 
 		#for at the bottom (drawing up) line depth is simply height-y
 		depth = height-y + self.innerheight
@@ -1673,6 +1726,7 @@ class Main:
 	def _printblurb(self,blurb,time):
 		'''Blurb display backend'''
 		if not (self.active and self.candisplay): return
+		#TODO queue a blurb instead
 		if self.last < 0: return
 		#try to queue a blurb	
 		if blurb == "": pass
@@ -1717,7 +1771,8 @@ class Main:
 		Release blurb. Sets self.last to a valid time, making newBlurb
 		start drawing again.
 		'''
-		self.loop.create_task(self._printblurb(message,"",self.loop.time()))
+		self.last = self.loop.time()
+		self.loop.create_task(self._printblurb("",self.last))
 
 	def updateinfo(self,right = None,left = None):
 		'''Update screen bottom'''

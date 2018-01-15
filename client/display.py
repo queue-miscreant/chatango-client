@@ -13,8 +13,8 @@ from .wcwidth import wcwidth
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT","_COLORS"
 			,"SELECT_AND_MOVE","perror","DisplayException","def256colors"
-			,"getColor","rawNum","collen","numdrawing","columnslice","Coloring"
-			,"Scrollable","Tokenize","ScrollSuggest"]
+			,"getColor","rawNum","collen","numdrawing","columnslice","escapeText"
+			,"Coloring","Scrollable","Tokenize","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
 _SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
@@ -879,3 +879,34 @@ class ScrollSuggest(Scrollable):
 				self._pos,self._disp = self._lastpos,self._lastdisp
 			self.append(suggestion)
 			return True
+
+
+def escapeText(string):
+	text = ""
+	args = []
+	escaping = False
+	singleFlag = False
+	doubleFlag = False
+	for i in str(string):
+		if escaping:
+			escaping = False
+			if not (singleFlag or doubleFlag):
+				text += i
+				continue
+			text += '\\'
+			
+		if i == '\\':
+			escaping = True
+		elif i == "'":
+			singleFlag ^= True
+		elif i == '"':
+			doubleFlag ^= True
+		elif i == ' ' and not (singleFlag or doubleFlag):
+			args.append(text)
+			text = ""
+		else:
+			text += i
+	if escaping:
+		text += "\\"
+	args.append(text)
+	return args

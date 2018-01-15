@@ -98,9 +98,36 @@ def getClient():
 	if isinstance(_client,ChatBot):
 		return _client
 
+#fractur is broken, so change it to normal
+mapRange = lambda charid,inrange,beginchar: (charid in inrange) and (charid - \
+	inrange.start + beginchar)
+badCharsets = [
+	 (range(119964,119964+26),ord('A'))	#uppercase math
+	,(range(119990,119990+26),ord('a'))	#lowercase math
+	,(range(119860,119860+26),ord('A'))	#uppercase italic math
+	,(range(119886,119886+26),ord('a'))	#lowercase italic math
+	,(range(120172,120172+26),ord('A'))	#uppercase fractur
+	,(range(120198,120198+26),ord('a'))	#lowercase fractur
+	,(range(120068,120068+26),ord('A'))	#uppercase math fractur
+	,(range(120094,120094+26),ord('a'))	#lowercase math fractur
+]
+
+def fracturMap(raw):
+	ret = ""
+	for i in raw:
+		for f in badCharsets:
+			mapped = mapRange(ord(i),f[0],f[1])
+			if mapped:
+				i = chr(mapped)
+				break
+		ret += i
+	return ret
+
 def parsePost(post, me, ishistory):
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
+	
+	post.post = fracturMap(post.post)
 	#format as ' user: message'; the space is for the channel
 	msg = " {}: {}".format(post.user,post.post)
 	#extra arguments. use in colorizers
@@ -226,7 +253,8 @@ class ChatBot(ch.Manager):
 		self.parseLinks(post.post)
 		msg = parsePost(post, self.me, False)
 		#						  isreply		ishistory
-		if self.options["bell"] and msg[2] and not msg[3]:
+		if self.options["bell"] and msg[2] and not msg[3] and \
+		not self.mainOverlay.filterMessage(*(msg[1:])):
 			client.soundBell()
 
 		self.members.promote(user.lower())
@@ -247,15 +275,16 @@ class ChatBot(ch.Manager):
 
 	@asyncio.coroutine
 	def onFloodWarning(self, group):
-		self.mainOverlay.msgSystem("Flood ban warning issued")
+		yield from self.mainOverlay.msgSystem("Flood ban warning issued")
 
 	@asyncio.coroutine
 	def onFloodBan(self, group, secs):
-		self.onFloodBanRepeat(group, secs)
+		yield from self.onFloodBanRepeat(group, secs)
 
 	@asyncio.coroutine
 	def onFloodBanRepeat(self, group, secs):
-		self.mainOverlay.msgSystem("You are banned for %d seconds"%secs)
+		yield from self.mainOverlay.msgSystem("You are banned for %d seconds" %
+			secs)
 	
 	@asyncio.coroutine
 	def onParticipants(self, group):
@@ -411,6 +440,30 @@ class ChatangoOverlay(client.MainOverlay):
 		def select(me):
 			'''Open link with selected opener'''
 			if not me.list: return
+			#try to get selected links
+			alllinks = me.selectedList()
+			if len(alllinks):
+				#function to open all links, like in above selected message
+				def openall():
+					needRecolor = False
+					for i in alllinks:
+						current = me.raw[len(me.list)-i-1]
+						client.open_link(self.parent,current,me.mode)
+						if current not in self.visited_links:
+							self.visited_links.append(current)
+							needRecolor = True
+					#self explanatory
+					if needRecolor: self.recolorlines()
+
+				if len(alllinks) >= self.bot.options["linkwarn"]:
+					self.parent.holdBlurb(
+						"Really open {} links? (y/n)".format(len(alllinks)))
+					client.ConfirmOverlay(self.parent, openall).add()
+				else:
+					openall()
+				me.clear()
+				return -1
+
 			current = me.raw[len(me.list)-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			if current not in self.visited_links:
@@ -429,7 +482,7 @@ class ChatangoOverlay(client.MainOverlay):
 		buildList = lambda raw: [i.replace("https://","").replace("http://","")
 			for i in reversed(raw)]
 
-		box = client.ListOverlay(self.parent, (buildList,linksList),
+		box = client.VisualListOverlay(self.parent, (buildList,linksList),
 			drawVisited, client.getDefaults())
 		box.addKeys({"enter":	select
 					,"tab": 	client.override(select)})
@@ -467,8 +520,8 @@ class ChatangoOverlay(client.MainOverlay):
 		
 		box = client.ListOverlay(self.parent,dispList,drawIgnored)
 		box.addKeys({
-			"enter":select
-			,"tab":tab
+			"enter":	select
+			,"tab":		tab
 		})
 		box.add()
 
@@ -845,9 +898,18 @@ def startClient(loop,creds):
 		chatbot = getClient()
 		if not chatbot: return
 
-		path = path.expanduser(' '.join(args))
-		path = path.replace("\ ",' ')
-		chatbot.uploadAvatar(path)
+		location = path.expanduser(' '.join(args))
+		location = location.replace("\ ",' ')
+
+		trim = location.find("file://")
+		if not trim:
+			location = location[7:]
+		
+		success = chatbot.uploadAvatar(location)
+		if success:
+			parent.newBlurb("Successfully updated avatar")
+		else:
+			parent.newBlurb("Failed to update avatar")
 
 	#done preparing client constants-------------------------------------------------
 	main = client.Main(loop=loop)
@@ -1034,6 +1096,7 @@ if __name__ == "__main__":
 		import traceback
 		print("\x1b[31mFatal error occurred\x1b[m")
 		traceback.print_exc()
+		traceback.print_exc(file=sys.stderr)
 	finally:
 		if mainTask != None and not mainTask.done():
 			mainTask.cancel()
