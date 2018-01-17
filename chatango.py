@@ -335,6 +335,7 @@ class ChatangoOverlay(client.MainOverlay):
 						,"f3":		self.listmembers
 						,"f4":		self.setformatting
 						,"f5":		self.setchannel
+						,"f6":		self.listreplies
 						,"f12":		self.options
 						,"^n":		self.addignore
 						,"^t":		self.joingroup
@@ -619,6 +620,7 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def options(self):
 		'''Options'''
+		#XXX Ew. Really needs some better structure in here
 		def select(me):
 			global creds_entire, creds_readwrite
 
@@ -697,6 +699,46 @@ class ChatangoOverlay(client.MainOverlay):
 			"enter":select
 			,"tab":	select
 			,' ':	select
+		})
+		box.add()
+
+	def listreplies(self):
+		'''List replies in a convenient overlay'''
+		#TODO maybe abstract this more for a ctrl-f kind of thing
+		#TODO add blurb pushing on earliest and latest messages
+		var = [0,	#hurts me inside, but the functions can access it
+			self.messages.iterateWith(lambda post,isreply,ishistory: isreply)]
+		try:
+			listOfMessages = [next(var[1])]
+		except StopIteration:
+			self.parent.newBlurb("No replies have been accumulated")
+			return
+
+		def nextMessage(me):
+			pos, it = var
+			#trying to go too far
+			if pos + 1 >= len(listOfMessages):
+				if it:	#if the iterator is active
+					try:
+						listOfMessages.append(next(it))
+					except StopIteration:
+						del var[1]	#just in case
+						var.append(None)
+						return
+				else:
+					return	#no more messages to select
+			var[0] += 1
+			me.changeDisplay(listOfMessages[var[0]])
+
+		def prevMessage(me):
+			if not var[0]: return
+			var[0] -= 1
+			me.changeDisplay(listOfMessages[var[0]])
+
+		box = client.DisplayOverlay(self.parent,listOfMessages[0])
+		box.addKeys({
+			"a-j":	prevMessage
+			,"a-k":	nextMessage
 		})
 		box.add()
 

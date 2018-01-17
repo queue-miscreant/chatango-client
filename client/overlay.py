@@ -380,9 +380,9 @@ class OverlayBase:
 					if i in _VALID_KEYNAMES:
 						i = _VALID_KEYNAMES[i]
 						if areMethods:
-							self._altkeys[i] = j
+							self._altkeys[i] = staticize(j)
 						else:
-							self._altkeys[i] = lambda: j(self)
+							self._altkeys[i] = staticize(j,self)
 						continue
 					else: raise KeyException("key alt-{} invalid".format(i))
 				#mouse buttons
@@ -391,9 +391,9 @@ class OverlayBase:
 					if i in _MOUSE_BUTTONS:
 						i = _MOUSE_BUTTONS[i]
 						if areMethods:
-							self._mouse[i] = j
+							self._mouse[i] = staticize(j)
 						else:
-							self._mouse[i] = lambda x,y: j(self,x,y)
+							self._mouse[i] = staticize(j,self)
 						continue
 					else: raise KeyException("key mouse-{} invalid".format(i))
 				#everything else
@@ -666,25 +666,18 @@ class VisualListOverlay(ListOverlay,Box):
 		self.clear()	#clear/initialize the selected data
 		
 		self._keys.update(
-			{ord('s'):	self.toggle
+			{ord('q'):	self.clearQuit
+			,ord('s'):	self.toggle
 			,ord('v'):	self.toggleSelect
 		})
 
-	def toggle(self,*args):
-		self._selected = self._selected.symmetric_difference((self.it,))
-	
-	def toggleSelect(self,*args):
-		if self._startSelect + 1:	#already selecting
-			#canonize the select
-			self._selected = \
-				self._selected.symmetric_difference(self._selectBuffer)
-			self._selectBuffer = set()
-			self._startSelect = -1
-			return
-#		self.toggle() #toggle the current element
-		self._startSelect = self.it
+	def clear(self,*args):
+		self._selected = set()	#list of indices selected by visual mode
+		self._selectBuffer = set()
+		self._startSelect = -1
 
 	def increment(self,amt):
+		'''New implemetation of increment that updates the visual lines'''
 		super(VisualListOverlay,self).increment(amt)
 		if self._startSelect + 1: #already selecting
 			if self.it < self._startSelect:
@@ -693,13 +686,31 @@ class VisualListOverlay(ListOverlay,Box):
 			else:
 				self._selectBuffer = set(range(self._startSelect,self.it+1))
 
-	def clear(self):
-		self._selected = set()	#list of indices selected by visual mode
-		self._selectBuffer = set()
-		self._startSelect = -1
+	def toggle(self,*args):
+		'''Togle the current line'''
+		self._selected = self._selected.symmetric_difference((self.it,))
+	
+	def toggleSelect(self,*args):
+		'''Toggle visual mode selecting'''
+		if self._startSelect + 1:	#already selecting
+			#canonize the select
+			self._selected = \
+				self._selected.symmetric_difference(self._selectBuffer)
+			self._selectBuffer = set()
+			self._startSelect = -1
+			return
+		self._startSelect = self.it
 
 	def selectedList(self):
+		'''Get list (set) of selected and buffered indices'''
 		return self._selected.symmetric_difference(self._selectBuffer)
+
+	def clearQuit(self,*args):
+		'''Clear the select or just quit the overlay'''
+		if self._selectBuffer or self._selected:
+			self.clear()
+		else:
+			return -1
 
 class ColorOverlay(ListOverlay,Box):
 	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
@@ -918,11 +929,26 @@ class DisplayOverlay(OverlayBase,Box):
 	'''Overlay that displays a string in a box'''
 	def __init__(self,parent,strings,outdent=""):
 		super(DisplayOverlay,self).__init__(parent)
+		self.changeDisplay(strings,outdent)
+
+		up = staticize(self.scroll,-1,
+			doc="Scroll downward")
+		down = staticize(self.scroll,1,
+			doc="Scroll upward")
+		self._keys.update({
+			curses.KEY_UP:		up
+			,curses.KEY_DOWN:	down
+			,ord('k'):			up
+			,ord('j'):			down
+			,ord('q'):			quitlambda
+		})
+
+	def changeDisplay(self,strings,outdent=""):
+		'''Basically re-initialize without making a new overlay'''
 		if isinstance(strings,str) or isinstance(strings,Coloring):
 			strings = [strings]
 		self.rawlist = [i if isinstance(i,Coloring) else Coloring(i) for i in strings]
 		self.outdent = outdent
-#		self.keepEmpty = keepEmpty
 		
 		#flattened list of broken strings
 		self.formatted = [j	for i in self.rawlist
@@ -935,17 +961,6 @@ class DisplayOverlay(OverlayBase,Box):
 			self.replace = False
 
 		self.begin = 0	#begin from this prompt
-		up = staticize(self.scroll,-1,
-			doc="Scroll downward")
-		down = staticize(self.scroll,1,
-			doc="Scroll upward")
-		self._keys.update({
-			curses.KEY_UP:		up
-			,curses.KEY_DOWN:	down
-			,ord('k'):			up
-			,ord('j'):			down
-			,ord('q'):			quitlambda
-		})
 	
 	@asyncio.coroutine
 	def __call__(self,lines):
@@ -1304,6 +1319,19 @@ class Messages:
 			self.innerheight = 0
 		return addlines
 
+	def iterateWith(self,callback):
+		'''
+		An iterator that yields when the callback is true.
+		Callback is called with arguments passed into append (or msgPost...)
+		'''
+		select = 1
+		while select <= len(self.allMessages):
+			message = self.allMessages[-select]
+			#ignore system messages
+			if message[1] and callback(*message[1]):
+				yield message[0]
+			select += 1
+
 	def append(self,message,args = None):
 		'''Add new message to the end of allMessages and lines'''
 		#undisplayed messages have length zero
@@ -1563,7 +1591,7 @@ class MainOverlay(TextOverlay):
 		'''
 		Virtual function called to see if a message can be displayed. If False,
 		the message can be displayed. Otherwise, the message is pushed to
-		_allMessages without drawing to _lines. Arguments are left generic so
+		allMessages without drawing to lines. Arguments are left generic so
 		that the user can define message args
 		'''
 		return False
