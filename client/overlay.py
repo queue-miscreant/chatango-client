@@ -7,6 +7,7 @@ one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
 #TODO	canscroll really means cangetmore, and locks when at the top and no more messages are retrieved
+#TODO	addScrollable is a scrollable factory, but if you forget to add a TextOverlay, then input isn't directed into it
 
 try:
 	import curses
@@ -21,6 +22,7 @@ from signal import SIGTSTP,SIGINT #redirect ctrl-z and ctrl-c
 from functools import partial
 from time import time,localtime,strftime as format_time
 from .display import *
+from .util import escapeText
 
 __all__ =	["CHAR_COMMAND","soundBell","Box","command"
 			,"OverlayBase","TextOverlay","ListOverlay","VisualListOverlay"
@@ -553,7 +555,7 @@ class ListOverlay(OverlayBase,Box):
 			doc=(self._nummodes and "Go to previous mode" or None))
 
 		self._keys.update(
-			{ord('r')-ord('a')+1:	self.regenList
+			{ord('r')-ord('a')+1:	self.regenList	#ctrl-r
 			,ord('j'):	down	#V I M
 			,ord('k'):	up
 			,ord('l'):	right
@@ -867,9 +869,12 @@ class InputOverlay(TextOverlay,Box):
 	def __init__(self, parent, prompt, callback = None, password = False):
 		super(InputOverlay, self).__init__(parent)
 		self._future = parent.loop.create_future()
-		self._prompt = prompt if isinstance(prompt,Coloring) else Coloring(prompt)
-		self._prompts = self._prompt.breaklines(parent.x-2)
-		self._numprompts = len(self._prompts)
+		if prompt is None:
+			self._prompt, self._prompts, self._numprompts = None, [], 0
+		else:
+			self._prompt = prompt if isinstance(prompt,Coloring) else Coloring(prompt)
+			self._prompts = self._prompt.breaklines(parent.x-2)
+			self._numprompts = len(self._prompts)
 
 		self.text.password = password
 		self._keys.update({
@@ -884,6 +889,7 @@ class InputOverlay(TextOverlay,Box):
 	@asyncio.coroutine
 	def __call__(self,lines):
 		'''Display the text in roughly the middle, in a box'''
+		if self._prompt is None: return
 		start = self.parent.y//2 - self._numprompts//2
 		end = self.parent.y//2 + self._numprompts
 		lines[start] = self.box_top()
@@ -929,7 +935,9 @@ class DisplayOverlay(OverlayBase,Box):
 	'''Overlay that displays a string in a box'''
 	def __init__(self,parent,strings,outdent=""):
 		super(DisplayOverlay,self).__init__(parent)
-		self.changeDisplay(strings,outdent)
+
+		self._outdent = outdent
+		self.changeDisplay(strings)
 
 		up = staticize(self.scroll,-1,
 			doc="Scroll downward")
@@ -943,16 +951,15 @@ class DisplayOverlay(OverlayBase,Box):
 			,ord('q'):			quitlambda
 		})
 
-	def changeDisplay(self,strings,outdent=""):
+	def changeDisplay(self,strings):
 		'''Basically re-initialize without making a new overlay'''
 		if isinstance(strings,str) or isinstance(strings,Coloring):
 			strings = [strings]
 		self.rawlist = [i if isinstance(i,Coloring) else Coloring(i) for i in strings]
-		self.outdent = outdent
 		
 		#flattened list of broken strings
 		self.formatted = [j	for i in self.rawlist
-			for j in i.breaklines(self.parent.x-2,outdent=outdent)]
+			for j in i.breaklines(self.parent.x-2,outdent=self._outdent)]
 		self._numprompts = len(self.formatted)
 		#bigger than the box holding it
 		if self._numprompts > self.parent.y-2:
@@ -961,6 +968,9 @@ class DisplayOverlay(OverlayBase,Box):
 			self.replace = False
 
 		self.begin = 0	#begin from this prompt
+
+	def forceOutdent(self,outdent):
+		self._outdent = outdent
 	
 	@asyncio.coroutine
 	def __call__(self,lines):

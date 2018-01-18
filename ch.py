@@ -251,7 +251,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		except AttributeError: pass
 
 	@asyncio.coroutine
-	def disconnect(self):
+	def disconnect(self,raiseError=False):
 		'''Safely close the transport. Prevents firing onConnectionError 'lost' '''
 		if self._transport:
 			self._transport.close()
@@ -259,7 +259,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		if self._pingTask:
 			self._pingTask.cancel()
 			self._pingTask = None
-		self.connected = False
+		self.connected = not raiseError
 
 	@asyncio.coroutine
 	def ping(self):
@@ -655,7 +655,13 @@ class Group(Connection):
 		if user == self._owner: return 2
 		if user in self._mods: return 1
 		return 0
-		
+
+def _connectionLostHandler(loop,context):
+	failedProtocol = context.get("protocol")
+	if failedProtocol:
+		loop.create_task(failedProtocol.disconnect(True))
+	else:
+		loop.default_exception_handler(context)
 
 class Manager:
 	'''
@@ -667,6 +673,8 @@ class Manager:
 		self._groups = []
 		self.username = username
 		self.password = password
+		
+		loop.set_exception_handler(_connectionLostHandler)
 
 	def __del__(self):
 		if self.loop.is_closed(): return

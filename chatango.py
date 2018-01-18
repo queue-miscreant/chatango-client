@@ -337,9 +337,10 @@ class ChatangoOverlay(client.MainOverlay):
 						,"f5":		self.setchannel
 						,"f6":		self.listreplies
 						,"f12":		self.options
+						,"^f":		self.ctrlf
+						,"^g":		self.openlastlink
 						,"^n":		self.addignore
 						,"^t":		self.joingroup
-						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
 				,"mouse-left":		self.clickOnLink
 				,"mouse-middle":	client.override(self.openSelectedLinks,1)
@@ -704,42 +705,61 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def listreplies(self):
 		'''List replies in a convenient overlay'''
-		#TODO maybe abstract this more for a ctrl-f kind of thing
-		#TODO add blurb pushing on earliest and latest messages
-		var = [0,	#hurts me inside, but the functions can access it
-			self.messages.iterateWith(lambda post,isreply,ishistory: isreply)]
 		try:
-			listOfMessages = [next(var[1])]
-		except StopIteration:
+			lazylist = client.LazyIterList(
+				self.messages.iterateWith(lambda _,isreply,__: isreply))
+		except TypeError:
 			self.parent.newBlurb("No replies have been accumulated")
 			return
 
-		def nextMessage(me):
-			pos, it = var
-			#trying to go too far
-			if pos + 1 >= len(listOfMessages):
-				if it:	#if the iterator is active
-					try:
-						listOfMessages.append(next(it))
-					except StopIteration:
-						del var[1]	#just in case
-						var.append(None)
-						return
-				else:
-					return	#no more messages to select
-			var[0] += 1
-			me.changeDisplay(listOfMessages[var[0]])
+		def scroll(me,step):
+			attempt = lazylist.step(step)
+			if attempt:
+				me.changeDisplay(attempt)
+			elif step == 1:
+				self.parent.newBlurb("Earliest reply selected")
+			elif step == -1:
+				self.parent.newBlurb("Latest reply selected")
 
-		def prevMessage(me):
-			if not var[0]: return
-			var[0] -= 1
-			me.changeDisplay(listOfMessages[var[0]])
-
-		box = client.DisplayOverlay(self.parent,listOfMessages[0])
+		box = client.DisplayOverlay(self.parent,lazylist[0],"    ")
 		box.addKeys({
-			"a-j":	prevMessage
-			,"a-k":	nextMessage
+			"a-j":	lambda me: scroll(me,-1)
+			,"a-k":	lambda me: scroll(me,1)
 		})
+		box.add()
+
+	def ctrlf(self):
+		'''Ctrl-f style message stepping'''
+
+		def search(string):
+			try:
+				lazylist = client.LazyIterList(self.messages.iterateWith(
+					lambda post,_,__: -1 != post.post.find(string)))
+			except TypeError:
+				self.parent.newBlurb("No message containing `%s` found"%string)
+				return
+			
+			def scroll(me,step):
+				attempt = lazylist.step(step)
+				if attempt:
+					me.changeDisplay(attempt)
+				elif step == 1:
+					self.parent.newBlurb("No earlier instance of `%s`"%string)
+				elif step == -1:
+					self.parent.newBlurb("No later instance of `%s`"%string)
+
+			newbox = client.DisplayOverlay(self.parent,lazylist[0],"    ")
+			newbox.addKeys({
+				"a-j":	lambda me: scroll(me,-1)
+				,"a-k":	lambda me: scroll(me,1)
+				,"n":	lambda me: scroll(me,-1)
+				,"N":	lambda me: scroll(me,1)
+			})
+			newbox.add()
+
+		#minimalism
+		box = client.InputOverlay(self.parent,None,search)
+		box.text.setnonscroll("^f: ")
 		box.add()
 
 	def addignore(self):
