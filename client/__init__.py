@@ -4,4 +4,6 @@
 from .overlay import *
 from .linkopen import *
 from .util import *
-from .display import rawNum,defColor,perror,Coloring
+from .display import rawNum,defColor,Coloring
+onDone = Main.onDone
+command = CommandOverlay.command

@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.283185
+Version 6.2831853
 --------------------------
 A terminal application written in python with curses input and ANSI escape-colored output.   
 Used to implement a client for chatango, an online chatting service.   
@@ -14,6 +14,7 @@ My custom script: https://puu.sh/tmIef/9592c56d10.py
 
 Requires livestreamer, youtube-dl, and xclip, but if you don't already have
 these, seriously consider installing them  
+Also the link is broken until someone decides to ~~play some games~~ watch some movies.
 
 If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
 
@@ -63,7 +64,7 @@ The following terminals are NOT supported or have restricted features:
 * Console2 (256 color mode)
 * cmd.exe (Doesn't support ANSI escapes)
 * Powershell (Same as cmd.exe)
-Untested:
+Testing limited:
 * PuTTY
 
 Links in browser WILL NOT open correctly by default. There are two solutions: 
@@ -88,18 +89,38 @@ The comment about symlinking to /usr/local/bin still works.
 
 Changelog
 =========================
-## v6.283185 *2016/1/16*
+## v6.283183 *2018/1/18*
+* Rewrote much of the infrastructure with asyncio
+	* Uses callbacks and futures for things like InputOverlays
+	* Rewrote ch.py (the chatango library) with async calls
+* If a message is very long, then selecting the next message down will display more of it instead
+* Added lazy re-colorization, line breaking, and fitering
+* Added DisplayOverlay, which displays (lists of) strings or Coloring objects
+	* Used in implementation of reply accumulator and ctrl-f
+* Added more vim-like features to ListOverlays
+	* Added VisualListOverlay, which allows selecting a set of elements from its list at once
+	* Added `g` and `G` keybindings that go to the beginning and end of the list
+* Segregated non-display functions and classes in client/display into its own file, client/util
+* Separated out Messages container and MainOverlay
+	* Added method to Messages which allows iteration over items for which a lambda returns true
+* Made resize and display calls asynchronous
+* Moved error message for importing client/overlay into overlay.Main.run, since that more actively requires it
+* Better, but imperfect filesystem tabbing that completes file paths
+* Bugfix where attempting to bind multiple alt keys would fail binding all but the last
+* Bugfix where clicking on whitespace without list entries in ListOverlays would crash them
+
+## v6.283185 *2017/3/25*
 * "Better" extensibility
 	* Changed import order to allow importing classes like ChatBot
 	* Moved credentials into directory ~/.cubecli
 	* Moved custom.py into ~/.cubecli
-	* All legacy updates should be handled automatically by the main script
+	* All legacy credential files should be handled automatically by the main script
 * Tinkered some with how scrollables draw, but it's still buggy
 * Added cyclical scrolling
 	* That is, tab will generate a list and more tabs (and s-tabs) will cycle
-* Bugfix that made ESC do nothing
+* Bugfix where ESC did nothing
 
-## v6.28318	*2016/1/16*
+## v6.28318	*2017/1/16*
 * Added mouse support again
 	* Clicking on links in main interface
 	* Automatically supported in ListOverlays

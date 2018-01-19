@@ -14,7 +14,7 @@ from .util import Tokenize
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT","_COLORS"
-			,"SELECT_AND_MOVE","perror","DisplayException","def256colors"
+			,"SELECT_AND_MOVE","DisplayException","def256colors"
 			,"getColor","rawNum","collen","numdrawing","columnslice"
 			,"Coloring","Scrollable","ScrollSuggest"]
 
@@ -56,16 +56,6 @@ CLEAR_FORMATTING = "\x1b[m"
 _TABLEN = 4
 #arbitrary number of characters a scrollable can have and not scroll
 MAX_NONSCROLL_WIDTH = 5
-
-#DEBUG STUFF--------------------------------------------------------------------
-def perror(*args,**kwargs):
-	'''
-	The client runs in a curses session, so screen printing must be done
-	cautiously. overlay.py sets up logging to /etc/client.log if sterr is not
-	redirected with 2>[file]
-	'''
-	print(*args,**kwargs,file=sys.stderr)
-	sys.stderr.flush()
 
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):

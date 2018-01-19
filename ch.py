@@ -20,6 +20,8 @@ import random
 import re
 import urllib.request
 import asyncio
+import time
+from client import perror
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
@@ -206,6 +208,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		self._pingTask = None
 		#socket stuff
 		self._transport = None
+		self.lastResponse = -1
 		self.connected = False
 		self._rbuff = b""
 		#user id
@@ -227,6 +230,7 @@ class ChatangoProtocol(asyncio.Protocol):
 				self._loop.create_task(receive(args[1:]))
 			except AttributeError: pass
 		self._rbuff = commands[-1]
+		self.lastResponse = self._loop.time()
 
 	def connection_lost(self, exc):
 		'''Cancel the ping task and fire onConnectionError'''
@@ -259,20 +263,21 @@ class ChatangoProtocol(asyncio.Protocol):
 		if self._pingTask:
 			self._pingTask.cancel()
 			self._pingTask = None
-		self.connected = not raiseError
+		self.connected = raiseError
 
 	@asyncio.coroutine
 	def ping(self):
 		'''Send a ping to keep the transport alive'''
-		while True:
+		while 60 > self._loop.time() - self.lastResponse:
 			self.sendCommand("")
 			yield from asyncio.sleep(self._pingDelay)
+		self._transport.close()
 
 	@asyncio.coroutine
 	def _recv_premium(self, args):
 		'''Receive premium command. Called for both PM and Group'''
 		#TODO write setBgMode and setRecordingMode
-		if float(args[1]) > self._loop.time():
+		if float(args[1]) > time.time():
 			self._storage._premium = True
 			if self._storage._messageBackground: self.setBgMode(1)
 			if self._storage._messageRecord: self.setRecordingMode(1)
@@ -293,6 +298,7 @@ class GroupProtocol(ChatangoProtocol):
 		#if i cared, i'd put this property-setting in a super method
 		self._transport = transport
 		self.connected = True
+		self.lastResponse = self._loop.time()
 		self.sendCommand("bauth", self._storage._name, self._uid, self._manager.username,
 			self._manager.password, firstcmd = True)
 
@@ -658,7 +664,7 @@ class Group(Connection):
 
 def _connectionLostHandler(loop,context):
 	failedProtocol = context.get("protocol")
-	if failedProtocol:
+	if isinstance(failedProtocol,ChatangoProtocol):
 		loop.create_task(failedProtocol.disconnect(True))
 	else:
 		loop.default_exception_handler(context)

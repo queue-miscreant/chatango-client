@@ -7,7 +7,6 @@ one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
 #TODO	canscroll really means cangetmore, and locks when at the top and no more messages are retrieved
-#TODO	addScrollable is a scrollable factory, but if you forget to add a TextOverlay, then input isn't directed into it
 
 try:
 	import curses
@@ -22,13 +21,12 @@ from signal import SIGTSTP,SIGINT #redirect ctrl-z and ctrl-c
 from functools import partial
 from time import time,localtime,strftime as format_time
 from .display import *
-from .util import escapeText
+from .util import staticize,override,escapeText,History
 
-__all__ =	["CHAR_COMMAND","soundBell","Box","command"
-			,"OverlayBase","TextOverlay","ListOverlay","VisualListOverlay"
-			,"ColorOverlay","ColorSliderOverlay","InputOverlay","ConfirmOverlay"
-			,"BlockingOverlay","MainOverlay","DisplayOverlay","onDone"
-			,"override","staticize","Main"]
+__all__ =	["CHAR_COMMAND","soundBell","Box","OverlayBase","TextOverlay"
+			,"InputOverlay","ListOverlay","VisualListOverlay","ColorOverlay"
+			,"ColorSliderOverlay","ConfirmOverlay","BlockingOverlay"
+			,"CommandOverlay","MainOverlay","DisplayOverlay","Main"]
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -91,77 +89,8 @@ def cloneKey(fro,to):
 	except: raise KeyException("%s or %s is an invalid key name"%(fro,to))
 	_KEY_LUT[fro] = to
 
-#EXTENDABLE CONTAINERS----------------------------------------------------------
-_commands = {}
-_commandComplete = {}
-_afterDone = []
-
-#decorators for containers
-def command(commandname,complete=[]):
-	'''
-	Add function as a command `commandname` with argument suggestion `complete`
-	`complete` may either be a list or a function returning a list and a number
-	that specifies where to start the suggestion from
-	'''
-	def wrapper(func):
-		_commands[commandname] = func
-		if complete:
-			_commandComplete[commandname] = complete
-			
-	return wrapper
-def onDone(func,*args):
-	if asyncio.iscoroutinefunction(func):
-		raise Exception("Please pass a coroutine, not a generator into onDone")
-	elif not asyncio.iscoroutine(func):
-		func = asyncio.coroutine(func)(*args)
-	_afterDone.append(func)
-	return func
-
 #OVERLAY HELPERS------------------------------------------------------------------
 CHAR_COMMAND = '`'
-
-class History:
-	'''Container class for historical entries, similar to an actual shell'''
-	def __init__(self):
-		self.history = []
-		self._selhis = 0
-		#storage for next entry, so that you can scroll up, then down again
-		self.bottom = None
-
-	def nexthist(self,replace=""):
-		'''Next historical entry (less recent)'''
-		if self.history:
-			if replace:
-				if not self._selhis:
-					#at the bottom, starting history
-					self.bottom = replace
-				else:
-					#else, update the entry
-					self.history[-self._selhis] = replace
-			#go backward in history
-			self._selhis += (self._selhis < (len(self.history)))
-			#return what we just retrieved
-			return self.history[-self._selhis]
-		return ""
-
-	def prevhist(self,replace=""):
-		'''Previous historical entry (more recent)'''
-		if self.history:
-			if replace and self._selhis: #not at the bottom already
-				self.history[-self._selhis] = replace
-			#go forward in history
-			self._selhis -= (self._selhis > 0)
-			#return what we just retreived
-			return (self._selhis and self.history[-self._selhis]) or self.bottom or ""
-		return ""
-
-	def append(self,new):
-		'''Add new entry in history and maintain a size of at most 50'''
-		if not self.bottom:
-			#not already added from history manipulation
-			self.history.append(new)
-		self.history = self.history[-50:]
-		self._selhis = 0
 
 #DISPLAY/OVERLAY CLASSES----------------------------------------------------------
 class SizeException(Exception):
@@ -181,31 +110,6 @@ def soundBell():
 
 quitlambda = lambda x: -1
 quitlambda.__doc__ = "Close current overlay"
-def staticize(func,*args,doc=None,**kwargs):
-	'''functools.partial but conserves or adds documentation'''
-	ret = partial(func,*args,**kwargs)
-	ret.__doc__ = doc or func.__doc__ or "(no documentation)"
-	return ret
-
-class override:
-	'''Create a new function that returns `ret`. Avoids (or ensures) '''+\
-	'''firing _post in overlays'''
-	def __init__(self,func,ret=0,nodoc=False):
-		self.func = func
-		self.ret = ret
-		
-		if not nodoc:
-			docText = func.__doc__
-			if docText is not None:
-				if ret == 0:
-					docText += " (keeps overlay open)"
-				elif ret == -1:
-					docText += " (and close overlay)"
-			self.__doc__ = docText	#preserve documentation text
-
-	def __call__(self,*args):
-		self.func(*args)
-		return self.ret
 
 class Box:
 	'''
@@ -453,11 +357,12 @@ class TextOverlay(OverlayBase):
 	'''Virtual overlay with text input (at bottom of screen)'''
 	def __init__(self,parent = None):
 		super(TextOverlay, self).__init__(parent)
-		self.text = parent.addScrollable()
+		self.text = _NScrollable(self.parent)
 		#ASCII code of sentinel char
 		self._sentinel = 0
 		self._keys.update({
 			-1:				self._input
+			,4:				staticize(self.text.clear)
 			,9:				staticize(self.text.complete)
 			,26:			staticize(self.text.undo)
 			,127:			staticize(self.text.backspace)
@@ -478,6 +383,21 @@ class TextOverlay(OverlayBase):
 			,127:			self.text.delword
 			,330:			self.text.delnextword	#TODO tmux alternative
 		})
+
+	def add(self):
+		'''Add scrollable with overlay'''
+		super(TextOverlay,self).add()
+		self.parent.addScrollable(self.text)
+
+	def remove(self):
+		'''Pop scrollable on remove'''
+		super(TextOverlay,self).remove()
+		self.parent.popScrollable(self.text)
+
+	@asyncio.coroutine
+	def resize(self,newx,newy):
+		'''Adjust scrollable on resize'''
+		self.text.setwidth(newx)
 
 	def _input(self,chars):
 		'''
@@ -500,16 +420,6 @@ class TextOverlay(OverlayBase):
 
 	def _transformPaste(self,string):
 		return string
-
-	@asyncio.coroutine
-	def resize(self,newx,newy):
-		'''Adjust scrollable on resize'''
-		self.text.setwidth(newx)
-
-	def remove(self):
-		'''Pop scrollable on remove'''
-		super(TextOverlay,self).remove()
-		self.parent.popScrollable(self.text)
 
 	def controlHistory(self,history):
 		'''
@@ -1003,79 +913,20 @@ class DisplayOverlay(OverlayBase,Box):
 		if (self._numprompts <= maxlines): return
 		self.begin = min(max(0,self.begin+amount),maxlines-self._numprompts)
 
-class DisplayOverlayOld(OverlayBase,Box):
-	'''Overlay that displays a string in a box'''
-	def __init__(self,parent,string,outdent="",keepEmpty=False):
-		super(DisplayOverlay,self).__init__(parent)
-		self._string = string if isinstance(string,Coloring) else Coloring(string)
-		self.outdent = outdent
-		self.keepEmpty = keepEmpty
-
-		self.strings = \
-			self._string.breaklines(self.parent.x-2,outdent=outdent
-			,keepEmpty=keepEmpty)
-		self._numprompts = len(self.strings)
-		#bigger than the box holding it
-		if self._numprompts > self.parent.y-2:
-			self.replace = True
-		else:
-			self.replace = False
-
-		self.begin = 0	#begin from this prompt
-		up = staticize(self.scroll,-1,
-			doc="Scroll downward")
-		down = staticize(self.scroll,1,
-			doc="Scroll upward")
-		self._keys.update({
-			curses.KEY_UP:		up
-			,curses.KEY_DOWN:	down
-			,ord('k'):			up
-			,ord('j'):			down
-			,ord('q'):			quitlambda
-		})
-	
-	@asyncio.coroutine
-	def __call__(self,lines):
-		begin = (not self.replace and max((self.parent.y-2)//2 - \
-			 self._numprompts//2,0) ) or 0
-		i = 0
-		lines[begin] = self.box_top()
-		for i in range(min(self._numprompts,len(lines)-2)):
-			lines[begin+i+1] = self.box_part(self.strings[self.begin+i])
-		if self.replace:
-			while i < len(lines)-3:
-				lines[begin+i+2] = self.box_part("")
-				i+=1
-		lines[begin+i+2] = self.box_bottom()
-
-	@asyncio.coroutine
-	def resize(self,newx,newy):
-		self.strings = \
-			self._string.breaklines(self.parent.x-2,outdent=self.outdent
-			,keepEmpty=self.keepEmpty)
-		self._numprompts = len(self.strings)
-		#bigger than the box holding it
-		if self._numprompts > self.parent.y-2:
-			self.replace = True
-		else:
-			self.replace = False
-
-	def scroll(self,amount):
-		maxlines = self.parent.y-2
-		if (self._numprompts <= maxlines): return
-		self.begin = min(max(0,self.begin+amount),maxlines-self._numprompts)
-
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands'''
 	replace = False
 	history = History()	#global command history
+	#command containers
+	_commands = {}
+	_commandComplete = {}
 	def __init__(self,parent,caller = None):
 		super(CommandOverlay,self).__init__(parent)
 		self._sentinel = ord(CHAR_COMMAND)
 		self.caller = caller
 		self.text.setnonscroll(CHAR_COMMAND)
-		self.text.completer.addComplete(CHAR_COMMAND,_commands)
-		for i,j in _commandComplete.items():
+		self.text.completer.addComplete(CHAR_COMMAND,self._commands)
+		for i,j in self._commandComplete.items():
 			self.text.addCommand(i,j)
 		self.controlHistory(self.history)
 		self._keys.update({
@@ -1107,10 +958,10 @@ class CommandOverlay(TextOverlay):
 		args = escapeText(self.text)
 		self.history.append(self.text)
 
-		if args[0] not in _commands:
+		if args[0] not in self._commands:
 			self.parent.newBlurb("Command \"{}\" not found".format(args[0]))
 			return -1
-		command = _commands[args[0]]
+		command = self._commands[args[0]]
 		
 		@asyncio.coroutine
 		def runCommand():
@@ -1126,6 +977,21 @@ class CommandOverlay(TextOverlay):
 				perror(traceback.format_exc(),"\n")
 		self.parent.loop.create_task(runCommand())
 		return -1
+
+	#decorators for containers
+	@classmethod
+	def command(cls,commandname,complete=[]):
+		'''
+		Add function as a command `commandname` with argument suggestion `complete`
+		`complete` may either be a list or a function returning a list and a number
+		that specifies where to start the suggestion from
+		'''
+		def wrapper(func):
+			cls._commands[commandname] = func
+			if complete:
+				cls._commandComplete[commandname] = complete
+				
+		return wrapper
 
 class EscapeOverlay(OverlayBase):
 	'''Overlay for redirecting input after \ is pressed'''
@@ -1698,10 +1564,12 @@ class _NScrollable(ScrollSuggest):
 	A scrollable that expects a Main object as parent so that it 
 	can run Main.updateinput()
 	'''
-	def __init__(self,width,parent,index):
-		super(_NScrollable, self).__init__(width)
+	def __init__(self,parent):
+		super(_NScrollable, self).__init__(parent.x)
 		self.parent = parent
-		self.index = index
+		self._index = -1
+	def _setIndex(self,index):
+		self._index = index
 	def _onchanged(self):
 		super(_NScrollable, self)._onchanged()
 		self.parent.loop.create_task(self.parent.updateinput())
@@ -1711,6 +1579,7 @@ class _NScrollable(ScrollSuggest):
 class Main:
 	'''Main class; handles all IO and defers to overlays'''
 	last = 0
+	_afterDone = []
 	def __init__(self,loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		#general state
@@ -1867,16 +1736,16 @@ class Main:
 				ret.append(overlay)
 		return ret
 
-	def addScrollable(self):
+	def addScrollable(self,newScroll):
 		'''Add a new scrollable and return it'''
-		newScroll = _NScrollable(self.x,self,len(self._scrolls))
+		newScroll._setIndex(len(self._scrolls))
 		self._scrolls.append(newScroll)
 		self.loop.create_task(self.updateinput())
 		return newScroll
 
 	def popScrollable(self,which):
 		'''Pop a scrollable added from addScrollable'''
-		del self._scrolls[which.index]
+		del self._scrolls[which._index]
 		self.loop.create_task(self.updateinput())
 	#Loop Backend--------------------------------------------------------------
 	@asyncio.coroutine
@@ -1913,7 +1782,7 @@ class Main:
 		self._screen.nodelay(1)	#don't wait for enter to get input
 		self._screen.getch() #the first getch clears the screen
 
-		#escape has delay, not that this matters since I embed this in tmux
+		#escape has delay, not that this matters since I use tmux frequently
 		os.environ.setdefault("ESCDELAY", "25")
 		#pass in the control chars for ctrl-c and ctrl-z
 		self.loop.add_signal_handler(SIGINT,lambda: curses.ungetch(3))
@@ -1943,7 +1812,7 @@ class Main:
 			curses.endwin()
 			self.loop.remove_signal_handler(SIGINT)
 			self.loop.remove_signal_handler(SIGTSTP)
-			for i in _afterDone:
+			for i in self._afterDone:
 				yield from i
 			self.exited.set()
 
@@ -2006,21 +1875,34 @@ class Main:
 		if sum(in216) < 2 or sum(in216) > 34:
 			return rawNum(0)
 		return self._two56start + 16 + sum(map(lambda x,y: x*y,in216,[36,6,1]))
+	
+	@classmethod
+	def onDone(cls,func,*args):
+		'''
+		Add function or prepared coroutine to be run after the Main 
+		instance has shut down
+		'''
+		if asyncio.iscoroutinefunction(func):
+			raise Exception("Coroutine, not coroutine object, passed into onDone")
+		elif not asyncio.iscoroutine(func):
+			func = asyncio.coroutine(func)(*args)
+		cls._afterDone.append(func)
+		return func
 
-#display list of defined commands
-@command("help")
+@CommandOverlay.command("help")
 def listcommands(parent,*args):
+	'''Display a list of the defined commands and their docstrings'''
 	def select(self):
 		new = CommandOverlay(parent)
 		new.text.append(self.list[self.it])
 		self.swap(new)
 
-	commandsList = ListOverlay(parent,list(_commands))
+	commandsList = ListOverlay(parent,list(CommandOverlay._commands))
 	commandsList.addKeys({
 		"enter":select
 	})
 	return commandsList
 
-@command("q")
+@CommandOverlay.command("q")
 def quit(parent,*args):
 	parent.stop()
