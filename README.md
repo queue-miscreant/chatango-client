@@ -40,7 +40,8 @@ Dependencies:
 --------------------------
 * Python 3
 * Python ncurses (included on most distros, python cygwin)
-### Technically these are optional since you can change how they open  
+
+Technically these are optional since you can change how they open  
 * Feh image viewer
 * MPV
 
@@ -64,6 +65,7 @@ The following terminals are NOT supported or have restricted features:
 * Console2 (256 color mode)
 * cmd.exe (Doesn't support ANSI escapes)
 * Powershell (Same as cmd.exe)
+
 Testing limited:
 * PuTTY
 
@@ -202,7 +204,7 @@ Changelog
 * Reorganized client.py into its own package (i.e, client/)
 	* Improves readability, but cross imports seem... strange.
 * Instead of mainOverlay.display calculating from selector position, three variables are used to track selection
-	* Less same time-complexity, half the iterations
+	* Same time complexity, half the iterations
 * Moved link opening under client/, and builtins in chatango.py to the new file
 * I honestly don't know if this should constitute its own version number, but okay
 
@@ -289,7 +291,7 @@ Changelog
 
 ## v3.1	*2016/2/20*
 * Changed colorer arguments. Made client more generalized so that argument list is pulled from the bot.
-* Modified the name colorer to use intene colors on certain names. Should be easier to tell names apart
+* Modified the name colorer to use intense colors on certain names. Should be easier to tell names apart
 * Added chat filtering (space in F5 menu)
 	* Drawing filtered channels in the menu pending
 
@@ -300,9 +302,9 @@ Changelog
 
 ## v3.0	*2016/2/17*
 * Added channel support
-	* 	Packets sent to chatango were XOR encrypted, so this was a little difficult
+	* Packets sent to chatango were XOR encrypted, so this was a little difficult
 * Added channel selector (F5)
-	* 	Filters are still unimplemented
+	* Filters are still unimplemented
 * Doing that "import bot and get credentials" was a bad idea
 * Removed aux.py file; reformatted 
 * Added new coloring feature. Messages are now drawn in parts corresponding to color.
@@ -349,7 +351,7 @@ Changelog
 ## v1.4 *2015/11/12*
 * Added user display list (F3)
 * Reorganized program: extended chat bot now in its own file
-	* 	New container that handles relations between the class instead of tightly coupling them
+	* New container that handles relations between the class instead of tightly coupling them
 * Fixed bug where lines without spaces would cause an infinite loop
 * Fixed regexes to end links at newline or space
 * Reformatted color hash to give "friends" the color they wanted

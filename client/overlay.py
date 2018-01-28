@@ -6,7 +6,13 @@ system of overlays, pulling input from the topmost
 one. Output is not done with curses display, but various
 different stdout printing calls.
 '''
-#TODO	canscroll really means cangetmore, and locks when at the top and no more messages are retrieved
+#TODO
+#		I want to create an option to scroll up to a certain message being found
+#		However, current implementions rely on tracking total changes in messages.lines
+#		starting from the most recent message appended.
+#		A new type of storage needs to be made so that messages can display from __any__
+#		point in the Coloring array. This could even be expanded to display so that
+#		the topmost message is not the only one selected
 
 try:
 	import curses
@@ -21,12 +27,12 @@ from signal import SIGTSTP,SIGINT #redirect ctrl-z and ctrl-c
 from functools import partial
 from time import time,localtime,strftime as format_time
 from .display import *
-from .util import staticize,override,escapeText,History
+from .util import staticize,override,escapeText,History,perror
 
 __all__ =	["CHAR_COMMAND","soundBell","Box","OverlayBase","TextOverlay"
 			,"InputOverlay","ListOverlay","VisualListOverlay","ColorOverlay"
-			,"ColorSliderOverlay","ConfirmOverlay","BlockingOverlay"
-			,"CommandOverlay","MainOverlay","DisplayOverlay","Main"]
+			,"ColorSliderOverlay","ConfirmOverlay","CommandOverlay"
+			,"MainOverlay","DisplayOverlay","Main"]
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -564,7 +570,7 @@ class ListOverlay(OverlayBase,Box):
 			self._numentries = len(self.list)
 
 class VisualListOverlay(ListOverlay,Box):
-	'''Listoverlay with visual mode like in vim: can select multiple rows'''
+	'''ListOverlay with visual mode like in vim: can select multiple rows'''
 	replace = True
 
 	def __init__(self,parent,outList,drawOther = None,modes = [""]):
@@ -631,7 +637,7 @@ class ColorOverlay(ListOverlay,Box):
 	_COLOR_LIST = ["red","orange","yellow","light green","green","teal",
 		"cyan","turquoise","blue","purple","magenta","pink","color sliders"]
 
-	def __init__(self,parent,initcolor=None):
+	def __init__(self,parent,callback,initcolor=None):
 		self._spectrum = self._genspectrum()
 		super(ColorOverlay, self).__init__(parent,self._COLOR_LIST,
 				self.drawColors, self._SELECTIONS)
@@ -653,6 +659,18 @@ class ColorOverlay(ListOverlay,Box):
 				self.it = len(self._COLOR_LIST)-1
 			else:
 				self.it = len(self._COLOR_LIST)-1
+		self._callback = callback
+		self._keys.update({
+			9:		self._select	#tab
+			,10:	self._select	#enter
+			,32:	self._select	#space
+		})
+
+	def _select(self):
+		'''Open the sliders or run the callback with the selected color'''
+		if self.it == 12:
+			return self.openSliders()
+		return self._callback(self.getColor())
 
 	def drawColors(self,_,string,i):
 		#4 is reserved for color sliders
@@ -671,14 +689,11 @@ class ColorOverlay(ListOverlay,Box):
 
 	def getColor(self,typ = str):
 		which = self._spectrum[self.mode][self.it]
-		color = [int(i*255/5) for i in which] 
-		if typ is str:
-			return ''.join(['%02x' % i for i in color])
-		return color
+		return tuple(int(i*255/5) for i in which)
 
-	def openSliders(self,selectFunction):
-		furtherInput = ColorSliderOverlay(self.parent,self.initcolor)
-		furtherInput.addKeys({"enter": selectFunction})
+	def openSliders(self):
+		furtherInput = ColorSliderOverlay(self.parent,
+			self._callback,self.initcolor)
 		furtherInput.add()
 
 	@staticmethod
@@ -701,20 +716,26 @@ class ColorOverlay(ListOverlay,Box):
 
 		return [spectrum,shade,tint,grayscale]
 
+	@staticmethod
+	def toHex(color):
+		'''Get self.color in hex form'''
+		return ''.join([hex(i)[2:].rjust(2,'0') for i in color])
+
 class ColorSliderOverlay(OverlayBase,Box):
-	'''Display 3 bars for red, green, and blue. Allows exporting of color as hex'''
+	'''Display 3 bars for red, green, and blue.'''
 	replace = True
 	NAMES = ["Red","Green","Blue"]
-	def __init__(self,parent,initcolor = [127,127,127]):
+	def __init__(self,parent,callback,initcolor = [127,127,127]):
 		super(ColorSliderOverlay, self).__init__(parent)
 		#allow setting from hex value
-		if isinstance(initcolor,str):
-			self.setHex(initcolor)
-		else:
-			self.color = initcolor
+		if not (isinstance(initcolor,tuple) or isinstance(initcolor,list)):
+			raise TypeError("initcolor must be list or tuple")
+		self.color = list(initcolor)
 		self._rgb = 0
+		self._callback = callback
 		self._keys.update(
-			{ord('q'):		quitlambda
+			{10:			self._select
+			,ord('q'):		quitlambda
 			,ord('k'):		staticize(self.increment,1)
 			,ord('j'):		staticize(self.increment,-1)
 			,ord('l'):		staticize(self.chmode,1)
@@ -757,8 +778,10 @@ class ColorSliderOverlay(OverlayBase,Box):
 		lines[-5] = self.box_part(names) #4 lines
 		lines[-4] = self.box_part(vals) #3 line
 		lines[-3] = sep #2 lines
-		lines[-2] = self.box_part(self.getHex().rjust(int(wide*1.5)+3)) #1 line
+		lines[-2] = self.box_part(self.toHex(self.color).rjust(int(wide*1.5)+3)) #1
 		lines[-1] = self.box_bottom() #last line
+	def _select(self):
+		self._callback(tuple(self.color))
 	#predefined self-traversal methods
 	def increment(self,amt):
 		'''Increase the selected color by amt'''
@@ -766,12 +789,6 @@ class ColorSliderOverlay(OverlayBase,Box):
 	def chmode(self,amt):
 		'''Go to the color amt to the right'''
 		self._rgb = (self._rgb + amt) % 3
-	def getHex(self):
-		'''Get self.color in hex form'''
-		return ''.join([hex(i)[2:].rjust(2,'0') for i in self.color])
-	def setHex(self,hexstr):
-		'''Set self.color from hex'''
-		self.color = [int(hexstr[2*i:2*i+2],16) for i in range(3)]
 
 class InputOverlay(TextOverlay,Box):
 	'''Creates a future for the contents of a Scrollable input'''
@@ -1028,28 +1045,369 @@ class ConfirmOverlay(OverlayBase):
 		self.nomouse()
 		self.noalt()
 
-class BlockingOverlay(OverlayBase):
-	'''Block until any input is received'''
-	replace = False
-	def __init__(self,parent,confirmfunc,tag=""):
-		super(BlockingOverlay, self).__init__(parent)
-		self.tag = tag
-		def callback(*args):
-			if asyncio.iscoroutine(confirmfunc):
-				self.parent.loop.create_task(confirmfunc)
-			else:
-				self.parent.loop.call_soon(confirmfunc)
-			return -1
-		self._keys.update({-1: callback})
-		self.nomouse()
-		self.noalt()
+class NewMessages:
+	'''Container object for message objects'''
+	_INDENT = "    "
+	def __init__(self,parent):
+		self.clear()
+		self.parent = parent
+		
+	def clear(self):
+		'''Clear all lines and messages'''
+		self.canselect = True
+		self.allMessages = []	#contains every message as 4-lists of Coloring
+								#objects, arg tuples, message length since last
+								#break, and message ID
+		self.lines = []			#contains every line currently or recently
+								#involved in drawing
+		self.msgID = 0			#next message id
+		#selectors
+		self.selector = 0		#selected message
+		self.startheight = 0	#to calculate which message we're drawing from
+								#so that selected can be seen relative to it
+		self.linesup = 0		#start drawing from this lines index (reversed)
+		self.distance = 0		#number of lines down from startheight's message
+		self.innerheight = 0	#inner message height, to start drawing message
+								#lines late
+		#lazy storage
+		self.lazyColorUp = -1	#latest message id to which coloring was applied
+		self.lazyColorDown = -1	#most recent message id //
+		
+		self.lazyFiltUp = -1	#latest message id to which filters were applied
+		self.lazyFiltDown = -1	#most recent message id //
+		#deletion lambdas
+		self.lazyDelete = []
 
-	def add(self):
-		if self.tag:
-			for i in self.parent.getOverlaysByClassName(type(self).__name__):
-				#don't add overlays with the same tag
-				if i.tag == self.tag: return
-		super(BlockingOverlay, self).add()
+	def dump(self):
+		perror("selector, startheight: %d,%d"%(self.selector,self.startheight))
+		perror("linesup, distance: %d,%d"%(self.linesup,self.distance))
+
+	def stopSelect(self):
+		'''Stop selecting'''
+		if self.selector:
+			self.selector = 0
+			self.linesup = 0
+			self.innerheight = 0
+			self.distance = 0
+			self.startheight = 0
+			return 1
+
+	def getselected(self):
+		'''
+		Frontend for getting the selected message. Returns a 4-list:
+		[0]: the message (in a coloring object); [1] an argument tuple, which
+		is None for system messages; [2] the number of lines it occupies;
+		[3]: its messageID
+		returns False on not selecting
+		'''
+		if self.selector:
+			return self.allMessages[-self.selector]
+		return False
+
+	def display(self,lines):
+		if self.msgID == 0: return
+		#seperate traversals
+		selftraverse,linetraverse = -1,-2
+		lenself, lenlines = len(self.lines),len(lines)
+		msgno = 1
+		#go backwards by default
+		direction = -1
+		#if we need to go forwards
+		if self.linesup:
+			direction = 1
+			msgno = self.startheight
+			selftraverse,linetraverse = -self.linesup+self.innerheight,-lenlines
+			lenself, lenlines = -1,-2
+
+		thismsg = self.allMessages[-msgno][2] - self.innerheight
+		#traverse list of lines
+		while (selftraverse*direction) <= lenself and \
+		(linetraverse*direction) <= lenlines:
+			reverse = (msgno == self.selector) and SELECT_AND_MOVE or ""
+			lines[linetraverse] = reverse + self.lines[selftraverse]
+			selftraverse += direction
+			linetraverse += direction
+			thismsg -= 1
+			while not thismsg:
+				msgno -= direction
+				if msgno <= len(self.allMessages):
+					thismsg = self.allMessages[-msgno][2]
+				else:
+					break
+
+	def scroll(self,step):
+		'''Select message. Only use step values of 1 and -1'''
+		#TODO probably can split this into selectup and selectdown with all the step-dependent code now
+		#screw WETness
+		if step-1 and not self.selector: return 0
+		select = self.selector+step
+		addlines = 0
+		#get the next message, applying colors/filters as appropriate
+		while not addlines and select <= len(self.allMessages):
+			message = self.allMessages[-select]
+
+			#TODO set msg[2] with this so that `isvisible` is unneeded
+			#test filter
+			#TODO Lazies
+			isvisible = ((message[1] is None) or \
+				not self.parent.filterMessage(*message[1]))
+
+			if isvisible:
+				addlines = message[2]*step
+			select += step
+
+		nextLines = self.linesup + addlines
+		select -= step
+
+		#don't try adjusting linesup
+		if not self.startheight: nextLines = 0
+
+		#we're too far down/up, append a message 				#next line OOB
+		if (nextLines < 0 or nextLines > len(self.lines)) and \
+		(select <= len(self.allMessages) and select > 0):		#message exists
+			message = self.allMessages[-select]
+			#break the message
+			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
+			addlines = len(new)
+			message[2] = addlines
+			#append or prepend
+			if step + 1:
+				#remember, this is selecting downward when the next line is OOB
+				self.distance = self.parent.parent.y	#force startheight/height
+				self.lines.extend(new)
+			else:
+				self.startheight = select
+				self.lines[0:0] = new
+		else:
+			#the next section of code makes this valid regardless
+			self.distance += addlines
+			if step-1:
+				self.distance += self.allMessages[-self.selector][2]-addlines
+		
+		#adjust linesup/startheight
+		if step-1 and self.distance >= self.parent.parent.y-1:
+			#adjust the startheight
+			lines = -addlines - self.allMessages[-self.startheight][2] + self.innerheight
+			while lines > 0:
+				self.startheight -= 1
+				lines -= self.allMessages[-self.startheight][2]
+			self.startheight -= 1
+			self.innerheight = -lines	#adjust for lines gone too far
+			self.distance = self.parent.parent.y + addlines - 1
+		elif step+1 and self.selector and self.selector == self.startheight:
+			self.distance = 0
+			self.innerheight = 0
+			self.startheight = select
+		elif not self.startheight and self.distance == self.parent.parent.y-1:
+			#translate from drawing normal to drawing up
+			self.linesup = self.distance-1
+			self.startheight = select
+			self.distance = 0
+			self.innerheight = 0
+		else:
+			addlines = 0
+
+		#if we're even "going" anywhere
+		if (select - self.selector):
+			self.selector = max(0,select)
+			self.linesup += addlines
+			if not self.selector:
+				self.linesup = 0
+				self.innerheight = 0
+				self.distance = 0
+				self.startheight = 0
+
+#		self.dump()
+
+		return addlines	#TODO lines of the message, not lines shifted?
+
+	def iterateWith(self,callback):
+		'''
+		An iterator that yields when the callback is true.
+		Callback is called with arguments passed into append (or msgPost...)
+		'''
+		select = 1
+		while select <= len(self.allMessages):
+			message = self.allMessages[-select]
+			#ignore system messages
+			if message[1] and callback(*message[1]):
+				yield message[0],select
+			select += 1
+
+	def append(self,message,args = None):
+		'''Add new message to the end of allMessages and lines'''
+		#undisplayed messages have length zero
+		msg = [message,args,0,self.msgID]
+		self.msgID += 1
+		self.allMessages.append(msg)
+		#before we filter it
+		self.selector += (self.selector>0)
+		#TODO
+		#is this really necessary? if I build a function that selects and modifies lines
+		#accordingly, then it'll hit the bottom of allMessages and not access linesup/startheight
+		if self.linesup < self.parent.parent.y-1:
+			self.startheight += (self.startheight>0)
+			return msg[-1]
+		#run filters
+		if (args is not None) and self.parent.filterMessage(*args):
+			return msg[-1]
+		new = message.breaklines(self.parent.parent.x,self._INDENT)
+		self.lines.extend(new)
+		msg[2] = len(new)
+		#keep the right message selected
+		if self.selector:
+			self.linesup += msg[2]
+		return msg[-1]
+
+	def prepend(self,message,args = None):
+		'''Prepend new message. Use msgPrepend instead'''
+		#run filters early so that the message can be selected up to properly
+		dummyLength = not self.parent.filterMessage(*args) if args is not None else 1
+		msg = [message, args, dummyLength, self.msgID]
+		self.msgID += 1
+		self.allMessages.insert(0,msg)
+		#we actually need to draw it
+		#(like for adding historical messages chronologically while empty)
+		if dummyLength and self.linesup < (self.parent.parent.y-1):
+			new = message.breaklines(self.parent.parent.x,self._INDENT)
+			self.lines[0:0] = new
+			msg[2] = len(new)
+
+		return msg[-1]
+
+	def delete(self,result,test=lambda x,y: x[3] == y):
+		'''Delete message from value result and callable test'''
+		nummsg = 1
+		if not callable(test):
+			raise TypeError("Messages.delete requires callable")
+		#if all messages are length 1, then that's our maximum tolerance
+		#for laziness
+		bound = min(self.parent.parent.y-1,len(self.allMessages))
+		#selecting up too high
+		if self.linesup-self.innerheight >= bound:
+			bound = self.selector
+			
+		while nummsg <= bound:
+			if (test(self.allMessages[-nummsg],result)):
+				del self.allMessages[-nummsg]
+			nummsg += 1
+
+		self.lazyDelete.append(test,result)
+
+	def getMessageFromPosition(self,x,y):
+		'''Get the message and depth into the string at position x,y'''
+		if y >= self.parent.parent.y-1: return "",-1
+		#go up or down
+		direction = 1
+		msgNo = 1
+		height = 0
+		if self.linesup < self.parent.parent.y-1:
+			#"height" from the top
+			y = self.parent.parent.y - 1 - y
+		else:
+			direction = -1
+			msgNo = self.selector
+			y = y + 1
+		#find message until we exceed the height
+		msg = self.allMessages[-msgNo]
+		while height < y:
+			msg = self.allMessages[-msgNo]
+			height += msg[2]
+			#advance the message number, or return if we go too far
+			msgNo += direction
+			if msgNo > len(self.allMessages):
+				return "",-1
+
+		#for at the bottom (drawing up) line depth is simply height-y
+		depth = height-y + self.innerheight
+		firstLine = height 
+		
+		#for drawing down, we're going backwards, so we have to subtract msg[2]
+		if direction-1:
+			depth = msg[2] - depth - 1
+			firstLine = msg[2] + self.linesup - height
+
+		#adjust the position
+		pos = 0
+		for i in range(depth):
+			#only subtract from the length of the previous line if it's not the first one
+			pos += numdrawing(self.lines[i-firstLine]) - (i and len(self._INDENT))
+		if x >= collen(self._INDENT) or not depth:
+			#try to get a slice up to the position 'x'
+			pos += numdrawing(self.lines[depth-firstLine],x)
+			
+		return msg,pos
+
+	#REAPPLY METHODS-----------------------------------------------------------
+	@asyncio.coroutine
+	def redolines(self, width = None, height = None):
+		'''
+		Redo lines, if current lines does not represent the unfiltered messages
+		or if the width has changed
+		'''
+		if width is None: width = self.parent.parent.x
+		if height is None: height = self.parent.parent.y
+		#TODO reformat this for variable-size lines
+		#algorithm basics:
+		#start with the currently selected message
+		#try to select upward until startheight
+		#if it's out of bounds according to the current height
+		#adjust linesup/distance
+		#---OR---
+		#set startheight to selector, distance to 0
+		#start appending messages downward
+		#
+		newlines = []
+		numup,nummsg = 0,1
+		#while there are still messages to add (to the current height)
+		#feels dirty and slow, but this will also resize all messages below
+		#the selection
+		while (nummsg <= self.selector or numup < height) and \
+		nummsg <= len(self.allMessages):
+			i = self.allMessages[-nummsg]
+			#check if the message should be drawn
+			if (i[1] is not None) and self.parent.filterMessage(*i[1]):
+				i[2] = 0
+				nummsg += 1
+				continue
+			new = i[0].breaklines(width,self._INDENT)
+			newlines[0:0] = new
+			i[2] = len(new)
+			numup += i[2]
+			if nummsg == self.selector: #invalid always when self.selector = 0
+				self.linesup = numup
+			nummsg += 1
+		#nummsg starts at 1, so to compare with allMessages, 1 less
+		self.lastFilter = -1	if nummsg-1 == len(self.allMessages) \
+								else self.allMessages[-nummsg][3]
+		self.lines = newlines
+		self.canselect = True
+
+	@asyncio.coroutine
+	def recolorlines(self):
+		#TODO reformat this for variable-size lines
+		#start with startheight (it's being at least partially drawn anyway
+		#draw until distance (not self.distance) exceeds `height`
+		'''Re-apply parent's colorizeMessage and redraw all visible lines'''
+		width = self.parent.parent.x
+		height = self.parent.parent.y
+		newlines = []
+		numup,nummsg = 0,1
+		while (numup < height or nummsg <= self.selector) and \
+		nummsg <= len(self.allMessages):
+			i = self.allMessages[-nummsg]
+			if i[1] is not None:	#don't decolor system messages
+				i[0].clear()
+				self.parent.colorizeMessage(i[0],*i[1])
+			nummsg += 1
+			if i[2]: #unfiltered (non zero lines)
+				new = i[0].breaklines(width,self._INDENT)
+				newlines[0:0] = new
+				i[2] = len(new)
+				numup += i[2]
+		self.lastRecolor = -1	if nummsg-1 == len(self.allMessages) \
+								else self.allMessages[-nummsg][3]
+		self.lines = newlines
 
 class Messages:
 	'''Container object for message objects'''
@@ -1156,7 +1514,7 @@ class Messages:
 				message[2] = ((message[1] is None) or \
 					not self.parent.filterMessage(*message[1]))
 				if select < len(self.allMessages):
-					self.lastFilter = self.allMessages[-select-1][3]
+					self.lastFilter = self.allMessages[-select-step][3]
 				else:
 					self.lastFilter = -1
 
@@ -1165,11 +1523,11 @@ class Messages:
 				if (message[1] is not None):
 					self.parent.colorizeMessage(message[0],*message[1])
 				if select < len(self.allMessages):
-					self.lastRecolor = self.allMessages[-select-1][3]
+					self.lastRecolor = self.allMessages[-select-step][3]
 				else:
 					self.lastRecolor = -1
 
-			#adjust linesup if scrolling down
+			#adjust linesup if scrolling up
 			if step > 0 and message[2]:
 				#for formerly invisible messages
 				self.linesup += message[2]	#'go up' if unfiltered
@@ -1427,7 +1785,6 @@ class MainOverlay(TextOverlay):
 		if self._pushtimes:
 			#finish running the task
 			self._pushtimes = False
-#			self.parent.loop.call_soon(self._pushTask.cancel)
 			self._pushTask.cancel()
 		if not self.index:
 			self.parent.active = False
@@ -1496,10 +1853,11 @@ class MainOverlay(TextOverlay):
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _maxselect(self):
 		soundBell()
+		self.canselect = 0
 
 	def selectup(self):
 		'''Select message up'''
-		if not self.canselect: return 1
+		if not self.messages.canselect: return 1
 		#go up the number of lines of the "next" selected message
 		upmsg = self.messages.scroll(1)
 		#but only if there is a next message
@@ -1508,7 +1866,7 @@ class MainOverlay(TextOverlay):
 
 	def selectdown(self):
 		'''Select message down'''
-		if not self.canselect: return 1
+		if not self.messages.canselect: return 1
 		#go down the number of lines of the currently selected message
 		self.messages.scroll(-1)
 		if not self.messages.selector:
@@ -1855,26 +2213,34 @@ class Main:
 		'''Turn the mouse on or off'''
 		return curses.mousemask(state and _MOUSE_MASK)
 
-	def get256color(self,color):
+	def get256color(self,color,green=None,blue=None):
 		'''
 		Convert a hex string to 256 color variant or get
 		color as a pre-caluclated number from `color`
-		Raises DisplayException if not running in 256 color mode
+		Returns rawNum(0) if not running in 256 color mode
 		'''
-		if not self._two56: raise DisplayException("Not running in 256 color mode")
+		if not self._two56: return rawNum(0)
 
 		if isinstance(color,int):
 			return self._two56start + color
+		elif isinstance(color,float):
+			raise TypeError("cannot call get256color with float")
 			
-		if color is None or len(color) < 3 or len(color) % 3:
+		if color is not None and green is not None and blue is not None:
+			color = (color,green,blue) 
+		elif not color:			#empty string
 			return rawNum(0)
-		partsLen = len(color)//3
-		in216 = [int(int(color[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))
-			 for i in range(3)]
-		#too white or too black
-		if sum(in216) < 2 or sum(in216) > 34:
+		
+		try:
+			partsLen = len(color)//3
+			in216 = [int(int(color[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))
+				 for i in range(3)]
+			#too white or too black
+			if sum(in216) < 2 or sum(in216) > 34:
+				raise AttributeError
+			return self._two56start + 16 + sum(map(lambda x,y: x*y,in216,[36,6,1]))
+		except (AttributeError,TypeError):
 			return rawNum(0)
-		return self._two56start + 16 + sum(map(lambda x,y: x*y,in216,[36,6,1]))
 	
 	@classmethod
 	def onDone(cls,func,*args):
@@ -1883,7 +2249,7 @@ class Main:
 		instance has shut down
 		'''
 		if asyncio.iscoroutinefunction(func):
-			raise Exception("Coroutine, not coroutine object, passed into onDone")
+			raise TypeError("Coroutine, not coroutine object, passed into onDone")
 		elif not asyncio.iscoroutine(func):
 			func = asyncio.coroutine(func)(*args)
 		cls._afterDone.append(func)

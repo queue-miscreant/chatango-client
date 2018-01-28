@@ -8,20 +8,26 @@ by those versions.
 '''
 #TODO	better modtools
 #TODO	property docstrings
-#TODO	I have no idea why, but PMs are failing in all implementations.
-#		Attempts to connect via websockets in a browser console also failed
-#		abandoning attempts to fix for a while
+#TODO	After playing around with nmap, I found that sockets to the private message
+#		service are open on c1.chatango.com:5222 (not 8080 as protocol upgrade
+#		requests from HTTP are made)
+#TODO	Rename lastResponse and _last in GroupProtocol
 #
+#		when receiving "track" commands in private messages, each "track" download
+#		is followed like a `getblock` command
+#		
+#		pending checking if `getblock` is "get tracking block" or "get blocklist" (which is null)
+
 ################################
 #Python Imports
 ################################
-import os
 import random
 import re
 import urllib.request
 import asyncio
 import time
-from client import perror
+from os.path import basename
+from socket import gaierror
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
@@ -72,6 +78,17 @@ class Post:
 	Post objects have support for channels and formatting parsing
 	'''
 	def __init__(self, raw, msgtype):
+		if msgtype == 2:
+			self.user = raw[0]
+			self.time = float(raw[3])
+			self.post = formatRaw(':'.join(raw[5:]))
+			self.nColor = ''
+			self.fColor = ''
+			self.fSize = 12
+			self.fFace = 0
+			self.channel = 0
+			return
+
 		self.time = float(raw[0])
 		self.uid = raw[3]
 		self.unid = raw[4]
@@ -96,6 +113,12 @@ class Post:
 				self.fColor = ''
 				self.fSize = 12
 			self.fFace = int(tag.group(5) or 0)
+		else:
+			self.nColor = ''
+			self.fColor = ''
+			self.fSize = 12
+			self.fFace = 0
+
 		#user parsing
 		user = raw[1].lower()
 		if not user:
@@ -143,12 +166,12 @@ class _Generate:
 			if gw >= num2:
 				return i
 
-	def pmAuth(self):
+	def pmAuth(username,password):
 		'''Request auth cookie for PMs'''
 		login = urllib.request.urlopen("http://chatango.com/login",
 			  data = urllib.parse.urlencode({
-				 "user_id":		self.username
-				,"password":	self.password
+				 "user_id":		username
+				,"password":	password
 				,"storecookie":	"on"
 				,"checkerrors":	"yes" 
 				}).encode())
@@ -178,7 +201,7 @@ class _Multipart(urllib.request.Request):
 					v[1].close()
 					#then set the filename to filename
 					multiform.append((self.DISPOSITION % k) + \
-						"; filename=\"%s\"" % os.path.basename(v[1].name))
+						"; filename=\"%s\"" % basename(v[1].name))
 					multiform.append("Content-Type: %s" % v[0])
 				except AttributeError as ae:
 					raise ValueError("expected file-like object") from ae
@@ -273,6 +296,7 @@ class ChatangoProtocol(asyncio.Protocol):
 			yield from asyncio.sleep(self._pingDelay)
 		self._transport.close()
 
+	"""
 	@asyncio.coroutine
 	def _recv_premium(self, args):
 		'''Receive premium command. Called for both PM and Group'''
@@ -283,6 +307,7 @@ class ChatangoProtocol(asyncio.Protocol):
 			if self._storage._messageRecord: self.setRecordingMode(1)
 		else:
 			self._storage._premium = False
+	"""
 
 class GroupProtocol(ChatangoProtocol):
 	'''Protocol interpreter for Chatango group commands'''
@@ -501,6 +526,116 @@ class GroupProtocol(ChatangoProtocol):
 		'''Request updated banlist (Mod)'''
 		self.sendCommand("blocklist", "block", "", "next", "500")
 
+class PMProtocol(ChatangoProtocol):
+	'''Protocol interpreter for Chatango private message commands'''
+	def __init__(self, manager, authkey, loop=None):
+		super(PMProtocol,self).__init__(manager,Privates(self),loop=loop)
+		self.authkey = authkey
+
+	def connection_made(self, transport):
+		'''Begins communication with and connects to the PM server'''
+		#if i cared, i'd put this property-setting in a super method
+		self._transport = transport
+		self.connected = True
+		self.lastResponse = self._loop.time()
+		#TODO session id is part of what gets sent to tlogin
+		self.sendCommand("tlogin",self.authKey,firstcmd = True)
+
+	def _recv_seller_name(self,*args):
+		#seller_name returns two arguments: the session id called with tlogin and
+		#the username; neither of these are important except as a sanity check
+		pass
+
+	@asyncio.coroutine
+	def _recv_OK(self,*args):
+		self.callEvent("onPMConnect")
+		self.sendCommand("settings")
+		self.sendCommand("wl")	#friends list
+		self._pingTask = self._loop.create_task(self.ping())
+
+	@asyncio.coroutine
+	def _recv_msg(self,args):
+		post = Post(args,2)
+		self.callEvent("onPrivateMessage", post, False)
+
+	@asyncio.coroutine
+	def _recv_msgoff(self,args):
+		post = Post(args,2)
+		self.callEvent("onPrivateMessage", post, True)
+
+	@asyncio.coroutine
+	def _recv_wl(self,args):
+		'''Received friends list (watch list)'''
+		self._storage._watchList = {}
+		it = iter(args)
+		try:
+			for i in it:
+				#username
+				self._storage._watchList[i] = \
+					(float(next(it))			#last message
+					,next(it))					#online/offline/app
+				next(it)						#lagging 0
+		except StopIteration: pass
+		self.callEvent("onWatchList")
+
+	@asyncio.coroutine
+	def _recv_track(self,args):
+		'''Received tracked user'''
+		#0: username
+		#1: time last online
+		#2: online/offline/app
+		track = self._storage._trackList
+		track[args[0]] = (float(args[1]),args[2])
+		self.callEvent("onTrack")
+
+	@asyncio.coroutine
+	def _recv_connect(self,args):
+		'''Received check online'''
+		#TODO:
+		#0:	username
+		#1:	last message time
+		#2:	online/offline/app/invalid (not a real person or is a group)
+
+	@asyncio.coroutine
+	def _recv_wladd(self,args):
+		'''Received addition to watch list'''
+		#0:	username
+		#1:	online/offline/app
+		#2:	last message time
+		self._storage._watchList[args[0]] = \
+			(float(args[2])
+			,args[1])
+		self.callEvent("onWatchListUpdate")
+		
+	@asyncio.coroutine
+	def _recv_wldelete(self,args):
+		'''Received deletion from watch list'''
+		#0:	username
+		#1:	'deleted'
+		#2:	0
+		if self._storage._watchList.get(args[0]):
+			del self._storage._watchList[args[0]]
+		self.callEvent("onWatchListUpdate")
+
+	@asyncio.coroutine
+	def _recv_status(self,args):
+		'''Received status update'''
+		#0: username
+		#1: last time online
+		#2:	online/offline/app
+		#update watch
+		if self._storage._watchList.get(args[0]):
+			self._storage._watchList[args[0]] = \
+				(float(args[1])
+				,args[2])
+			self.callEvent("onWatchListUpdate")
+		#update track
+		if self._storage._trackList.get(args[0]):
+			self._storage._trackList[args[0]] = \
+				(float(args[1])
+				,args[2])
+			self.callEvent("onTrack")
+
 class Connection:
 	'''Virtual class for storing responses from protocols'''
 	def __init__(self, protocol):
@@ -662,6 +797,24 @@ class Group(Connection):
 		if user in self._mods: return 1
 		return 0
 
+class Privates(Connection):
+	'''
+	Class representing high-level private message communication and storage
+	'''
+	def __init__(self,protocol):
+		super(Privates,self).__init__(protocol)
+
+		self._watchList = {}	#analogous to a friends list, but not mutual
+		self._trackList = {}	#dict of users to whom `track` has been issued
+
+	def sendPost(self,user,post,html=False):
+		if not html:
+			#replace HTML equivalents
+			for i,j in reversed(HTML_CODES):
+				post = post.replace(j,i)
+			post = post.replace('\n',"<br/>")
+		self._protocol.sendCommand("msg",user,"<m>{}</m>".format(post))
+
 def _connectionLostHandler(loop,context):
 	failedProtocol = context.get("protocol")
 	if isinstance(failedProtocol,ChatangoProtocol):
@@ -674,9 +827,12 @@ class Manager:
 	Factory that creates and manages connections to chatango.
 	This class also propogates all events from groups
 	'''
-	def __init__(self, username, password, loop=None):
+	def __init__(self, username, password, PMs = False, loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		self._groups = []
+		self.PMs = None
+		if PMs:
+			self.loop.create_task(self.joinPMs())
 		self.username = username
 		self.password = password
 		
@@ -687,6 +843,8 @@ class Manager:
 		for i in self._groups:
 			#disconnect (and cancel all ping tasks)
 			self.loop.run_until_complete(i._protocol.disconnect())
+		if self.PMs is not None:
+			self.PMs._protocol.disconnect()
 
 	@asyncio.coroutine
 	def joinGroup(self, groupName, port=443):
@@ -694,17 +852,22 @@ class Manager:
 		groupName = groupName.lower()
 
 		server = _Generate.serverNum(groupName)
-		if server is None: raise Exception("Malformed room token: " + room)
+		if server is None: raise ValueError("malformed room token " + room)
 
 		#already joined group
 		if groupName != self.username and groupName not in self._groups:
-			ret = GroupProtocol(groupName, self)
-			yield from self.loop.create_connection(lambda: ret,
-				"s{}.chatango.com".format(server), port)
-			self._groups.append(ret._storage)
-			return ret._storage
+			try:
+				ret = GroupProtocol(groupName, self)
+				yield from self.loop.create_connection(lambda: ret,
+					"s{}.chatango.com".format(server), port)
+				self._groups.append(ret._storage)
+				return ret._storage
+			except gaierror as e:
+				raise ConnectionError("could not connect to group server") from e
+		elif groupName == self.username:
+			self.joinPMs()
 		else:
-			raise Exception("Attempted to join group multiple times")
+			raise ValueError("Attempted to join group multiple times")
 
 	@asyncio.coroutine
 	def leaveGroup(self, groupName):
@@ -719,11 +882,30 @@ class Manager:
 			self._groups.pop(index)
 
 	@asyncio.coroutine
+	def joinPMs(self, port=5222):
+		if self.PMs is None:
+			try:
+				authkey = _Generate.pmAuth(self.username,self.password)
+				ret = PMProtocol(self,authkey)
+				yield from self.loop.create_connection(lambda: ret,
+					"c1.chatango.com",port)
+				self.PMs = ret._storage
+			except gaierror as e:
+				raise ConnectionError("could not connect to PM server") from e
+
+	@asyncio.coroutine
+	def leavePMs(self):
+		if self.PMs is not None:
+			yield from self.PMs._protocol.disconnect()
+			self.PMs = None
+
+	@asyncio.coroutine
 	def leaveAll(self):
-		'''Disconnect from all groups'''
+		'''Disconnect from all groups and PMs'''
 		for group in self._groups:
 			yield from group._protocol.disconnect()
 		self._groups.clear()
+		yield from self.leavePMs()
 
 	def uploadAvatar(self, location):
 		'''Upload an avatar with path `location`'''

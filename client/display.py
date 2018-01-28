@@ -5,7 +5,6 @@ Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
 generic string containers.
 '''
-#TODO move stuff that's independent to its own package
 import sys
 import re
 from shlex import shlex
