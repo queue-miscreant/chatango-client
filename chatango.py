@@ -432,6 +432,8 @@ class ListMuxer:
 		@staticmethod
 		def stringDrawer(mux,value,coloring):
 			'''Default string drawer'''
+			#TODO don't draw string if it exceeds some threshold,
+			#like half of the length of the list entry (= mux.parent.parent.x-2)
 			val = str(value)
 			startpos = -len(val)
 			coloring[:startpos]+val
@@ -490,8 +492,8 @@ def fontsize(context):
 def _(context,value):
 	context.bot.creds["formatting"][3] = FONT_SIZES[value]
 
+#options mux
 options = ListMuxer()
-
 @options.listel("bool")
 def mouse(context):
 	"Mouse:"

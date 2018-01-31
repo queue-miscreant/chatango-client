@@ -1070,17 +1070,16 @@ class NewMessages:
 		self.innerheight = 0	#inner message height, to start drawing message
 								#lines late
 		#lazy storage
-		self.lazyColorUp = -1	#latest message id to which coloring was applied
-		self.lazyColorDown = -1	#most recent message id //
-		
-		self.lazyFiltUp = -1	#latest message id to which filters were applied
-		self.lazyFiltDown = -1	#most recent message id //
+		self.lazyColor	= [-1,-1] #latest/earliest messages to recolor
+		self.lazyFilter = [-1,-1] #latest/earliest messages to refilter
+
 		#deletion lambdas
 		self.lazyDelete = []
 
 	def dump(self):
 		perror("selector, startheight: %d,%d"%(self.selector,self.startheight))
 		perror("linesup, distance: %d,%d"%(self.linesup,self.distance))
+		perror("innerheight: %d"%(self.innerheight))
 
 	def stopSelect(self):
 		'''Stop selecting'''
@@ -1107,54 +1106,172 @@ class NewMessages:
 	def display(self,lines):
 		if self.msgID == 0: return
 		#seperate traversals
-		selftraverse,linetraverse = -1,-2
-		lenself, lenlines = len(self.lines),len(lines)
-		msgno = 1
-		#go backwards by default
-		direction = -1
-		#if we need to go forwards
-		if self.linesup:
-			direction = 1
-			msgno = self.startheight
-			selftraverse,linetraverse = -self.linesup+self.innerheight,-lenlines
-			lenself, lenlines = -1,-2
+		selftraverse,linetraverse = -self.linesup-1,-2
+		lenself, lenlines = -len(self.lines),-len(lines)
+		msgno = -self.startheight-1
 
-		thismsg = self.allMessages[-msgno][2] - self.innerheight
+		thismsg = self.allMessages[msgno][2] - self.innerheight
 		#traverse list of lines
-		while (selftraverse*direction) <= lenself and \
-		(linetraverse*direction) <= lenlines:
-			reverse = (msgno == self.selector) and SELECT_AND_MOVE or ""
+		while selftraverse >= lenself and linetraverse >= lenlines:
+			reverse = (msgno == -self.selector) and SELECT_AND_MOVE or ""
 			lines[linetraverse] = reverse + self.lines[selftraverse]
-			selftraverse += direction
-			linetraverse += direction
+
+			selftraverse -= 1
+			linetraverse -= 1
 			thismsg -= 1
 			while not thismsg:
-				msgno -= direction
-				if msgno <= len(self.allMessages):
-					thismsg = self.allMessages[-msgno][2]
+				msgno -= 1
+				if msgno >= -len(self.allMessages):
+					thismsg = self.allMessages[msgno][2]
 				else:
 					break
 
+	def applyLazies(self,select,direction):
+		'''
+		Generator that yields on application of lazy iterators to mesages
+		The value yielded corresponds to the kind of lazy operation performed
+		0:	deletion
+		1:	filtering
+		2:	coloring
+		'''
+		#test all lazy deleters
+		message = self.allMessages[-select]
+
+		for test,result in self.lazyDelete:
+			if test(message,result):
+				del self.allMessages[-select]
+				#run this test once
+				nextoob = select+direction >= len(self.allMessages)
+				if message[3] == self.lazyFilter[direction == 1]:
+					self.lazyFilter[direction == 1] = nextoob and -1 or \
+						self.allMessages[-select-direction]
+
+				if message[3] == self.lazyColor[direction == 1]:
+					self.lazyColor[direction == 1] = nextoob and -1 or \
+						self.allMessages[-select-direction]
+
+				return 0
+
+		nextoob = select+direction >= len(self.allMessages)
+		#lazy filters
+		#upward is direction of 1, meaning that earlier messages are the second element of the list
+		if message[3] == self.lazyFilter[direction == 1]:
+			#use a dummy length to signal that the message should be drawn
+			message[2] = ((message[1] is None) or \
+				not self.parent.filterMessage(*message[1]))
+
+			self.lazyFilter[direction == 1] = nextoob and -1 or \
+				self.allMessages[-select-direction]
+
+		if message[3] == self.lazyColor[direction == 1]:
+			#ignore system
+			if (message[1] is not None):
+				self.parent.colorizeMessage(message[0],*message[1])
+
+			self.lazyColor[direction == 1] = nextoob and -1 or \
+				self.allMessages[-select-direction]
+
+		return message[2]
+		
+	def scrollup(self):
+		select = self.selector+1
+		addlines = 0
+		while not addlines and select <= len(self.allMessages):
+			addlines = self.applyLazies(select,1)
+			select += 1
+
+		nextPos = (self.linesup + self.distance + addlines)
+		#next message out of bounds and select refers to an actual message
+		if nextPos > len(self.lines) and select <= len(self.allMessages):
+			message = self.allMessages[-select]
+			#break the message, then add at the beginning
+			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
+			addlines = len(new)
+			message[2] = addlines
+			#append or prepend
+			self.lines[0:0] = new
+			#TODO very large messages should enter drawing with linesup from the bottom
+
+		self.distance += addlines
+
+		#can only make sense when the client properly handles variables right
+		#so checking validity is futile
+		if self.distance > self.parent.parent.y-1:
+			#get a delta from the top, just in case we aren't there already
+			needToAdd = self.distance - self.parent.parent.y+1
+			linesleft = needToAdd - self.allMessages[-self.startheight-1][2] +\
+				self.innerheight
+			if linesleft:
+				while linesleft > 0:
+					self.startheight += 1
+					linesleft -= self.allMessages[-self.startheight-1][2]
+			else:
+				self.startheight += 1
+
+			self.distance = self.parent.parent.y-1
+			self.linesup += needToAdd
+			self.innerheight = -linesleft
+
+		self.selector = select - 1
+
+		self.dump()
+
+	def scrolldown(self):
+		if not self.selector: return 0
+		select = self.selector-1
+		addlines = 0
+		while not addlines and select <= len(self.allMessages):
+			addlines = self.applyLazies(select,-1)
+			select -= 1
+
+		lastMessageLines = self.allMessages[-self.selector][2]
+		nextPos = (self.linesup + self.distance - lastMessageLines)
+		if nextPos < 0 and select > 0:
+			message = self.allMessages[-select]
+			#break the message, then add at the end
+			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
+			addlines = len(new)
+			message[2] = addlines
+			self.lines.extend(new)
+			self.distance = addlines
+			self.linesup = 0
+			#TODO if too much of the message gets on screen
+		elif select == self.startheight:
+			#fix the last line to show all of the message
+			self.distance = self.allMessages[-self.startheight][2]
+			self.linesup -= self.innerheight
+			#TODO if too much of the message gets on screen
+			self.innerheight = 0
+			self.startheight = select	#startheight is off by one anyway
+		elif self.selector == self.startheight+1:
+			#TODO adjust innerheight for very big messages
+			self.distance = self.allMessages[-select-1][2]
+			self.linesup -= self.distance
+			self.startheight = select
+		else:
+			self.distance -= lastMessageLines
+
+		self.selector = select+1
+		if not self.selector:
+			self.distance = 0
+			self.linesup = 0
+			self.startheight = 0
+
+		self.dump()
+
+		return addlines
+
+	def scroll(self,step):
+		if step + 1:
+			return self.scrollup()
+		return self.scrolldown()
+			
+	"""
 	def scroll(self,step):
 		'''Select message. Only use step values of 1 and -1'''
 		#TODO probably can split this into selectup and selectdown with all the step-dependent code now
 		#screw WETness
 		if step-1 and not self.selector: return 0
-		select = self.selector+step
-		addlines = 0
-		#get the next message, applying colors/filters as appropriate
-		while not addlines and select <= len(self.allMessages):
-			message = self.allMessages[-select]
-
-			#TODO set msg[2] with this so that `isvisible` is unneeded
-			#test filter
-			#TODO Lazies
-			isvisible = ((message[1] is None) or \
-				not self.parent.filterMessage(*message[1]))
-
-			if isvisible:
-				addlines = message[2]*step
-			select += step
 
 		nextLines = self.linesup + addlines
 		select -= step
@@ -1217,8 +1334,6 @@ class NewMessages:
 				self.distance = 0
 				self.startheight = 0
 
-#		self.dump()
-
 		return addlines	#TODO lines of the message, not lines shifted?
 
 	def iterateWith(self,callback):
@@ -1233,6 +1348,7 @@ class NewMessages:
 			if message[1] and callback(*message[1]):
 				yield message[0],select
 			select += 1
+	"""
 
 	def append(self,message,args = None):
 		'''Add new message to the end of allMessages and lines'''
@@ -1245,9 +1361,9 @@ class NewMessages:
 		#TODO
 		#is this really necessary? if I build a function that selects and modifies lines
 		#accordingly, then it'll hit the bottom of allMessages and not access linesup/startheight
-		if self.linesup < self.parent.parent.y-1:
-			self.startheight += (self.startheight>0)
-			return msg[-1]
+#		if self.linesup < self.parent.parent.y-1:
+#			self.startheight += (self.startheight>0)
+#			return msg[-1]
 		#run filters
 		if (args is not None) and self.parent.filterMessage(*args):
 			return msg[-1]
