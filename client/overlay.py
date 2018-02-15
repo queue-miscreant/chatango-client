@@ -1186,11 +1186,10 @@ class NewMessages:
 			message = self.allMessages[-select]
 			#break the message, then add at the beginning
 			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
-			addlines = len(new)
-			message[2] = addlines
+			message[2] = len(new)
 			#append or prepend
 			self.lines[0:0] = new
-			#TODO very large messages should enter drawing with linesup from the bottom
+			addlines = max(message[2],self.parent.parent.y-1)
 
 		self.distance += addlines
 
@@ -1199,15 +1198,20 @@ class NewMessages:
 		if self.distance > self.parent.parent.y-1:
 			#get a delta from the top, just in case we aren't there already
 			needToAdd = self.distance - self.parent.parent.y+1
-			linesleft = needToAdd - self.allMessages[-self.startheight-1][2] +\
+			currentStart = -self.startheight-1
+			linesleft = needToAdd - self.allMessages[currentStart][2] +\
 				self.innerheight
-			if linesleft:
+			if linesleft > 0:
 				while linesleft > 0:
 					self.startheight += 1
 					linesleft -= self.allMessages[-self.startheight-1][2]
+				if currentStart != -self.startheight-1:
+					linesleft = -self.innerheight-needToAdd
+			elif linesleft < 0:
+				linesleft = -self.innerheight-needToAdd
 			else:
 				self.startheight += 1
-
+	
 			self.distance = self.parent.parent.y-1
 			self.linesup += needToAdd
 			self.innerheight = -linesleft
@@ -1227,25 +1231,35 @@ class NewMessages:
 		lastMessageLines = self.allMessages[-self.selector][2]
 		nextPos = (self.linesup + self.distance - lastMessageLines)
 		if nextPos < 0 and select > 0:
+			#add the next message
 			message = self.allMessages[-select]
 			#break the message, then add at the end
 			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
 			addlines = len(new)
 			message[2] = addlines
 			self.lines.extend(new)
-			self.distance = addlines
-			self.linesup = 0
-			#TODO if too much of the message gets on screen
+			self.distance = addlines - self.parent.parent.y-1
+			if self.distance <= 0:
+				self.distance = addlines
+			else:
+				self.innerheight = self.distance
+				self.distance = self.parent.parent.y-1
+			self.linesup = self.innerheight
 		elif select == self.startheight:
 			#fix the last line to show all of the message
-			self.distance = self.allMessages[-self.startheight][2]
-			self.linesup -= self.innerheight
-			#TODO if too much of the message gets on screen
-			self.innerheight = 0
-			self.startheight = select	#startheight is off by one anyway
+			msgSize = self.allMessages[-self.startheight-1][2]
+			perror(msgSize)
+			self.distance = min(self.parent.parent.y-1,msgSize)
+			self.linesup -= min(self.parent.parent.y-1,lastMessageLines)
+			#the delta, if there are still lines left
+			self.innerheight = msgSize-self.distance	
+			#startheight is off by one anyway
+			self.startheight = select
 		elif self.selector == self.startheight+1:
-			#TODO adjust innerheight for very big messages
-			self.distance = self.allMessages[-select-1][2]
+			#scroll down to the next (already added) message
+			msgSize = self.allMessages[-select-1][2]
+			self.distance = min(self.parent.parent.y-1,msgSize)
+			self.innerheight -= msgSize-self.distance
 			self.linesup -= self.distance
 			self.startheight = select
 		else:

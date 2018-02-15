@@ -105,33 +105,46 @@ badCharsets = [
 	,(range(120094,120094+26),ord('a'))	#lowercase math fractur
 ]
 
-def fracturMap(raw):
-	ret = ""
-	for i in raw:
+def parsePost(post, me, ishistory):
+	#and is short-circuited
+	isreply = me is not None and ('@'+me.lower() in post.post.lower())
+	
+	#remove egregiously large amounts of newlines (more than 2)
+	#also edit sections with right to left override
+	cooked = ""
+	newlineCounter = 0
+	rtlbuffer, rtl = "", False
+	for i in post.post:
+		#look for fractur and double-width fonts that don't comply with wcwidth
 		for f in badCharsets:
 			mapped = mapRange(ord(i),f[0],f[1])
 			if mapped:
 				i = chr(mapped)
 				break
-		ret += i
-	return ret
 
-def parsePost(post, me, ishistory):
-	#and is short-circuited
-	isreply = me is not None and ('@'+me.lower() in post.post.lower())
-	
-	halfcooked = fracturMap(post.post)
-	#remove egregiously large amounts of newlines (more than 2)
-	cooked = ""
-	newlineCounter = 0
-	for i in halfcooked:
 		if i == '\n':
+			#right-to-left sequences end on newlines
+			if rtl:
+				cooked += rtlbuffer + (newlineCounter < 2 and i or "")
+				rtl = False
+				rtlbuffer = ""
 			if newlineCounter < 2:
 				cooked += i
 			newlineCounter += 1
+		elif i == u'\u202d':
+			cooked += rtlbuffer
+			rtlbuffer = ""
+			rtl = False
+		elif i == u'\u202e':
+			rtl = True
 		else:
 			newlineCounter = 0
-			cooked += i
+			if rtl:
+				rtlbuffer = i + rtlbuffer
+			else:
+				cooked += i
+	if rtl:
+		cooked += rtlbuffer
 	#format as ' user: message'; the space is for the channel
 	msg = " {}: {}".format(post.user,cooked)
 	#extra arguments. use in colorizers
