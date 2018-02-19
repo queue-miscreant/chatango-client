@@ -7,16 +7,6 @@ display oriented. Contains classes like LazyIterList and PromoteSet
 import sys
 from functools import partial
 
-#DEBUG--------------------------------------------------------------------------
-def perror(*args,**kwargs):
-	'''
-	The client runs in a curses session, so screen printing must be done
-	cautiously. overlay.py sets up logging to /tmp/client.log if sterr is not
-	redirected with 2>[file]
-	'''
-	print(*args,**kwargs,file=sys.stderr)
-	sys.stderr.flush()
-
 #HIGHER-ORDER FUNCTIONS---------------------------------------------------------
 def staticize(func,*args,doc=None,**kwargs):
 	'''functools.partial but conserves or adds documentation'''

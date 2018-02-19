@@ -13,6 +13,7 @@ different stdout printing calls.
 #		A new type of storage needs to be made so that messages can display from __any__
 #		point in the Coloring array. This could even be expanded to display so that
 #		the topmost message is not the only one selected
+#
 
 try:
 	import curses
@@ -27,9 +28,9 @@ from signal import SIGTSTP,SIGINT #redirect ctrl-z and ctrl-c
 from functools import partial
 from time import time,localtime,strftime as format_time
 from .display import *
-from .util import staticize,override,escapeText,History,perror
+from .util import staticize,override,escapeText,History
 
-__all__ =	["CHAR_COMMAND","soundBell","Box","OverlayBase","TextOverlay"
+__all__ =	["CHAR_COMMAND","Box","OverlayBase","TextOverlay"
 			,"InputOverlay","ListOverlay","VisualListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","ConfirmOverlay","CommandOverlay"
 			,"MainOverlay","DisplayOverlay","Main"]
@@ -96,7 +97,13 @@ def cloneKey(fro,to):
 	_KEY_LUT[fro] = to
 
 #OVERLAY HELPERS------------------------------------------------------------------
-CHAR_COMMAND = '`'
+CHAR_COMMAND	= '`'
+RETURN_CURSOR	= "\x1b[?25h\x1b[u\n\x1b[A"
+#return cursor to the top of the screen, hide, and clear formatting on drawing
+DISPLAY_INIT	= "\x1b[;f%s\x1b[?25l" % CLEAR_FORMATTING
+#format with tuple (row number, string)
+#move cursor, clear formatting, print string, clear garbage, and return cursor
+SINGLE_LINE		= "\x1b[%d;f" + CLEAR_FORMATTING +"%s\x1b[K" + RETURN_CURSOR
 
 #DISPLAY/OVERLAY CLASSES----------------------------------------------------------
 class SizeException(Exception):
@@ -105,14 +112,6 @@ class SizeException(Exception):
 	Should only be raised in an overlay's resize method,
 	where if raised, the Main instance will not attempt to display.
 	'''
-
-CHAR_RETURN_CURSOR = "\x1b[?25h\x1b[u\n\x1b[A"
-def _moveCursor(row = 0):
-	'''Move the cursor to the row number specified'''
-	print("\x1b[%d;f" % row,end=CLEAR_FORMATTING)
-def soundBell():
-	'''Sound console bell. Just runs `print("\a",end="")`'''
-	print(end="\a")
 
 quitlambda = lambda x: -1
 quitlambda.__doc__ = "Close current overlay"
@@ -991,7 +990,7 @@ class CommandOverlay(TextOverlay):
 			except Exception as exc:
 				self.parent.newBlurb(
 					'an error occurred while running command {}'.format(args[0]))
-				perror(traceback.format_exc(),"\n")
+				print(traceback.format_exc(),"\n")
 		self.parent.loop.create_task(runCommand())
 		return -1
 
@@ -1077,9 +1076,9 @@ class NewMessages:
 		self.lazyDelete = []
 
 	def dump(self):
-		perror("selector, startheight: %d,%d"%(self.selector,self.startheight))
-		perror("linesup, distance: %d,%d"%(self.linesup,self.distance))
-		perror("innerheight: %d"%(self.innerheight))
+		print("selector, startheight: %d,%d"%(self.selector,self.startheight))
+		print("linesup, distance: %d,%d"%(self.linesup,self.distance))
+		print("innerheight: %d"%(self.innerheight))
 
 	def stopSelect(self):
 		'''Stop selecting'''
@@ -1248,7 +1247,7 @@ class NewMessages:
 		elif select == self.startheight:
 			#fix the last line to show all of the message
 			msgSize = self.allMessages[-self.startheight-1][2]
-			perror(msgSize)
+			print(msgSize)
 			self.distance = min(self.parent.parent.y-1,msgSize)
 			self.linesup -= min(self.parent.parent.y-1,lastMessageLines)
 			#the delta, if there are still lines left
@@ -1982,7 +1981,7 @@ class MainOverlay(TextOverlay):
 
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _maxselect(self):
-		soundBell()
+		self.parent.soundBell()
 		self.canselect = 0
 
 	def selectup(self):
@@ -2070,6 +2069,7 @@ class Main:
 	_afterDone = []
 	def __init__(self,loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
+		self._displaybuffer = sys.stdout
 		#general state
 		self.active = True
 		self.candisplay = False
@@ -2087,6 +2087,11 @@ class Main:
 		self._bottom_edges = [" "," "]
 
 	#Display Backends----------------------------------------------------------
+
+	def soundBell(self):
+		'''Sound console bell.'''
+		self._displaybuffer.write('\a')
+
 	@asyncio.coroutine
 	def display(self):
 		'''Display backend'''
@@ -2100,13 +2105,11 @@ class Main:
 		except SizeException:
 			self.candisplay = 0
 			return
-		#main display method: move to top of screen
-		_moveCursor()
-		print(end="\x1b[?25l")
+		self._displaybuffer.write(DISPLAY_INIT)
 		#draw each line in lines, deleting the rest of the garbage on the line
 		for i in lines:
-			print(i,end="\x1b[K\n\r") 
-		print(CHAR_RETURN_CURSOR,end="")
+			self._displaybuffer.write(i+"\x1b[K\n\r")
+		self._displaybuffer.write(RETURN_CURSOR)
 
 	@asyncio.coroutine
 	def updateinput(self):
@@ -2114,8 +2117,7 @@ class Main:
 		if not (self.active and self.candisplay): return
 		if not self._scrolls: return	#no textoverlays added
 		string = format(self._scrolls[-1])
-		_moveCursor(self.y+1)
-		print("%s\x1b[K" % string,end=CHAR_RETURN_CURSOR)
+		self._displaybuffer.write(SINGLE_LINE % (self.y+1,string))
 
 	@asyncio.coroutine
 	def _printblurb(self,blurb,time):
@@ -2135,22 +2137,23 @@ class Main:
 		else:
 			blurb = ""
 		self.last = time
-		_moveCursor(self.y+2)
-		print("{}\x1b[K".format(blurb),end=CHAR_RETURN_CURSOR)
+		#move cursor, clear row, print blurb, and return cursor
+		self._displaybuffer.write(SINGLE_LINE % (self.y+2,blurb))
 
 	@asyncio.coroutine
 	def _updateinfo(self,right=None,left=None):
 		'''Info window backend'''
 		if not (self.active and self.candisplay): return
-		self._bottom_edges[0] = str(left or self._bottom_edges[0])
-		self._bottom_edges[1] = str(right or self._bottom_edges[1])
-		room = self.x - collen(self._bottom_edges[0]) - collen(self._bottom_edges[1])
-		if room < 1: return
+		templeft = str(left or self._bottom_edges[0])
+		tempright = str(right or self._bottom_edges[1])
+		room = self.x - collen(templeft) - collen(tempright)
+		if room < 1: return #TODO raise exception
 
-		_moveCursor(self.y+3)
-		#selected, then turn off
-		print("\x1b[7m{}{}{}\x1b[0m".format(self._bottom_edges[0],
-			" "*room,self._bottom_edges[1]),end=CHAR_RETURN_CURSOR)
+		self._bottom_edges[0] = templeft
+		self._bottom_edges[1] = tempright
+
+		self._displaybuffer.write(SINGLE_LINE % (self.y+3, "\x1b[7m" + \
+			templeft + (" "*room) + tempright + "\x1b[m"))
 
 	#Display Frontends----------------------------------------------------------
 	def newBlurb(self,message = ""):
@@ -2172,6 +2175,7 @@ class Main:
 	def updateinfo(self,right = None,left = None):
 		'''Update screen bottom'''
 		self.loop.create_task(self._updateinfo(right,left))
+
 	#Overlay Frontends---------------------------------------------------------
 	def addOverlay(self,new):
 		'''Add overlay'''
@@ -2262,8 +2266,8 @@ class Main:
 		#interactivity when using a main instance
 		if not (sys.stdin.isatty() and sys.stdout.isatty()):
 			raise ImportError("interactive stdin/stdout required to run Main")
-		if sys.stderr.isatty():
-			sys.stderr = open("/tmp/client.log","a+")
+		sys.stdout = open("/tmp/client.log","a+",buffering=1)
+		if sys.stderr.isatty(): sys.stderr = sys.stdout
 		#curses input setup
 		self._screen = curses.initscr()		#init screen
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
@@ -2294,10 +2298,15 @@ class Main:
 			for i in reversed(self._ins):
 				try:
 					i.remove()
-				except: pass
+				except Exception as exc:
+					print("Error occurred during shutdown:")
+					print(traceback.format_exc(),"\n")
 			#return to sane mode
 			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
 			curses.endwin()
+			sys.stdout.close() #close the temporary buffer set up
+			sys.stdout = self._displaybuffer #reconfigure output
+			
 			self.loop.remove_signal_handler(SIGINT)
 			self.loop.remove_signal_handler(SIGTSTP)
 			for i in self._afterDone:

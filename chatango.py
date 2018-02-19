@@ -288,7 +288,7 @@ class ChatBot(ch.Manager):
 		#						  isreply		ishistory
 		if self.options["bell"] and msg[2] and not msg[3] and \
 		not self.mainOverlay.filterMessage(*(msg[1:])):
-			client.soundBell()
+			self.mainOverlay.parent.soundBell()
 
 		self.members.promote(user.lower())
 		yield from self.mainOverlay.msgPost(*msg)
@@ -524,7 +524,7 @@ def _(context,value):
 	try:
 		context.bot.options["linkwarn"] = int(value)
 	except Exception as exc:
-		client.perror(exc)
+		print(exc)
 
 @options.listel("bool")
 def ignoresave(context):
@@ -1015,7 +1015,7 @@ def tabFile(patharg):
 		else:
 			ls = os.listdir(path.expanduser(initpath))
 	except (NotADirectoryError, FileNotFoundError):
-		client.perror("error occurred, aborting tab attempt on ", patharg)
+		print("error occurred, aborting tab attempt on ", patharg)
 		return [],0
 		
 	suggestions = []
