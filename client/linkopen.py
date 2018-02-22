@@ -162,14 +162,14 @@ def videos(main, link, ext):
 def browser(main, link):
 	'''Open new tab without webbrowser outputting to stdout/err'''
 	main.newBlurb("Opened new tab")
-	#magic code to output stderr to /dev/null
-	savout = os.dup(1)	#get another file descriptor for stdout
-	saverr = os.dup(2)	#get another file descriptor for stderr
-	os.close(1)		#close stdout briefly because open_new_tab doesn't pipe stdout to null
-	os.close(2)
-#	os.open(os.devnull, os.O_RDWR)	#open devnull for writing
+	#get file descriptors for stdout
+	fdout, fderr =  sys.stdout.fileno(), sys.stderr.fileno()
+	savout, saverr = os.dup(fdout), os.dup(fderr)	#get new file descriptors
+	#close output briefly because open_new_tab prints garbage
+	os.close(fdout)	
+	os.close(fderr)
 	try:
 		webbrowser.open_new_tab(link)
-	finally:
-		os.dup2(savout, 1)	#reopen stdout
-		os.dup2(saverr, 2)
+	finally:	#reopen stdout/stderr
+		os.dup2(savout, fdout)	
+		os.dup2(saverr, fderr)

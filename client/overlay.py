@@ -261,7 +261,10 @@ class OverlayBase:
 
 	@asyncio.coroutine
 	def resize(self,newx,newy):
-		'''Overridable function. On resize event, all added overlays have this called'''
+		'''
+		Overridable function. All added overlays have this method called
+		on resize event
+		'''
 		pass
 
 	#frontend methods----------------------------
@@ -1088,6 +1091,8 @@ class NewMessages:
 			self.innerheight = 0
 			self.distance = 0
 			self.startheight = 0
+			if self.lazyFilter[0] != -1:
+				self.parent.create_task(self.redolines())
 			return 1
 
 	def getselected(self):
@@ -1133,9 +1138,9 @@ class NewMessages:
 		1:	filtering
 		2:	coloring
 		'''
-		#test all lazy deleters
 		message = self.allMessages[-select]
 
+		#test all lazy deleters
 		for test,result in self.lazyDelete:
 			if test(message,result):
 				del self.allMessages[-select]
@@ -1173,104 +1178,116 @@ class NewMessages:
 		return message[2]
 		
 	def scrollup(self):
+		windowHeight = self.parent.parent.y-1
+		if self.selector and \
+		self.allMessages[-self.selector][2] - windowHeight > self.innerheight:
+			self.linesup += 1
+			self.innerheight += 1
+			return -1
+
 		select = self.selector+1
+
 		addlines = 0
 		while not addlines and select <= len(self.allMessages):
 			addlines = self.applyLazies(select,1)
 			select += 1
 
-		nextPos = (self.linesup + self.distance + addlines)
+		#if the message just had its length calculated as 1, this barely works
+		offscreen = (self.distance + addlines - windowHeight)
 		#next message out of bounds and select refers to an actual message
-		if nextPos > len(self.lines) and select <= len(self.allMessages):
-			message = self.allMessages[-select]
+		if self.linesup + offscreen > len(self.lines) and \
+		select <= len(self.allMessages):
+			message = self.allMessages[-select+1]
 			#break the message, then add at the beginning
 			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
 			message[2] = len(new)
 			#append or prepend
 			self.lines[0:0] = new
-			addlines = max(message[2],self.parent.parent.y-1)
+			addlines = message[2]
+			offscreen += addlines-1
 
 		self.distance += addlines
 
-		#can only make sense when the client properly handles variables right
+		#can only make sense when the instance properly handles variables
 		#so checking validity is futile
-		if self.distance > self.parent.parent.y-1:
+		if offscreen > 0:
 			#get a delta from the top, just in case we aren't there already
-			needToAdd = self.distance - self.parent.parent.y+1
-			currentStart = -self.startheight-1
-			linesleft = needToAdd - self.allMessages[currentStart][2] +\
-				self.innerheight
-			if linesleft > 0:
-				while linesleft > 0:
+			self.linesup += offscreen
+			canscroll = self.allMessages[-self.startheight-1][2] - self.innerheight
+			#scroll through messages if needed
+			if offscreen - canscroll >= 0:
+				while offscreen - canscroll >= 0:
+					offscreen -= canscroll
 					self.startheight += 1
-					linesleft -= self.allMessages[-self.startheight-1][2]
-				if currentStart != -self.startheight-1:
-					linesleft = -self.innerheight-needToAdd
-			elif linesleft < 0:
-				linesleft = -self.innerheight-needToAdd
+					canscroll = self.allMessages[-self.startheight-1][2]
+				self.innerheight = offscreen
 			else:
-				self.startheight += 1
-	
-			self.distance = self.parent.parent.y-1
-			self.linesup += needToAdd
-			self.innerheight = -linesleft
+				self.innerheight += offscreen
 
-		self.selector = select - 1
+			self.distance = windowHeight
 
-		self.dump()
+		self.selector = select-1
+
+		return addlines
 
 	def scrolldown(self):
 		if not self.selector: return 0
+		windowHeight = self.parent.parent.y-1
+
+		if self.selector == self.startheight+1 and \
+		self.innerheight > 0:	#there is at least one hidden line
+			self.linesup -= 1
+			self.innerheight -= 1 
+			return -1
+
 		select = self.selector-1
 		addlines = 0
 		while not addlines and select <= len(self.allMessages):
 			addlines = self.applyLazies(select,-1)
 			select -= 1
+		select += 1
 
-		lastMessageLines = self.allMessages[-self.selector][2]
-		nextPos = (self.linesup + self.distance - lastMessageLines)
+		lastLines = self.allMessages[-self.selector][2]
+		nextPos = (self.linesup + self.distance - lastLines - addlines)
 		if nextPos < 0 and select > 0:
-			#add the next message
 			message = self.allMessages[-select]
 			#break the message, then add at the end
 			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
 			addlines = len(new)
 			message[2] = addlines
 			self.lines.extend(new)
-			self.distance = addlines - self.parent.parent.y-1
-			if self.distance <= 0:
-				self.distance = addlines
-			else:
-				self.innerheight = self.distance
-				self.distance = self.parent.parent.y-1
-			self.linesup = self.innerheight
-		elif select == self.startheight:
-			#fix the last line to show all of the message
-			msgSize = self.allMessages[-self.startheight-1][2]
-			print(msgSize)
-			self.distance = min(self.parent.parent.y-1,msgSize)
-			self.linesup -= min(self.parent.parent.y-1,lastMessageLines)
-			#the delta, if there are still lines left
-			self.innerheight = msgSize-self.distance	
-			#startheight is off by one anyway
-			self.startheight = select
-		elif self.selector == self.startheight+1:
-			#scroll down to the next (already added) message
-			msgSize = self.allMessages[-select-1][2]
-			self.distance = min(self.parent.parent.y-1,msgSize)
-			self.innerheight -= msgSize-self.distance
-			self.linesup -= self.distance
-			self.startheight = select
-		else:
-			self.distance -= lastMessageLines
 
-		self.selector = select+1
+		#fix the last line to show all of the message
+		if select == self.startheight+1:
+			msgSize = self.allMessages[-select][2]
+			self.distance = min(windowHeight,msgSize)
+			newheight = max(0,msgSize - windowHeight)
+			#this newheight will hide fewer lines; it's less than innerheight
+			#the delta, if there are still lines left
+			self.linesup -= self.innerheight - newheight
+			self.innerheight = newheight
+			#startheight is off by one anyway
+			self.startheight = select-1
+		#scroll down to the next message
+		elif self.selector == self.startheight+1:
+			msgSize = self.allMessages[-select][2]
+			self.distance = min(windowHeight,msgSize)
+			if self.innerheight:
+				self.linesup -= self.innerheight + self.distance
+			else:
+				self.linesup -= min(windowHeight, self.distance)
+
+			self.innerheight = max(0,msgSize - windowHeight)
+			self.startheight = select-1
+		else:
+			self.distance -= lastLines
+
+		self.selector = select
 		if not self.selector:
 			self.distance = 0
 			self.linesup = 0
 			self.startheight = 0
-
-		self.dump()
+			self.innerheight = 0
 
 		return addlines
 
@@ -1279,113 +1296,24 @@ class NewMessages:
 			return self.scrollup()
 		return self.scrolldown()
 			
-	"""
-	def scroll(self,step):
-		'''Select message. Only use step values of 1 and -1'''
-		#TODO probably can split this into selectup and selectdown with all the step-dependent code now
-		#screw WETness
-		if step-1 and not self.selector: return 0
-
-		nextLines = self.linesup + addlines
-		select -= step
-
-		#don't try adjusting linesup
-		if not self.startheight: nextLines = 0
-
-		#we're too far down/up, append a message 				#next line OOB
-		if (nextLines < 0 or nextLines > len(self.lines)) and \
-		(select <= len(self.allMessages) and select > 0):		#message exists
-			message = self.allMessages[-select]
-			#break the message
-			new = message[0].breaklines(self.parent.parent.x,self._INDENT)
-			addlines = len(new)
-			message[2] = addlines
-			#append or prepend
-			if step + 1:
-				#remember, this is selecting downward when the next line is OOB
-				self.distance = self.parent.parent.y	#force startheight/height
-				self.lines.extend(new)
-			else:
-				self.startheight = select
-				self.lines[0:0] = new
-		else:
-			#the next section of code makes this valid regardless
-			self.distance += addlines
-			if step-1:
-				self.distance += self.allMessages[-self.selector][2]-addlines
-		
-		#adjust linesup/startheight
-		if step-1 and self.distance >= self.parent.parent.y-1:
-			#adjust the startheight
-			lines = -addlines - self.allMessages[-self.startheight][2] + self.innerheight
-			while lines > 0:
-				self.startheight -= 1
-				lines -= self.allMessages[-self.startheight][2]
-			self.startheight -= 1
-			self.innerheight = -lines	#adjust for lines gone too far
-			self.distance = self.parent.parent.y + addlines - 1
-		elif step+1 and self.selector and self.selector == self.startheight:
-			self.distance = 0
-			self.innerheight = 0
-			self.startheight = select
-		elif not self.startheight and self.distance == self.parent.parent.y-1:
-			#translate from drawing normal to drawing up
-			self.linesup = self.distance-1
-			self.startheight = select
-			self.distance = 0
-			self.innerheight = 0
-		else:
-			addlines = 0
-
-		#if we're even "going" anywhere
-		if (select - self.selector):
-			self.selector = max(0,select)
-			self.linesup += addlines
-			if not self.selector:
-				self.linesup = 0
-				self.innerheight = 0
-				self.distance = 0
-				self.startheight = 0
-
-		return addlines	#TODO lines of the message, not lines shifted?
-
-	def iterateWith(self,callback):
-		'''
-		An iterator that yields when the callback is true.
-		Callback is called with arguments passed into append (or msgPost...)
-		'''
-		select = 1
-		while select <= len(self.allMessages):
-			message = self.allMessages[-select]
-			#ignore system messages
-			if message[1] and callback(*message[1]):
-				yield message[0],select
-			select += 1
-	"""
-
 	def append(self,message,args = None):
 		'''Add new message to the end of allMessages and lines'''
 		#undisplayed messages have length zero
 		msg = [message,args,0,self.msgID]
 		self.msgID += 1
 		self.allMessages.append(msg)
-		#before we filter it
-		self.selector += (self.selector>0)
-		#TODO
-		#is this really necessary? if I build a function that selects and modifies lines
-		#accordingly, then it'll hit the bottom of allMessages and not access linesup/startheight
-#		if self.linesup < self.parent.parent.y-1:
-#			self.startheight += (self.startheight>0)
-#			return msg[-1]
-		#run filters
+		#check that we're not selecting and don't need to add it
+		if self.selector:
+			self.selector += 1
+			self.startheight += 1
+			return msg[-1]
+
 		if (args is not None) and self.parent.filterMessage(*args):
 			return msg[-1]
 		new = message.breaklines(self.parent.parent.x,self._INDENT)
 		self.lines.extend(new)
 		msg[2] = len(new)
-		#keep the right message selected
-		if self.selector:
-			self.linesup += msg[2]
+
 		return msg[-1]
 
 	def prepend(self,message,args = None):
@@ -1395,9 +1323,9 @@ class NewMessages:
 		msg = [message, args, dummyLength, self.msgID]
 		self.msgID += 1
 		self.allMessages.insert(0,msg)
-		#we actually need to draw it
-		#(like for adding historical messages chronologically while empty)
-		if dummyLength and self.linesup < (self.parent.parent.y-1):
+		#we actually need to draw it; startheight is only modified when the
+		#top message has been scrolled past, so the messages are full
+		if dummyLength and self.startheight:
 			new = message.breaklines(self.parent.parent.x,self._INDENT)
 			self.lines[0:0] = new
 			msg[2] = len(new)
@@ -1406,66 +1334,61 @@ class NewMessages:
 
 	def delete(self,result,test=lambda x,y: x[3] == y):
 		'''Delete message from value result and callable test'''
-		nummsg = 1
 		if not callable(test):
 			raise TypeError("Messages.delete requires callable")
-		#if all messages are length 1, then that's our maximum tolerance
-		#for laziness
-		bound = min(self.parent.parent.y-1,len(self.allMessages))
-		#selecting up too high
-		if self.linesup-self.innerheight >= bound:
-			bound = self.selector
+
+		nummsg = self.startheight+1
+		height = self.distance #at max, window height
+		windowHeight = self.parent.parent.y
 			
-		while nummsg <= bound:
+		while height <= windowHeight:
 			if (test(self.allMessages[-nummsg],result)):
 				del self.allMessages[-nummsg]
 			nummsg += 1
+			height += self.allMessages[-nummsg][2]
 
 		self.lazyDelete.append(test,result)
 
 	def getMessageFromPosition(self,x,y):
 		'''Get the message and depth into the string at position x,y'''
-		if y >= self.parent.parent.y-1: return "",-1
-		#go up or down
-		direction = 1
-		msgNo = 1
-		height = 0
-		if self.linesup < self.parent.parent.y-1:
-			#"height" from the top
-			y = self.parent.parent.y - 1 - y
-		else:
-			direction = -1
-			msgNo = self.selector
-			y = y + 1
-		#find message until we exceed the height
-		msg = self.allMessages[-msgNo]
-		while height < y:
-			msg = self.allMessages[-msgNo]
-			height += msg[2]
-			#advance the message number, or return if we go too far
-			msgNo += direction
-			if msgNo > len(self.allMessages):
-				return "",-1
+		windowHeight = self.parent.parent.y-1
+		if y >= windowHeight: return "",-1
 
-		#for at the bottom (drawing up) line depth is simply height-y
-		depth = height-y + self.innerheight
-		firstLine = height 
-		
-		#for drawing down, we're going backwards, so we have to subtract msg[2]
-		if direction-1:
-			depth = msg[2] - depth - 1
-			firstLine = msg[2] + self.linesup - height
+		#we always draw "upward," so 0 being the bottom is more useful
+		y = windowHeight - y				
+		msgno = self.startheight+1		#we start drawing from this message
+		msg = self.allMessages[-msgno]
+		height = msg[2] - self.innerheight	#visible lines shown 
+
+		#find message until we exceed the height
+		while height < y:
+			#advance the message number, or return if we go too far
+			msgno += 1
+			if msgno > len(self.allMessages):
+				return "",-1
+			msg = self.allMessages[-msgno]
+			height += msg[2]
+
+		#line depth into the message
+		depth = height - y
+		pos = 0
 
 		#adjust the position
-		pos = 0
 		for i in range(depth):
 			#only subtract from the length of the previous line if it's not the first one
-			pos += numdrawing(self.lines[i-firstLine]) - (i and len(self._INDENT))
+			pos += numdrawing(self.lines[i-height]) - (i and len(self._INDENT))
+
 		if x >= collen(self._INDENT) or not depth:
 			#try to get a slice up to the position 'x'
-			pos += numdrawing(self.lines[depth-firstLine],x)
+			pos += max(0,numdrawing(self.lines[depth-height],x) - len(self._INDENT))
 			
 		return msg,pos
+
+	def scrollToMessage(self,messageIndex):
+		'''Directly set selector and startheight and schedule redolines'''
+		self.selector = messageIndex
+		self.startheight = messageIndex-1
+		self.parent.loop.create_task(self.redolines())
 
 	#REAPPLY METHODS-----------------------------------------------------------
 	@asyncio.coroutine
@@ -1474,69 +1397,81 @@ class NewMessages:
 		Redo lines, if current lines does not represent the unfiltered messages
 		or if the width has changed
 		'''
+		i = self.allMessages[-self.selector]
+		while self.selector > 0 and ((i[1] is None) or \
+		not self.parent.filterMessage(*i[1])):
+			self.selector -= 1
+			i = self.allMessages[-self.selector]
+
+		#a new start height must be decided
+		if width or height or self.selector <= self.startheight:
+			self.startheight = max(0,self.selector-1)
 		if width is None: width = self.parent.parent.x
 		if height is None: height = self.parent.parent.y
-		#TODO reformat this for variable-size lines
-		#algorithm basics:
-		#start with the currently selected message
-		#try to select upward until startheight
-		#if it's out of bounds according to the current height
-		#adjust linesup/distance
-		#---OR---
-		#set startheight to selector, distance to 0
-		#start appending messages downward
-		#
-		newlines = []
-		numup,nummsg = 0,1
-		#while there are still messages to add (to the current height)
-		#feels dirty and slow, but this will also resize all messages below
-		#the selection
-		while (nummsg <= self.selector or numup < height) and \
-		nummsg <= len(self.allMessages):
-			i = self.allMessages[-nummsg]
+
+		startMessage = self.allMessages[-self.startheight-1]
+		newlines = startMessage.breaklines(width,self._INDENT)
+		startMessage[2] = len(new)
+
+		self.innerheight = max(0,startMessage[2] - height)
+		self.distance = min(height,startMessage[2])
+		self.linesup = self.innerheight
+
+		msgno, lineno = self.startheight+2, self.distance
+	
+		self.lazyFilter[1]	= self.allMessages[-self.startheight][3] \
+								if self.startheight	else -1
+		
+		while lineno < height and msgno <= len(self.allMessages):
+			i = self.allMessages[-msgno]
 			#check if the message should be drawn
 			if (i[1] is not None) and self.parent.filterMessage(*i[1]):
 				i[2] = 0
-				nummsg += 1
+				msgno += 1
 				continue
 			new = i[0].breaklines(width,self._INDENT)
 			newlines[0:0] = new
 			i[2] = len(new)
-			numup += i[2]
-			if nummsg == self.selector: #invalid always when self.selector = 0
-				self.linesup = numup
-			nummsg += 1
-		#nummsg starts at 1, so to compare with allMessages, 1 less
-		self.lastFilter = -1	if nummsg-1 == len(self.allMessages) \
-								else self.allMessages[-nummsg][3]
+			lineno += i[2]
+			msgno += 1
+
+		self.lazyFilter[0]	= -1	if nummsg-1 == len(self.allMessages) \
+									else self.allMessages[-msgno][3]
 		self.lines = newlines
 		self.canselect = True
 
 	@asyncio.coroutine
 	def recolorlines(self):
-		#TODO reformat this for variable-size lines
-		#start with startheight (it's being at least partially drawn anyway
-		#draw until distance (not self.distance) exceeds `height`
 		'''Re-apply parent's colorizeMessage and redraw all visible lines'''
 		width = self.parent.parent.x
 		height = self.parent.parent.y
-		newlines = []
-		numup,nummsg = 0,1
-		while (numup < height or nummsg <= self.selector) and \
-		nummsg <= len(self.allMessages):
-			i = self.allMessages[-nummsg]
+		lineno,msgno = self.distance,self.startheight+2
+		
+		startMessage = self.allMessages[-msgno+1]
+		newlines = startMessage.breaklines(width,self._INDENT)
+		if len(new) != startMessage[2]:
+			raise DisplayException("recolorlines called before redolines")
+
+		self.lazyRecolor[1] = self.allMessages[-self.startheight][3] \
+								if self.startheight	else -1
+
+		while lineno < height and msgno <= len(self.allMessages):
+			i = self.allMessages[-msgno]
 			if i[1] is not None:	#don't decolor system messages
 				i[0].clear()
 				self.parent.colorizeMessage(i[0],*i[1])
-			nummsg += 1
 			if i[2]: #unfiltered (non zero lines)
 				new = i[0].breaklines(width,self._INDENT)
+				if len(new) != i[2]:
+					raise DisplayException("recolorlines called before redolines")
 				newlines[0:0] = new
-				i[2] = len(new)
-				numup += i[2]
-		self.lastRecolor = -1	if nummsg-1 == len(self.allMessages) \
-								else self.allMessages[-nummsg][3]
+				lineno += i[2]
+			msgno += 1
+
+		self.lazyRecolor[0] = -1	if msgno-1 == len(self.allMessages) \
+									else self.allMessages[-msgno][3]
 		self.lines = newlines
+		self.linesup = self.innerheight
 
 class Messages:
 	'''Container object for message objects'''

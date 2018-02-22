@@ -415,6 +415,7 @@ def numdrawing(string,width=-1):
 	Number of drawing characters in the string (up to width).
 	Ostensibly the number of non-escape sequence characters
 	'''
+	if not width: return 0
 	escape = False
 	a = 0
 	for i in string:

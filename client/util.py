@@ -4,12 +4,13 @@
 Module for miscellaneous classes that are not inherently overlay or 
 display oriented. Contains classes like LazyIterList and PromoteSet
 '''
+
 import sys
 from functools import partial
 
 #HIGHER-ORDER FUNCTIONS---------------------------------------------------------
 def staticize(func,*args,doc=None,**kwargs):
-	'''functools.partial but conserves or adds documentation'''
+	'''functools.partial, but conserves or adds documentation'''
 	ret = partial(func,*args,**kwargs)
 	ret.__doc__ = doc or func.__doc__ or "(no documentation)"
 	return ret
@@ -111,7 +112,8 @@ class LazyIterList(list):
 					try:
 						self.append(next(self._iter))
 					except StopIteration:
-						del self._iter	#just in case
+						#just in case the following doesn't activate the gc
+						del self._iter
 						self._iter = None
 						return
 				else:
@@ -126,45 +128,48 @@ class LazyIterList(list):
 
 class History:
 	'''Container class for historical entries, similar to an actual shell'''
-	def __init__(self):
-		self.history = []
+	def __init__(self, *args, size = 50):
+		self.history = list(args)
 		self._selhis = 0
+		self._size = size
 		#storage for next entry, so that you can scroll up, then down again
 		self.bottom = None
 
+	def __repr__(self):
+		return "History(%s)" % repr(self.history)
+
 	def nexthist(self,replace=""):
 		'''Next historical entry (less recent)'''
-		if self.history:
-			if replace:
-				if not self._selhis:
-					#at the bottom, starting history
-					self.bottom = replace
-				else:
-					#else, update the entry
-					self.history[-self._selhis] = replace
-			#go backward in history
-			self._selhis += (self._selhis < (len(self.history)))
-			#return what we just retrieved
-			return self.history[-self._selhis]
-		return ""
+		if not self.history: return ""
+		if replace:
+			if not self._selhis:
+				#at the bottom, starting history
+				self.bottom = replace
+			else:
+				#else, update the entry
+				self.history[-self._selhis] = replace
+		#go backward in history
+		self._selhis += (self._selhis < (len(self.history)))
+		#return what we just retrieved
+		return self.history[-self._selhis]
 
 	def prevhist(self,replace=""):
 		'''Previous historical entry (more recent)'''
-		if self.history:
-			if replace and self._selhis: #not at the bottom already
-				self.history[-self._selhis] = replace
-			#go forward in history
-			self._selhis -= (self._selhis > 0)
-			#return what we just retreived
-			return (self._selhis and self.history[-self._selhis]) or self.bottom or ""
-		return ""
+		if not self.history: return ""
+		if replace and self._selhis: #not at the bottom already
+			self.history[-self._selhis] = replace
+		#go forward in history
+		self._selhis -= (self._selhis > 0)
+		#return what we just retreived
+		return (self._selhis and self.history[-self._selhis]) or self.bottom or ""
 
 	def append(self,new):
 		'''Add new entry in history and maintain a size of at most 50'''
 		if not self.bottom:
 			#not already added from history manipulation
 			self.history.append(new)
-		self.history = self.history[-50:]
+		self.bottom = None
+		self.history = self.history[-self._size:]
 		self._selhis = 0
 
 #COMMANDLINE-LIKE FEATURES------------------------------------------------------

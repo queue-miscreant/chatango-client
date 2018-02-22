@@ -26,8 +26,11 @@ Useful Key Bindings:
 	^R:		Refresh current group
 	^T:		Switch to new group
 '''
-#TODO on finished implementation of NewMessages, iterateWith returns a 2-tuple of the coloring object and select number
+#TODO	on finished implementation of NewMessages, iterateWith returns a 2-tuple of the coloring object and select number
 #		adjust uses of iterateWith accordingly
+#
+#TODO	friendlier PM interface
+
 import os
 import os.path as path
 import asyncio
@@ -523,8 +526,7 @@ def linkwarn(context):
 def _(context,value):
 	try:
 		context.bot.options["linkwarn"] = int(value)
-	except Exception as exc:
-		print(exc)
+	except ValueError: pass
 
 @options.listel("bool")
 def ignoresave(context):
