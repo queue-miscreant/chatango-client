@@ -18,10 +18,16 @@ __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT","_COLORS"
 			,"Coloring","Scrollable","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
-_SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
-_UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
-_NEXT_WORD_RE =	re.compile("([{0}]*[^{0}]+)".format(_SANE_TEXTBOX))	#sane textbox word-delete
-_LINE_BREAKING = "- 　"	#line breaking characters
+#sane textbox splitting characters
+_SANE_TEXTBOX =	r"\s\-/`~,;"
+#sane textbox word-backspace
+_UP_TO_WORD_RE =re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))
+#sane textbox word-delete
+_NEXT_WORD_RE =	re.compile("([{0}]*[^{0}]+)".format(_SANE_TEXTBOX))
+#line breaking characters
+_LINE_BREAKING ="- 　"
+
+#COLORING CONSTANTS------------------------------------------------------------
 #valid color names to add
 _COLOR_NAMES =	["black"
 				,"red"
@@ -450,6 +456,7 @@ def columnslice(string,width):
 		escape = temp
 	return lentr + 1
 
+#SCROLLABLE CLASSES-------------------------------------------------------------
 class Scrollable:
 	'''Scrollable text input'''
 	def __init__(self,width,string=""):
@@ -516,10 +523,7 @@ class Scrollable:
 			'\\r').replace('\t',' '*_TABLEN)
 	#SET METHODS----------------------------------------------------------------
 	def _onchanged(self):
-		'''
-		Since this class is meant to take a 'good' slice of a string,
-		this method is a useful callback for when the slice updates
-		'''
+		'''Useful callback to retreive a new 'good' slice of a string'''
 		pass
 
 	def setstr(self,new):
@@ -755,4 +759,3 @@ class ScrollSuggest(Scrollable):
 				self._pos,self._disp = self._lastpos,self._lastdisp
 			self.append(suggestion)
 			return True
-

@@ -29,6 +29,20 @@ import time
 from os.path import basename
 from socket import gaierror
 
+#enumerable constants
+FONT_FACES = \
+	["Arial"
+	,"Comic Sans"
+	,"Georgia"
+	,"Handwriting"
+	,"Impact"
+	,"Palatino"
+	,"Papyrus"
+	,"Times New Roman"
+	,"Typewriter" ]
+#limited sizes available for non-premium accounts
+FONT_SIZES = [9,10,11,12,13,14]
+
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
 

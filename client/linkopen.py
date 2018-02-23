@@ -162,14 +162,19 @@ def videos(main, link, ext):
 def browser(main, link):
 	'''Open new tab without webbrowser outputting to stdout/err'''
 	main.newBlurb("Opened new tab")
-	#get file descriptors for stdout
-	fdout, fderr =  sys.stdout.fileno(), sys.stderr.fileno()
-	savout, saverr = os.dup(fdout), os.dup(fderr)	#get new file descriptors
-	#close output briefly because open_new_tab prints garbage
-	os.close(fdout)	
-	os.close(fderr)
 	try:
-		webbrowser.open_new_tab(link)
-	finally:	#reopen stdout/stderr
-		os.dup2(savout, fdout)	
-		os.dup2(saverr, fderr)
+		#get file descriptors for stdout
+		fdout, fderr =  sys.stdout.fileno(), sys.stderr.fileno()
+		savout, saverr = os.dup(fdout), os.dup(fderr)	#get new file descriptors
+		#close output briefly because open_new_tab prints garbage
+		os.close(fdout)	
+		if fdout != fderr: os.close(fderr)
+		try:
+			webbrowser.open_new_tab(link)
+		finally:	#reopen stdout/stderr
+			os.dup2(savout, fdout)	
+			os.dup2(saverr, fderr)
+	except Exception as exc:
+		import traceback
+		with open("err","w") as a:
+			traceback.print_exc(file=a)

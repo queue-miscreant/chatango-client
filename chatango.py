@@ -26,7 +26,7 @@ Useful Key Bindings:
 	^R:		Refresh current group
 	^T:		Switch to new group
 '''
-#TODO	on finished implementation of NewMessages, iterateWith returns a 2-tuple of the coloring object and select number
+#TODO	on finished implementation of NewMessages, iterateWith returns a 2-tuple of the coloring object and message index
 #		adjust uses of iterateWith accordingly
 #
 #TODO	friendlier PM interface
@@ -56,21 +56,9 @@ creds_readwrite = {
 	,"ignores":	1
 	,"filtered_channels":	3
 }
-disconnected_error = None
 
-#-------------------------------------------------------------------------------
-#constants for chatango TODO maybe move into ch.py?
-FONT_FACES = \
-	["Arial"
-	,"Comic Sans"
-	,"Georgia"
-	,"Handwriting"
-	,"Impact"
-	,"Palatino"
-	,"Papyrus"
-	,"Times New Roman"
-	,"Typewriter" ]
-FONT_SIZES = [9,10,11,12,13,14]
+#Constants----------------------------------------------------------------------
+LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
 
 DEFAULT_OPTIONS = \
 	{"mouse": 		False
@@ -86,8 +74,7 @@ DEFAULT_FORMATTING = \
 	,"0"		#font face
 	,12]		#font size
 
-LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
-
+#ChatBot related functionality--------------------------------------------------
 _client = None
 def getClient():
 	global _client
@@ -159,7 +146,8 @@ class ChatBot(ch.Manager):
 	#event hookup
 
 	def __init__(self, parent, creds):
-		super(ChatBot,self).__init__(creds["user"],creds["passwd"],loop=parent.loop)
+		super(ChatBot,self).__init__(creds["user"],creds["passwd"]
+			,loop=parent.loop)
 
 		self.creds = creds
 		#default to the given user name
@@ -179,13 +167,15 @@ class ChatBot(ch.Manager):
 		#disconnect from all groups on done
 		client.onDone(self.leaveAll())
 
-		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
+		#tabbing for members, ignoring the # and ! induced by anons and temps
 		client.Tokenize('@',self.members)
 		self.loop.create_task(self.connect())
 
 	@classmethod
 	def addEvent(cls,eventname,func):
 		ancestor = None
+		#limit modifiable attributes
+		eventname = "on"+eventname
 		try:
 			ancestor = getattr(self,eventname)
 		except AttributeError: pass
@@ -277,7 +267,6 @@ class ChatBot(ch.Manager):
 		msg = " {}: {}".format(post.user,post.post)
 		yield from self.mainOverlay.msgPost(msg,post,True,historical)
 		
-	#on message
 	@asyncio.coroutine
 	def onMessage(self, group, post):
 		'''On message. No event because you can just use ExamineMessage'''
@@ -307,7 +296,7 @@ class ChatBot(ch.Manager):
 			self.parseLinks(post.post, True)
 			msg = parsePost(post, self.me, True)
 			yield from self.mainOverlay.msgPrepend(*msg)
-		self.mainOverlay.canselect = True
+		self.mainOverlay.messages.canselect = True
 
 	@asyncio.coroutine
 	def onFloodWarning(self, group):
@@ -348,130 +337,14 @@ class ChatBot(ch.Manager):
 	def onConnectionError(self, group, error):
 		if isinstance(error,ConnectionResetError) or error == None:
 			self.mainOverlay.messages.stopSelect()
-			yield from self.mainOverlay.msgSystem("Connection lost; press ^R to reconnect")
+			yield from self.mainOverlay.msgSystem(
+				"Connection lost; press ^R to reconnect")
 		else:
-			self.mainOverlay.msgSystem("Connection error occurred. Try joining another room with ^T")
+			self.mainOverlay.msgSystem(
+				"Connection error occurred. Try joining another room with ^T")
 
-#LISTMUXERS---------------------------------------------------------------------
-class ListMuxer:
-	def __init__(self):
-		self._ordering = []
-		self.indices = {}
-		self.context = None
-		self.parent = None
-
-	def add(self,context):
-		'''Add the muxer with ChatangoOverlay `parent`'''
-		self.context = context
-		self.parent = context.parent
-		overlay = client.ListOverlay(self.parent
-			,[self.indices[i]._doc for i in self._ordering]
-			,self.drawing)
-		selectSub = lambda me: self.indices[self._ordering[me.it]]._select()
-		overlay.addKeys({
-			"tab":		selectSub
-			,"enter":	selectSub
-			,' ':		selectSub
-		})
-		overlay.add()
-
-	def drawing(self,me,string,i):
-		element = self.indices[self._ordering[i]]
-		element._drawer(self,element._getter(self.context),string)
-
-	class _ListEl: #list element
-		def __init__(self,parent,dataType,func):
-			self.name = func.__name__
-			if parent.indices.get(self.name):
-				raise TypeError("Cannot implement element %s more than once"%\
-					self.name)
-			#bind parent names
-			self.parent = parent
-			self.parent.indices[self.name] = self
-			self.parent._ordering.append(self.name)
-			self._doc = func.__doc__
-			self._type = dataType
-			#default drawer
-			if self._type == "color":
-				self._drawer = self.colorDrawer
-			elif self._type == "str":
-				self._drawer = self.stringDrawer
-			elif self._type == "enum":
-				self._drawer = self.enumDrawer
-			elif self._type == "bool":
-				self._drawer = self.boolDrawer
-			else:	#invalid type
-				raise TypeError("input type %s not recognized"%self._type)
-
-			self._getter = func
-			self._setter = None
-
-		def setter(self,func):
-			'''Decorator to set setter'''
-			self._setter = func
-		def drawer(self,func):
-			'''Decorator to set drawer'''
-			self._drawer = func
-
-		def _select(self):
-			furtherInput = None
-			if self._type == "color":
-				furtherInput = client.ColorOverlay(self.parent.parent
-					,lambda ret: self._setter(self.parent.context,ret) #callback
-					,self._getter(self.parent.context))			#initial color
-			elif self._type == "str":
-				furtherInput = client.InputOverlay(self.parent.parent
-					,self._doc								#input window text
-					,lambda ret: self._setter(self.parent.context,ret)) #callback
-			elif self._type == "enum":
-				li,index = self._getter(self.parent.context)
-				furtherInput = client.ListOverlay(self.parent.parent
-					,li)		#enum entries
-				furtherInput.it = index
-				setCallback = lambda me: self._setter(self.parent.context,me.it)
-				furtherInput.addKeys(
-					{'tab':		setCallback
-					,'enter':	setCallback
-					,' ':		setCallback
-				})
-			elif self._type == "bool":
-				self._setter(self.parent.context,
-					not self._getter(self.parent.context))	#toggle
-				return
-			furtherInput.add()
-			
-		@staticmethod
-		def colorDrawer(mux,value,coloring):
-			'''Default color drawer'''
-			coloring.insertColor(-1,mux.parent.get256color(value))
-			coloring.effectRange(-1,0,0)
-		@staticmethod
-		def stringDrawer(mux,value,coloring):
-			'''Default string drawer'''
-			#TODO don't draw string if it exceeds some threshold,
-			#like half of the length of the list entry (= mux.parent.parent.x-2)
-			val = str(value)
-			startpos = -len(val)
-			coloring[:startpos]+val
-			coloring.insertColor(startpos,4)	#yellow
-		@classmethod
-		def enumDrawer(cls,mux,value,coloring):
-			'''Default enum drawer'''
-			#dereference and run string drawer
-			cls.stringDrawer(mux,value[0][value[1]],coloring)
-		@staticmethod
-		def boolDrawer(mux,value,coloring):
-			'''Default bool drawer'''
-			coloring[:-1]+(value and "y" or "n")
-			coloring.insertColor(-1,value and 11 or 3)
-
-	def listel(self,dataType):
-		return partial(self._ListEl,self,dataType)
-
-fromHex = lambda h: tuple(int(h[i*2:i*2+2],16) for i in range(3))
-
-#formatting mux
-formatting = ListMuxer()
+#Formatting InputMux------------------------------------------------------------
+formatting = client.InputMux()	#formatting mux
 @formatting.listel("color")
 def fontcolor(context):
 	"Font Color"
@@ -491,7 +364,7 @@ def _(context,value):
 @formatting.listel("enum")
 def fontface(context):
 	"Font Face"
-	tab = FONT_FACES
+	tab = ch.FONT_FACES
 	index = context.bot.creds["formatting"][2]
 	return tab,int(index)
 @fontface.setter
@@ -501,15 +374,15 @@ def _(context,value):
 @formatting.listel("enum")
 def fontsize(context):
 	"Font Size"
-	tab = FONT_SIZES
+	tab = ch.FONT_SIZES
 	index = context.bot.creds["formatting"][3]
 	return list(map(str,tab)),tab.index(index)
 @fontsize.setter
 def _(context,value):
-	context.bot.creds["formatting"][3] = FONT_SIZES[value]
+	context.bot.creds["formatting"][3] = ch.FONT_SIZES[value]
 
-#options mux
-options = ListMuxer()
+#Options InputMux---------------------------------------------------------------
+options = client.InputMux()	#options mux
 @options.listel("bool")
 def mouse(context):
 	"Mouse:"
@@ -593,16 +466,16 @@ def _(mux,value,coloring):
 		coloring.clear()
 		coloring.insertColor(0,mux.parent.get256color(245))
 
-#OVERLAY EXTENSION--------------------------------------------------------------
-class ChatangoOverlay(client.MainOverlay):
+#Extended overlay---------------------------------------------------------------
+class ChatangoOverlay(client.ChatOverlay):
 	def __init__(self,parent,bot):
 		#XXX not sure why, but lastlinks after the super raises an exception
 		self.lastlinks = []
 		self.visited_links = []
 
 		super(ChatangoOverlay, self).__init__(parent)
+		self.messages.canselect = False
 		self.bot = bot
-		self.canselect = False
 		self.addKeys({	"enter":	self.onenter
 						,"a-enter":	self.onaltenter
 						,"tab":		self.ontab
@@ -626,7 +499,7 @@ class ChatangoOverlay(client.MainOverlay):
 		#when we've gotten too many messages
 		group = self.bot.joinedGroup
 		if group:
-			self.canselect = False
+			self.messages.canselect = False
 			group.getMore()
 			#wait until we're done getting more
 			self.parent.newBlurb("Fetching more messages")
@@ -815,7 +688,7 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def setformatting(self):
 		'''Chatango formatting settings'''
-		formatting.add(self)
+		formatting.add(self.parent,self)
 
 	def setchannel(self):
 		'''List channels'''
@@ -841,7 +714,7 @@ class ChatangoOverlay(client.MainOverlay):
 
 	def options(self):
 		'''Options'''
-		options.add(self)
+		options.add(self.parent,self)
 
 	def listreplies(self):
 		'''List replies in a convenient overlay'''
@@ -1113,7 +986,7 @@ def startClient(loop,creds):
 		else:
 			parent.newBlurb("Failed to update avatar")
 
-	#done preparing client constants-------------------------------------------------
+	#done preparing client constants--------------------------------------------
 	main = client.Main(loop=loop)
 	mainTask = main.start()
 	yield from main.prepared.wait()
