@@ -26,9 +26,6 @@ Useful Key Bindings:
 	^R:		Refresh current group
 	^T:		Switch to new group
 '''
-#TODO	on finished implementation of NewMessages, iterateWith returns a 2-tuple of the coloring object and message index
-#		adjust uses of iterateWith accordingly
-#
 #TODO	friendlier PM interface
 
 import os
@@ -58,6 +55,7 @@ creds_readwrite = {
 }
 
 #Constants----------------------------------------------------------------------
+#look for whole word links starting with http:// or https://
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
 
 DEFAULT_OPTIONS = \
@@ -234,7 +232,6 @@ class ChatBot(ch.Manager):
 		like with historical messages.
 		'''
 		newLinks = []
-		#look for whole word links starting with http:// or https://
 		#don't add the same link twice
 		for i in LINK_RE.findall(raw+' '):
 			if i not in newLinks:
@@ -718,60 +715,23 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def listreplies(self):
 		'''List replies in a convenient overlay'''
-		try:
-			lazylist = client.LazyIterList(
-				self.messages.iterateWith(lambda _,isreply,__: isreply))
-		except TypeError:
-			self.parent.newBlurb("No replies have been accumulated")
-			return
-
-		def scroll(me,step):
-			attempt = lazylist.step(step)
-			if attempt:
-				me.changeDisplay(attempt)
-			elif step == 1:
-				self.parent.newBlurb("Earliest reply selected")
-			elif step == -1:
-				self.parent.newBlurb("Latest reply selected")
-
-		box = client.DisplayOverlay(self.parent,lazylist[0],"    ")
-		box.addKeys({
-			"a-j":	lambda me: scroll(me,-1)
-			,"a-k":	lambda me: scroll(me,1)
-		})
-		box.add()
+		callback = lambda _,isreply,__: isreply
+		client.addMessageScroller(self, callback
+			,msgEmpty="No replies have been accumulated"
+			,msgEarly	= "Earliest reply selected"
+			,msgLate	= "Latest reply selected")
 
 	def pmConnect(self):
 		self.parent.loop.create_task(self.bot.joinPMs())
 
 	def ctrlf(self):
 		'''Ctrl-f style message stepping'''
-
 		def search(string):
-			try:
-				lazylist = client.LazyIterList(self.messages.iterateWith(
-					lambda post,_,__: -1 != post.post.find(string)))
-			except TypeError:
-				self.parent.newBlurb("No message containing `%s` found"%string)
-				return
-			
-			def scroll(me,step):
-				attempt = lazylist.step(step)
-				if attempt:
-					me.changeDisplay(attempt)
-				elif step == 1:
-					self.parent.newBlurb("No earlier instance of `%s`"%string)
-				elif step == -1:
-					self.parent.newBlurb("No later instance of `%s`"%string)
-
-			newbox = client.DisplayOverlay(self.parent,lazylist[0],"    ")
-			newbox.addKeys({
-				"a-j":	lambda me: scroll(me,-1)
-				,"a-k":	lambda me: scroll(me,1)
-				,"n":	lambda me: scroll(me,-1)
-				,"N":	lambda me: scroll(me,1)
-			})
-			newbox.add()
+			callback = lambda post,_,__: -1 != post.post.lower().find(string)
+			client.addMessageScroller(self, callback
+				,msgEmpty	= "No message containing `%s` found" % string
+				,msgEarly	= "No earlier instance of `%s`" % string
+				,msgLate	= "No later instance of `%s`" % string)
 
 		#minimalism
 		box = client.InputOverlay(self.parent,None,search)

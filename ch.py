@@ -8,9 +8,7 @@ by those versions.
 '''
 #TODO	better modtools
 #TODO	property docstrings
-#TODO	After playing around with nmap, I found that sockets to the private message
-#		service are open on c1.chatango.com:5222 (not 8080 as protocol upgrade
-#		requests from HTTP are made)
+#TODO	finish implementing PMs
 #TODO	Rename lastResponse and _last in GroupProtocol
 #
 #		when receiving "track" commands in private messages, each "track" download
@@ -53,7 +51,7 @@ THUMBNAIL_FIX_RE = re.compile(r"(https?://ust\.chatango\.com/.+?/)t(_\d+.\w+)")
 weights = [['5', 75], ['6', 75], ['7', 75], ['8', 75], ['16', 75], ['17', 75], ['18', 75], ['9', 95], ['11', 95], ['12', 95], ['13', 95], ['14', 95], ['15', 95], ['19', 110], ['23', 110], ['24', 110], ['25', 110], ['26', 110], ['28', 104], ['29', 104], ['30', 104], ['31', 104], ['32', 104], ['33', 104], ['35', 101], ['36', 101], ['37', 101], ['38', 101], ['39', 101], ['40', 101], ['41', 101], ['42', 101], ['43', 101], ['44', 101], ['45', 101], ['46', 101], ['47', 101], ['48', 101], ['49', 101], ['50', 101], ['52', 110], ['53', 110], ['55', 110], ['57', 110], ['58', 110], ['59', 110], ['60', 110], ['61', 110], ['62', 110], ['63', 110], ['64', 110], ['65', 110], ['66', 110], ['68', 95], ['71', 116], ['72', 116], ['73', 116], ['74', 116], ['75', 116], ['76', 116], ['77', 116], ['78', 116], ['79', 116], ['80', 116], ['81', 116], ['82', 116], ['83', 116], ['84', 116]]
 specials = {"de-livechat": 5, "ver-anime": 8, "watch-dragonball": 8, "narutowire": 10, "dbzepisodeorg": 10, "animelinkz": 20, "kiiiikiii": 21, "soccerjumbo": 21, "vipstand": 21, "cricket365live": 21, "pokemonepisodeorg": 22, "watchanimeonn": 22, "leeplarp": 27, "animeultimacom": 34, "rgsmotrisport": 51, "cricvid-hitcric-": 51, "tvtvanimefreak": 54, "stream2watch3": 56, "mitvcanal": 56, "sport24lt": 56, "ttvsports": 56, "eafangames": 56, "myfoxdfw": 67, "peliculas-flv": 69, "narutochatt": 70}
 
-HTML_CODES = \
+_HTML_CODES = \
 	[("&#39;","'")
 	,("&gt;",'>')
 	,("&lt;",'<')
@@ -78,7 +76,7 @@ def formatRaw(raw):
 		raw = raw[:start-acc] + rep + raw[end-acc:]
 		acc += end-start - len(rep)
 	raw.replace("&nbsp;",' ')
-	for i,j in HTML_CODES:
+	for i,j in _HTML_CODES:
 		raw = raw.replace(i,j)
 	#remove trailing \n's
 	while len(raw) and raw[-1] == "\n":
@@ -552,8 +550,7 @@ class PMProtocol(ChatangoProtocol):
 		self._transport = transport
 		self.connected = True
 		self.lastResponse = self._loop.time()
-		#TODO session id is part of what gets sent to tlogin
-		self.sendCommand("tlogin",self.authKey,firstcmd = True)
+		self.sendCommand("tlogin",self.authKey,self._uid,firstcmd = True)
 
 	def _recv_seller_name(self,*args):
 		#seller_name returns two arguments: the session id called with tlogin and
@@ -723,7 +720,7 @@ class Group(Connection):
 		channel = (((channel&2)<<2 | (channel&1))<<8)
 		if not html:
 			#replace HTML equivalents
-			for i,j in reversed(HTML_CODES):
+			for i,j in reversed(_HTML_CODES):
 				post = post.replace(j,i)
 			post = post.replace('\n',"<br/>")
 		if len(post) > self._maxLength:
@@ -824,7 +821,7 @@ class Privates(Connection):
 	def sendPost(self,user,post,html=False):
 		if not html:
 			#replace HTML equivalents
-			for i,j in reversed(HTML_CODES):
+			for i,j in reversed(_HTML_CODES):
 				post = post.replace(j,i)
 			post = post.replace('\n',"<br/>")
 		self._protocol.sendCommand("msg",user,"<m>{}</m>".format(post))

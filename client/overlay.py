@@ -18,12 +18,12 @@ import traceback
 from signal import SIGTSTP,SIGINT #redirect ctrl-z and ctrl-c
 from time import time,localtime,strftime as format_time
 from .display import *
-from .util import staticize,override,escapeText,History
+from .util import staticize,override,escapeText,LazyIterList,History
 
-__all__ =	["CHAR_COMMAND","Box","OverlayBase","TextOverlay"
-			,"InputOverlay","ListOverlay","VisualListOverlay","ColorOverlay"
+__all__ =	["CHAR_COMMAND","Box","OverlayBase","TextOverlay","InputOverlay"
+			,"ListOverlay","VisualListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","ConfirmOverlay","CommandOverlay"
-			,"ChatOverlay","DisplayOverlay","InputMux","Main"]
+			,"DisplayOverlay","ChatOverlay","addMessageScroller","InputMux","Main"]
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -1023,13 +1023,16 @@ class EscapeOverlay(OverlayBase):
 	replace = False
 	def __init__(self,parent,scroll):
 		super(EscapeOverlay, self).__init__(parent)
+		addTab		= override(staticize(scroll.append,'\t'),-1,nodoc=True)
+		addNewLine	= override(staticize(scroll.append,'\n'),-1,nodoc=True)
+		addSlash	= override(staticize(scroll.append,'\\'),-1,nodoc=True)
 		self._keys.update({
 			-1:		quitlambda
-			,9:		override(staticize(scroll.append,'\t'),-1,nodoc=True)
-			,10:	override(staticize(scroll.append,'\n'),-1,nodoc=True)
-			,ord('n'):	override(staticize(scroll.append,'\n'),-1,nodoc=True)
-			,ord('\\'):	override(staticize(scroll.append,'\\'),-1,nodoc=True)
-			,ord('t'):	override(staticize(scroll.append,'\t'),-1,nodoc=True)
+			,9:		addTab
+			,10:	addNewLine
+			,ord('n'):	addNewLine
+			,ord('\\'):	addSlash
+			,ord('t'):	addTab
 		})
 		self.nomouse()
 		self.noalt()
@@ -1097,6 +1100,11 @@ class Messages:
 			if self.lazyFilter[0] != -1 or needRecolor:
 				self.redolines(recolor = needRecolor)
 			return 1
+
+	def dump(self):
+		print("selector: %d, startheight: %d"%(self.selector,self.startheight))
+		print("linesup: %d, distance: %d"%(self.linesup,self.distance))
+		print("innerheight: %d" % self.innerheight)
 
 	def getselected(self):
 		'''
@@ -1224,6 +1232,7 @@ class Messages:
 			self.distance = windowHeight
 
 		self.selector = select-1
+#		self.dump()
 
 		return addlines
 
@@ -1245,7 +1254,7 @@ class Messages:
 		select += 1
 
 		lastLines = self.allMessages[-self.selector][2]
-		nextPos = (self.linesup + self.distance - lastLines - addlines)
+		nextPos = self.linesup + self.distance - lastLines - addlines
 		#append message lines if necessary
 		if nextPos < 0 and select > 0:
 			message = self.allMessages[-select]
@@ -1255,26 +1264,24 @@ class Messages:
 			message[2] = addlines
 			self.lines.extend(new)
 			#to cancel out with distance in the else statement below
-			self.innerheight = -min(addlines,windowHeight)
+			self.innerheight = -max(addlines,addlines-windowHeight)
 
 		#fix the last line to show all of the message
 		if select == self.startheight+1:
-			msgSize = self.allMessages[-select][2]
-			self.distance = min(windowHeight,msgSize)
-			newheight = max(0,msgSize - windowHeight)
+			self.distance = min(windowHeight,addlines)
+			newheight = max(0,addlines - windowHeight)
 			#this newheight will hide fewer lines; it's less than innerheight
 			#the delta, if there are still lines left
 			self.linesup -= self.innerheight - newheight
 			self.innerheight = newheight
-			#startheight is off by one anyway
+			#startheight is off by one
 			self.startheight = select-1
 		#scroll down to the next message
 		elif select and self.selector == self.startheight+1:
-			msgSize = self.allMessages[-select][2]
-			self.distance = min(windowHeight,msgSize)
+			self.distance = min(windowHeight,addlines)
 			self.linesup -= min(windowHeight, self.innerheight + self.distance)
 
-			self.innerheight = max(0,msgSize - windowHeight)
+			self.innerheight = max(0,addlines - windowHeight)
 			self.startheight = select-1
 		else:
 			self.distance -= lastLines
@@ -1286,6 +1293,7 @@ class Messages:
 			self.startheight = 0
 			self.innerheight = 0
 
+#		self.dump()
 		return addlines
 			
 	def append(self,message,args = None):
@@ -1307,7 +1315,8 @@ class Messages:
 		if self.selector:
 			self.selector += 1
 			#scrolled up too far to see
-			if msg[2] + self.distance > (self.parent.parent.y-1):
+			if self.startheight or \
+			msg[2] + self.distance > (self.parent.parent.y-1):
 				self.startheight += 1
 				self.lazyFilter[0]	= msg[3]
 				self.lazyColor[0]	= msg[3]
@@ -1394,6 +1403,19 @@ class Messages:
 		self.startheight = messageIndex-1
 		self.redolines()
 
+	def iterateWith(self,callback):
+		'''
+		Returns an iterator that yields when the callback is true.
+		Callback is called with arguments passed into append (or msgPost...)
+		'''
+		select = 1
+		while select <= len(self.allMessages):
+			message = self.allMessages[-select]
+			#ignore system messages
+			if message[1] and callback(*message[1]):
+				yield message[0],select
+			select += 1
+
 	#REAPPLY METHODS-----------------------------------------------------------
 	def redolines(self, width = None, height = None, recolor = False):
 		'''
@@ -1402,8 +1424,8 @@ class Messages:
 		'''
 		#search for a fitting message to set as selector
 		i = self.allMessages[-self.selector]
-		while self.selector > 0 and ((i[1] is None) or \
-		not self.parent.filterMessage(*i[1])):
+		while self.selector > 0 and ((i[1] is not None) and \
+		self.parent.filterMessage(*i[1])):
 			self.selector -= 1
 			i = self.allMessages[-self.selector]
 
@@ -1412,7 +1434,8 @@ class Messages:
 			self.startheight = max(0,self.selector-1)
 		if width is None: width = self.parent.parent.x
 		if height is None: height = self.parent.parent.y
-		height -= 1 #because the bottom line is reserved
+		#must change lazyColor bounds 
+		if self.startheight: recolor = True	
 
 		startMessage = self.allMessages[-self.startheight-1]
 		if recolor and startMessage[1] is not None:	#don't decolor system messages
@@ -1456,6 +1479,7 @@ class Messages:
 			#duplicate the lazy bounds
 			self.lazyColor = list(self.lazyFilter)
 
+#		self.dump()
 		self.lines = newlines
 		self.canselect = True
 
@@ -1686,9 +1710,65 @@ class ChatOverlay(TextOverlay):
 		ret = self.messages.prepend(post,list(args))
 		yield from self.parent.display()
 		return ret
-	@asyncio.coroutine
-	def msgDelete(self,number):
-		self.messages.delete(number)
+
+class _MessageScrollOverlay(DisplayOverlay):
+	'''
+	DisplayOverlay with the added capabilities to display messages in a
+	LazyIterList and to scroll a ChatOverlay to the message index of such
+	a message. Do not directly create these; use addMessageScroller.
+	'''
+	def __init__(self,chatOverlay,lazyList,msgEarly,msgLate):
+		self.lazyList = lazyList
+
+		self.msgno = lazyList[0][1]
+		self.msgEarly = msgEarly
+		self.msgLate = msgLate
+		
+		super(_MessageScrollOverlay,self).__init__(chatOverlay.parent,
+			lazyList[0][0], chatOverlay.messages._INDENT)
+		scrollDown	= lambda: self.nextMessage(-1)
+		scrollUp	= lambda: self.nextMessage(1)
+		scrollTo 	= lambda: chatOverlay.messages.scrollToMessage(self.msgno) \
+			or -1
+		self._keys.update({
+			9:			scrollTo
+			,10:		scrollTo
+			,ord('N'):	scrollDown
+			,ord('n'):	scrollUp
+		})
+		self._altkeys.update({
+			ord('j'):	scrollDown
+			,ord('k'):	scrollUp
+		})
+
+	def nextMessage(self,step):
+		attempt = self.lazyList.step(step)
+		if attempt:
+			self.changeDisplay(attempt[0])
+			self.msgno = attempt[1]
+		elif step == 1:
+			self.parent.newBlurb(self.msgEarly)
+		elif step == -1:
+			self.parent.newBlurb(self.msgLate)
+
+def addMessageScroller(chatOverlay,callback,msgEmpty,msgEarly,msgLate):
+	'''
+	Add a message scroller for a particular callback.
+	This wraps Messages.iterateWith with a LazyIterList, spawns an instance
+	of _MessageScrollOverlay, and adds it to the same parent as chatOverlay.
+	Error blurbs are printed to chatOverlay: msgEmpty for an exhausted
+	iterator, msgEarly for when no earlier messages matching the callback
+	are found, and msgLate for the same situation with later messages.
+	'''
+	try:
+		lazyList = LazyIterList(chatOverlay.messages.iterateWith(callback))
+	except TypeError:
+		chatOverlay.parent.newBlurb(msgEmpty)
+		return
+
+	ret = _MessageScrollOverlay(chatOverlay,lazyList,msgEarly,msgLate)
+	ret.add()
+	return ret
 
 #INPUTMUX CLASS-----------------------------------------------------------------
 class InputMux:
@@ -1919,7 +1999,7 @@ class Main:
 		templeft = str(left or self._bottom_edges[0])
 		tempright = str(right or self._bottom_edges[1])
 		room = self.x - collen(templeft) - collen(tempright)
-		if room < 1:
+		if room < 1 and (right or left):
 			raise SizeException("updateinfo failed: right and left overlap")
 
 		self._bottom_edges[0] = templeft

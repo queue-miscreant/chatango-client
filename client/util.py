@@ -120,11 +120,13 @@ class LazyIterList(list):
 					return
 			self._pos += 1
 			return self[self._pos]
-		elif step == -1:
 			#step backward
-			if not self._pos: return	#at the beginning already
+		elif step == -1:
+			#at the beginning already
+			if not self._pos: return
 			self._pos -= 1
 			return self[self._pos]
+		return
 
 class History:
 	'''Container class for historical entries, similar to an actual shell'''
