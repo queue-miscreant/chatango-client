@@ -601,6 +601,8 @@ class ChatangoOverlay(client.ChatOverlay):
 			#try to get selected links
 			alllinks = me.selectedList()
 			if len(alllinks):
+				#add the iterator; idempotent if already in set
+				alllinks.add(me.it)
 				#function to open all links, like in above selected message
 				def openall():
 					needRecolor = False
@@ -650,6 +652,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		'''List members of current group'''
 		if self.bot.joinedGroup is None: return
 		def select(me):
+			'''Reply to user'''
 			current = me.list[me.it]
 			current = current.split(' ')[0]
 			if current[0] in "!#":
@@ -658,6 +661,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			self.text.append("@%s " % current)
 			return -1
 		def tab(me):
+			'''Ignore/unignore user'''
 			current = me.list[me.it]
 			current = current.split(' ')[0]
 			if current not in self.bot.ignores:
@@ -665,17 +669,17 @@ class ChatangoOverlay(client.ChatOverlay):
 			else:
 				self.bot.ignores.remove(current)
 			self.redolines()
-
-		users = self.bot.joinedGroup.userlist
-		dispList = {i:users.count(i) for i in users}
-		dispList = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
-			for i,j in dispList.items()])
 		def drawIgnored(me,string,i):
 			selected = me.list[i]
 			if selected.split(' ')[0] not in self.bot.ignores: return
 			string[:-1]+'i'
 			string.insertColor(-1,3)
-		
+	
+		users = self.bot.joinedGroup.userlist
+		dispList = {i:users.count(i) for i in users}
+		dispList = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
+			for i,j in dispList.items()])
+	
 		box = client.ListOverlay(self.parent,dispList,drawIgnored)
 		box.addKeys({
 			"enter":	select
@@ -690,9 +694,11 @@ class ChatangoOverlay(client.ChatOverlay):
 	def setchannel(self):
 		'''List channels'''
 		def select(me):
+			'''Set channel'''
 			self.bot.channel = me.it
 			return -1
 		def ontab(me):
+			'''Ignore/unignore channel'''
 			self.bot.filtered_channels[me.it] = \
 				not self.bot.filtered_channels[me.it]
 			self.redolines()
@@ -703,8 +709,8 @@ class ChatangoOverlay(client.ChatOverlay):
 						
 		box = client.ListOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
 		box.addKeys({
-			"enter":select
-			,"tab":	ontab
+			"enter":	select
+			,"tab":		ontab
 		})
 		box.it = self.bot.channel
 		box.add()
@@ -717,7 +723,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		'''List replies in a convenient overlay'''
 		callback = lambda _,isreply,__: isreply
 		client.addMessageScroller(self, callback
-			,msgEmpty="No replies have been accumulated"
+			,msgEmpty	= "No replies have been accumulated"
 			,msgEarly	= "Earliest reply selected"
 			,msgLate	= "Latest reply selected")
 
@@ -849,9 +855,10 @@ def tabFile(patharg):
 			ls = os.listdir(newpath)
 		else:
 			ls = os.listdir(path.expanduser(initpath))
-	except (NotADirectoryError, FileNotFoundError):
-		print("error occurred, aborting tab attempt on ", patharg)
-		return [],0
+#	except (NotADirectoryError, FileNotFoundError):
+#		print("error occurred, aborting tab attempt on ", patharg)
+#		return [],0
+	except ZeroDivisionError: pass
 		
 	suggestions = []
 	if search: #we need to iterate over what we were given

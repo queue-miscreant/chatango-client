@@ -33,7 +33,8 @@ Features:
 * Client commands
 	* Type \`help while the input box is empty to display a list of commands implemented
 * Mouse support
-* Chat filters based on message attributes
+* Ctrl-f substring searching and reply accumulation
+	* Jumping to found messages
 
 
 Dependencies:
@@ -91,7 +92,20 @@ The comment about symlinking to /usr/local/bin still works.
 
 Changelog
 =========================
-## v6.283183 *2018/1/18*
+## v6.28318530 *2018/2/26*
+* Reworked Messages storage object
+	* Scrolling is no longer limited to selecting the highest message
+	* Drawing is no longer selectively from the top or bottom depending on message height
+	* Arbitrary length lines that can be recalculated at whim with redolines
+	* Redolines and recolorlines are no longer arbitrarily coroutines
+* Added InputMuxer, a class to help build menus that manipulate a list variables in some context
+	* Formatting and options now produce overlays through this
+* Added MessageScrollOverlay and addMessageScroll, a helper function which builds instances of the former
+	* Features message scrolling on keypresses `a-k` and `a-j`, `n` and `N`
+	* Jump to message on keypress `enter`
+	* Built ctrl-f message searching on top of these functions
+
+## v6.2831853 *2018/1/18*
 * Rewrote much of the infrastructure with asyncio
 	* Uses callbacks and futures for things like InputOverlays
 	* Rewrote ch.py (the chatango library) with async calls
