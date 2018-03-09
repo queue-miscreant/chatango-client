@@ -803,7 +803,7 @@ class ChatangoOverlay(client.ChatOverlay):
 				raise Exception
 			nameColor = self.parent.get256color(post.nColor)
 			fontColor = self.parent.get256color(post.fColor)
-		except Exception as exc:
+		except Exception:
 			nameColor = getColor(post.user)
 			fontColor = getColor(post.user)
 			
@@ -855,10 +855,9 @@ def tabFile(patharg):
 			ls = os.listdir(newpath)
 		else:
 			ls = os.listdir(path.expanduser(initpath))
-#	except (NotADirectoryError, FileNotFoundError):
-#		print("error occurred, aborting tab attempt on ", patharg)
-#		return [],0
-	except ZeroDivisionError: pass
+	except (NotADirectoryError, FileNotFoundError):
+		print("error occurred, aborting tab attempt on ", patharg)
+		return [],0
 		
 	suggestions = []
 	if search: #we need to iterate over what we were given
@@ -943,8 +942,7 @@ def startClient(loop,creds):
 		location = path.expanduser(' '.join(args))
 		location = location.replace("\ ",' ')
 
-		trim = location.find("file://")
-		if not trim:
+		if not location.find("file://"):
 			location = location[7:]
 		
 		success = chatbot.uploadAvatar(location)
@@ -1135,7 +1133,6 @@ if __name__ == "__main__":
 	except Exception:
 		import traceback
 		print("\x1b[31mFatal error occurred\x1b[m")
-		traceback.print_exc()
 		traceback.print_exc(file=sys.stderr)
 	finally:
 		if mainTask != None and not mainTask.done():

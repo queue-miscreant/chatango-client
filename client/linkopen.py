@@ -27,7 +27,9 @@ MPV_PATH = "mpv"
 if sys.platform == "cygwin":
 	IMG_PATH = ""
 	if os.environ.get("BROWSER") is None:
-		os.environ["BROWSER"] = os.path.pathsep.join(["chrome","firefox"])
+		#prioritize cygstart for windows users
+		os.environ["BROWSER"] = os.path.pathsep.join(["cygstart","chrome",
+			"firefox","waterfox","palemoon"])
 
 import webbrowser
 
