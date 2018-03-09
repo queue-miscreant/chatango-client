@@ -9,18 +9,25 @@ import sys
 import re
 from shlex import shlex
 from .wcwidth import wcwidth
+from .util import Tokenize
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT","_COLORS"
-			,"SELECT_AND_MOVE","perror","DisplayException","def256colors"
-			,"getColor","rawNum","collen","numdrawing","columnslice","Coloring"
-			,"Scrollable","Tokenize","ScrollSuggest"]
+			,"SELECT_AND_MOVE","DisplayException","def256colors"
+			,"getColor","rawNum","collen","numdrawing","columnslice"
+			,"Coloring","Scrollable","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
-_SANE_TEXTBOX =		r"\s\-/`~,;"			#sane textbox splitting characters
-_UP_TO_WORD_RE =	re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))	#sane textbox word-backspace
-_NEXT_WORD_RE =	re.compile("([{0}]*[^{0}]+)".format(_SANE_TEXTBOX))	#sane textbox word-delete
-_LINE_BREAKING = "- 　"	#line breaking characters
+#sane textbox splitting characters
+_SANE_TEXTBOX =	r"\s\-/`~,;"
+#sane textbox word-backspace
+_UP_TO_WORD_RE =re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))
+#sane textbox word-delete
+_NEXT_WORD_RE =	re.compile("([{0}]*[^{0}]+)".format(_SANE_TEXTBOX))
+#line breaking characters
+_LINE_BREAKING ="- 　"
+
+#COLORING CONSTANTS------------------------------------------------------------
 #valid color names to add
 _COLOR_NAMES =	["black"
 				,"red"
@@ -54,17 +61,6 @@ CLEAR_FORMATTING = "\x1b[m"
 _TABLEN = 4
 #arbitrary number of characters a scrollable can have and not scroll
 MAX_NONSCROLL_WIDTH = 5
-
-#DEBUG STUFF--------------------------------------------------------------------
-def perror(*args,**kwargs):
-	'''
-	The client runs in a curses session, so screen printing must be done
-	cautiously. overlay.py sets up logging to /etc/client.log if sterr is not
-	redirected with 2>[file]
-	'''
-	kwargs.update("file",sys.stderr)
-	print(*args,**kwargs)
-	sys.stderr.flush()
 
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
@@ -305,18 +301,20 @@ class Coloring:
 		up to `length` columns
 		'''
 		outdentLen = collen(outdent)
-		TABSPACE = length - outdentLen
-		THRESHOLD = length >> 1
-		broken = []
+		TABSPACE = length - outdentLen	#the number of columns sans the outdent
+		THRESHOLD = length >> 1	#number of columns before we break on a nice
+								#character rather than slicing a word in half
+		broken = []		#array of broken lines with formatting
 
-		start = 0
-		space = length
-		lineBuffer = ""
+		start = 0		#start at 0
+		space = length	#number of columns left
+		lineBuffer = ""	#broken line with formatting; emptied into `broken`
 
-		formatPos = 0
-		getFormat = bool(len(self._positions))
-		lastColor = 0
-		lastEffect = 0
+		formatPos = 0	#self.formatting iterator
+		getFormat = bool(len(self._positions))	#is there a next color?
+		lastColor = 0	#last color used; used to continue it after line breaks
+		lastEffect = 0	#last effect used; //
+		lastcol = 0		#last possible breaking character position
 		for pos,j in enumerate(self._str):	#character by character, the old fashioned way
 			lenj = wcwidth(j)
 			#if we have a 'next color', and we're at that position
@@ -391,9 +389,14 @@ class Coloring:
 				lastcol = 0
 				space = TABSPACE - lenj
 
+		#empty the buffer one last time
 		lineBuffer += self._str[start:]
 		if lineBuffer.rstrip() != outdent.rstrip():
 			broken.append(lineBuffer+CLEAR_FORMATTING)
+
+		#guarantee that a broken empty string is a singleton of an empty string
+		if not len(broken):
+			broken = [""]
 
 		return broken
 
@@ -413,11 +416,12 @@ def collen(string):
 		escape = temp
 	return a
 
-def numdrawing(string):
+def numdrawing(string,width=-1):
 	'''
-	Number of drawing characters in the string.
+	Number of drawing characters in the string (up to width).
 	Ostensibly the number of non-escape sequence characters
 	'''
+	if not width: return 0
 	escape = False
 	a = 0
 	for i in string:
@@ -425,6 +429,8 @@ def numdrawing(string):
 		#not escaped and not transitioning to escape
 		if not temp:
 			a += 1
+			if a == width:
+				return a
 		elif i.isalpha(): #is escaped and i is alpha
 			escape = False
 			continue
@@ -450,55 +456,7 @@ def columnslice(string,width):
 		escape = temp
 	return lentr + 1
 
-class PromoteSet:
-	'''Set with ordering like a list, whose elements can be promoted to the front'''
-	def __init__(self,iterable = None):
-		self._list = list()
-		if iterable is not None:
-			for i in iterable:
-				self.append(i)
-	def __repr__(self):
-		return "PromoteSet({})".format(repr(self._list))
-	def __iter__(self):
-		return iter(self._list)
-	def __len__(self):
-		return len(self._list)
-	
-	def append(self,new):
-		'''Add an item to the list'''
-		if new in self._list: return
-		self._list.append(new)
-	def extend(self,iterable):
-		'''Append each element in iterable'''
-		for i in iterable:
-			self.append(i)
-	def clear(self):
-		'''Clear list'''
-		self._list.clear()
-	def remove(self,old):
-		'''Remove an item from the list'''
-		if old not in self._list: raise KeyError(old)
-		self._list.remove(old)
-	def promote(self,index):
-		'''Promote index to the front of the list'''
-		if len(self._list) < 2: return
-		i = 1
-		found = False
-		#look for the value
-		while i <= len(self._list):
-			if self._list[-i] == index:
-				found = True
-				break
-			i += 1
-		if not found: raise KeyError(index)
-		if i == len(self._list): return
-		#swap successive values
-		while i < len(self._list):
-			temp = self._list[-i-1] 
-			self._list[-i-1] = self._list[-i]
-			self._list[-i] = temp
-			i += 1
-
+#SCROLLABLE CLASSES-------------------------------------------------------------
 class Scrollable:
 	'''Scrollable text input'''
 	def __init__(self,width,string=""):
@@ -565,10 +523,7 @@ class Scrollable:
 			'\\r').replace('\t',' '*_TABLEN)
 	#SET METHODS----------------------------------------------------------------
 	def _onchanged(self):
-		'''
-		Since this class is meant to take a 'good' slice of a string,
-		this method is a useful callback for when the slice updates
-		'''
+		'''Useful callback to retreive a new 'good' slice of a string'''
 		pass
 
 	def setstr(self,new):
@@ -692,73 +647,6 @@ class Scrollable:
 		#or after pressing space
 		pass
 
-class Tokenize:
-	'''Class for holding new tab-completers'''
-	prefixes = []		#list of prefixes to search for
-	suggestions = []	#list of (references to) lists for each prefix paradigm
-	def __init__(self,newPrefix=None,newSuggest=None):
-		'''Add a new tabbing method'''
-		if newPrefix is None and newSuggest is None:
-			self.localPrefix = []
-			self.localSuggest = []
-			self.complete = lambda x: Tokenize.complete(x,self)
-			return
-		elif newPrefix is None or newSuggest is None:
-			raise DisplayException("Invalid number of arguments for Tokenize. "+\
-				"Must be 0 args for instance, or 2 args for global class")
-		self.prefixes.append(newPrefix)
-		self.suggestions.append(newSuggest)
-
-	def addComplete(self,newPrefix,newSuggest):
-		'''Add new completion token to the class'''
-		self.localPrefix.append(newPrefix)
-		self.localSuggest.append(newSuggest)
-	
-	@classmethod
-	def complete(cls,incomplete,self=None):
-		'''Find rest of a name in a list'''
-		if isinstance(self,cls):
-			#go through the local lists first
-			ret = cls._complete(incomplete,self.localPrefix,self.localSuggest)
-			if ret:	#don't cut off all completions
-				return ret
-		return cls._complete(incomplete,cls.prefixes,cls.suggestions)
-
-	@staticmethod
-	def _complete(incomplete,prefixes,suggestions):
-		'''Backend for complete'''
-		#O(|prefixes|*|suggestionlists|), so n**2
-		for pno,prefix in enumerate(prefixes):
-			preflen = len(prefix)
-			if (incomplete[:preflen] == prefix):
-				search = incomplete[preflen:]
-				return Tokenize.collapseSuggestion(search,suggestions[pno])[0]
-		return []
-
-	@staticmethod
-	def collapseSuggestion(search,suggestion,addSpace=True):
-		'''
-		When a list of suggestions (or a callable that generates them) has
-		been found, cut the list down based on the length of the search
-		'''
-		truecut = 0			#how far to go back
-		cut = len(search)	#the current depth into the suggestion
-		if callable(suggestion):
-			suggest,cut = suggestion(search)
-			#if we want to back up the cursor instead of go into the suggestion
-			if cut < 0:
-				truecut = cut
-				cut = 0
-		else:
-			suggest = [i for i in list(suggestion) if not i.find(search)]
-
-		if addSpace:
-			addSpace = ' '
-		else:
-			addSpace = ''
-
-		return [i[cut:]+addSpace for i in suggest], truecut
-
 class ScrollSuggest(Scrollable):
 	'''
 	A Scrollable extension with suggestion built in
@@ -788,7 +676,7 @@ class ScrollSuggest(Scrollable):
 		self._argumentComplete[command] = suggestion
 
 	def complete(self):
-		'''Complete the last word before the cursor'''
+		'''Complete the last word before the cursor or go to next suggestion'''
 		#need to generate list
 		if not self._suggestList:
 			closeQuote = False
@@ -859,7 +747,7 @@ class ScrollSuggest(Scrollable):
 			return True
 
 	def backcomplete(self):
-		'''Complete, but backwards. Assumes already generated list'''
+		'''Return to previous entry in tab list'''
 		if self._suggestList:
 			self._suggestNum = (self._suggestNum-1)%len(self._suggestList)
 			suggestion = self._suggestList[self._suggestNum]

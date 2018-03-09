@@ -27,7 +27,9 @@ MPV_PATH = "mpv"
 if sys.platform == "cygwin":
 	IMG_PATH = ""
 	if os.environ.get("BROWSER") is None:
-		os.environ["BROWSER"] = os.path.pathsep.join(["chrome","firefox"])
+		#prioritize cygstart for windows users
+		os.environ["BROWSER"] = os.path.pathsep.join(["cygstart","chrome",
+			"firefox","waterfox","palemoon"])
 
 import webbrowser
 
@@ -67,7 +69,13 @@ class open_link:
 					return
 			#check for patterns
 			for i,j in self._sites.items():
-				if 1+link.find(i):
+				found = False
+				#compiled regex
+				if isinstance(i,type(_POST_FORMAT_RE)):
+					found = i.search(link)
+				elif isinstance(i,str):
+					found = 1+link.find(i)
+				if found: 
 					client.loop.create_task(j(client,link))
 					return
 			#check for lambdas
@@ -128,9 +136,8 @@ class opener:
 def images(main, link, ext):
 	'''Start feh (or replaced image viewer) in main.loop'''
 	if not IMG_PATH:
-		ret = yield from browser(main,link)
-		return ret
-	main.newBlurb("Displaying image... ({})".format(ext))
+		return browser(main,link)
+	main.newBlurb("Displaying image... (%s)" % ext)
 	args = [IMG_PATH, link]
 	try:
 		yield from asyncio.create_subprocess_exec(*args
@@ -158,14 +165,14 @@ def videos(main, link, ext):
 def browser(main, link):
 	'''Open new tab without webbrowser outputting to stdout/err'''
 	main.newBlurb("Opened new tab")
-	#magic code to output stderr to /dev/null
-	savout = os.dup(1)	#get another file descriptor for stdout
-	saverr = os.dup(2)	#get another file descriptor for stderr
-	os.close(1)		#close stdout briefly because open_new_tab doesn't pipe stdout to null
-	os.close(2)
-#	os.open(os.devnull, os.O_RDWR)	#open devnull for writing
+	#get file descriptors for stdout
+	fdout, fderr =  sys.stdout.fileno(), sys.stderr.fileno()
+	savout, saverr = os.dup(fdout), os.dup(fderr)	#get new file descriptors
+	#close output briefly because open_new_tab prints garbage
+	os.close(fdout)	
+	if fdout != fderr: os.close(fderr)
 	try:
 		webbrowser.open_new_tab(link)
-	finally:
-		os.dup2(savout, 1)	#reopen stdout
-		os.dup2(saverr, 2)
+	finally:	#reopen stdout/stderr
+		os.dup2(savout, fdout)	
+		os.dup2(saverr, fderr)

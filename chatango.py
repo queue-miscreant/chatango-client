@@ -26,6 +26,8 @@ Useful Key Bindings:
 	^R:		Refresh current group
 	^T:		Switch to new group
 '''
+#TODO	friendlier PM interface
+
 import os
 import os.path as path
 import asyncio
@@ -52,27 +54,9 @@ creds_readwrite = {
 	,"filtered_channels":	3
 }
 
-#-------------------------------------------------------------------------------
-#constants for chatango
-FONT_FACES = \
-	["Arial"
-	,"Comic Sans"
-	,"Georgia"
-	,"Handwriting"
-	,"Impact"
-	,"Palatino"
-	,"Papyrus"
-	,"Times New Roman"
-	,"Typewriter" ]
-FONT_SIZES = [9,10,11,12,13,14]
-OPTION_NAMES = \
-	["Mouse:"
-	,"Multiple link open warning threshold:"
-	,"Save ignore list:"
-	,"Console bell on reply:"
-	,"256 colors:"
-	,"HTML colors:"
-	,"Colorize anon names:"]
+#Constants----------------------------------------------------------------------
+#look for whole word links starting with http:// or https://
+LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
 
 DEFAULT_OPTIONS = \
 	{"mouse": 		False
@@ -88,19 +72,69 @@ DEFAULT_FORMATTING = \
 	,"0"		#font face
 	,12]		#font size
 
-LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
-
+#ChatBot related functionality--------------------------------------------------
 _client = None
 def getClient():
 	global _client
 	if isinstance(_client,ChatBot):
 		return _client
 
+#fractur is broken, so change it to normal
+mapRange = lambda charid,inrange,beginchar: (charid in inrange) and (charid - \
+	inrange.start + beginchar)
+badCharsets = [
+	 (range(119964,119964+26),ord('A'))	#uppercase math
+	,(range(119990,119990+26),ord('a'))	#lowercase math
+	,(range(119860,119860+26),ord('A'))	#uppercase italic math
+	,(range(119886,119886+26),ord('a'))	#lowercase italic math
+	,(range(120172,120172+26),ord('A'))	#uppercase fractur
+	,(range(120198,120198+26),ord('a'))	#lowercase fractur
+	,(range(120068,120068+26),ord('A'))	#uppercase math fractur
+	,(range(120094,120094+26),ord('a'))	#lowercase math fractur
+]
+
 def parsePost(post, me, ishistory):
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
+	
+	#remove egregiously large amounts of newlines (more than 2)
+	#also edit sections with right to left override
+	cooked = ""
+	newlineCounter = 0
+	rtlbuffer, rtl = "", False
+	for i in post.post:
+		#look for fractur and double-width fonts that don't comply with wcwidth
+		for f in badCharsets:
+			mapped = mapRange(ord(i),f[0],f[1])
+			if mapped:
+				i = chr(mapped)
+				break
+
+		if i == '\n':
+			#right-to-left sequences end on newlines
+			if rtl:
+				cooked += rtlbuffer + (newlineCounter < 2 and i or "")
+				rtl = False
+				rtlbuffer = ""
+			if newlineCounter < 2:
+				cooked += i
+			newlineCounter += 1
+		elif i == u'\u202d':
+			cooked += rtlbuffer
+			rtlbuffer = ""
+			rtl = False
+		elif i == u'\u202e':
+			rtl = True
+		else:
+			newlineCounter = 0
+			if rtl:
+				rtlbuffer = i + rtlbuffer
+			else:
+				cooked += i
+	if rtl:
+		cooked += rtlbuffer
 	#format as ' user: message'; the space is for the channel
-	msg = " {}: {}".format(post.user,post.post)
+	msg = " {}: {}".format(post.user,cooked)
 	#extra arguments. use in colorizers
 	return (msg, post, isreply, ishistory)
 
@@ -110,7 +144,8 @@ class ChatBot(ch.Manager):
 	#event hookup
 
 	def __init__(self, parent, creds):
-		super(ChatBot,self).__init__(creds["user"],creds["passwd"],loop=parent.loop)
+		super(ChatBot,self).__init__(creds["user"],creds["passwd"]
+			,loop=parent.loop)
 
 		self.creds = creds
 		#default to the given user name
@@ -120,6 +155,7 @@ class ChatBot(ch.Manager):
 		self.filtered_channels = self.creds["filtered_channels"]
 		self.options = self.creds["options"]
 
+		self.connecting = False
 		self.joinedGroup = None
 		self.channel = 0
 
@@ -129,13 +165,15 @@ class ChatBot(ch.Manager):
 		#disconnect from all groups on done
 		client.onDone(self.leaveAll())
 
-		#new tabbing for members, ignoring the # and ! induced by anons and tempnames
+		#tabbing for members, ignoring the # and ! induced by anons and temps
 		client.Tokenize('@',self.members)
 		self.loop.create_task(self.connect())
 
 	@classmethod
 	def addEvent(cls,eventname,func):
 		ancestor = None
+		#limit modifiable attributes
+		eventname = "on"+eventname
 		try:
 			ancestor = getattr(self,eventname)
 		except AttributeError: pass
@@ -145,9 +183,17 @@ class ChatBot(ch.Manager):
 	
 	@asyncio.coroutine
 	def connect(self):
+		if self.connecting: return
+		self.connecting = True
 		self.members.clear()
 		yield from self.mainOverlay.msgSystem("Connecting")
-		yield from self.joinGroup(self.creds["room"])
+		try:
+			yield from self.joinGroup(self.creds["room"])
+		except ConnectionError:
+			self.mainOverlay.msgSystem("Failed to connect to room '%s'" %
+				self.creds["room"])
+		finally:
+			self.connecting = False
 	
 	@asyncio.coroutine
 	def reconnect(self):
@@ -174,13 +220,18 @@ class ChatBot(ch.Manager):
 		if self.joinedGroup is None: return
 		self.loop.create_task(self.joinedGroup.sendPost(text,self.channel))
 
+	def tryPM(self,user,text):
+		if self.PMs is None: return
+		self.PMs.sendPost(user,text)
+		dummy = ch.Post((self.me,0,0,0,0,text),2)
+		self.loop.create_task(self.onPrivateMessage(None,dummy,False))
+
 	def parseLinks(self,raw,prepend = False):
 		'''
 		Add links to lastlinks. Prepend argument for adding links backwards,
 		like with historical messages.
 		'''
 		newLinks = []
-		#look for whole word links starting with http:// or https://
 		#don't add the same link twice
 		for i in LINK_RE.findall(raw+' '):
 			if i not in newLinks:
@@ -202,8 +253,17 @@ class ChatBot(ch.Manager):
 		yield from self.mainOverlay.msgSystem("Connected to "+group.name)
 		yield from self.mainOverlay.msgTime(group.last,"Last message at ")
 		yield from self.mainOverlay.msgTime()
+
+	@asyncio.coroutine
+	def onPMConnect(self, group):
+		yield from self.mainOverlay.msgSystem("Connected to PMs")
+
+	@asyncio.coroutine
+	def onPrivateMessage(self, group, post, historical):
+		user = post.user
+		msg = " {}: {}".format(post.user,post.post)
+		yield from self.mainOverlay.msgPost(msg,post,True,historical)
 		
-	#on message
 	@asyncio.coroutine
 	def onMessage(self, group, post):
 		'''On message. No event because you can just use ExamineMessage'''
@@ -215,8 +275,9 @@ class ChatBot(ch.Manager):
 		self.parseLinks(post.post)
 		msg = parsePost(post, self.me, False)
 		#						  isreply		ishistory
-		if self.options["bell"] and msg[2] and not msg[3]:
-			client.soundBell()
+		if self.options["bell"] and msg[2] and not msg[3] and \
+		not self.mainOverlay.filterMessage(*(msg[1:])):
+			self.mainOverlay.parent.soundBell()
 
 		self.members.promote(user.lower())
 		yield from self.mainOverlay.msgPost(*msg)
@@ -232,19 +293,20 @@ class ChatBot(ch.Manager):
 			self.parseLinks(post.post, True)
 			msg = parsePost(post, self.me, True)
 			yield from self.mainOverlay.msgPrepend(*msg)
-		self.mainOverlay.canselect = True
+		self.mainOverlay.messages.canselect = True
 
 	@asyncio.coroutine
 	def onFloodWarning(self, group):
-		self.mainOverlay.msgSystem("Flood ban warning issued")
+		yield from self.mainOverlay.msgSystem("Flood ban warning issued")
 
 	@asyncio.coroutine
 	def onFloodBan(self, group, secs):
-		self.onFloodBanRepeat(group, secs)
+		yield from self.onFloodBanRepeat(group, secs)
 
 	@asyncio.coroutine
 	def onFloodBanRepeat(self, group, secs):
-		self.mainOverlay.msgSystem("You are banned for %d seconds"%secs)
+		yield from self.mainOverlay.msgSystem("You are banned for %d seconds" %
+			secs)
 	
 	@asyncio.coroutine
 	def onParticipants(self, group):
@@ -272,22 +334,145 @@ class ChatBot(ch.Manager):
 	def onConnectionError(self, group, error):
 		if isinstance(error,ConnectionResetError) or error == None:
 			self.mainOverlay.messages.stopSelect()
-			yield from self.mainOverlay.msgSystem("Connection lost; press any key to reconnect")
-			client.BlockingOverlay(self.mainOverlay.parent,
-				self.reconnect(),"connect").add()
+			yield from self.mainOverlay.msgSystem(
+				"Connection lost; press ^R to reconnect")
 		else:
-			self.mainOverlay.msgSystem("Connection error occurred. Try joining another room with ^T")
+			self.mainOverlay.msgSystem(
+				"Connection error occurred. Try joining another room with ^T")
 
-#OVERLAY EXTENSION--------------------------------------------------------------
-class ChatangoOverlay(client.MainOverlay):
+#Formatting InputMux------------------------------------------------------------
+formatting = client.InputMux()	#formatting mux
+@formatting.listel("color")
+def fontcolor(context):
+	"Font Color"
+	return context.bot.creds["formatting"][0]
+@fontcolor.setter
+def _(context,value):
+	context.bot.creds["formatting"][0] = client.ColorOverlay.toHex(value)
+
+@formatting.listel("color")
+def namecolor(context):
+	"Name Color"
+	return context.bot.creds["formatting"][1]
+@namecolor.setter
+def _(context,value):
+	context.bot.creds["formatting"][1] = client.ColorOverlay.toHex(value)
+
+@formatting.listel("enum")
+def fontface(context):
+	"Font Face"
+	tab = ch.FONT_FACES
+	index = context.bot.creds["formatting"][2]
+	return tab,int(index)
+@fontface.setter
+def _(context,value):
+	context.bot.creds["formatting"][2] = str(value)
+
+@formatting.listel("enum")
+def fontsize(context):
+	"Font Size"
+	tab = ch.FONT_SIZES
+	index = context.bot.creds["formatting"][3]
+	return list(map(str,tab)),tab.index(index)
+@fontsize.setter
+def _(context,value):
+	context.bot.creds["formatting"][3] = ch.FONT_SIZES[value]
+
+#Options InputMux---------------------------------------------------------------
+options = client.InputMux()	#options mux
+@options.listel("bool")
+def mouse(context):
+	"Mouse:"
+	return context.bot.options["mouse"]
+@mouse.setter
+def _(context,value):
+	context.bot.options["mouse"] = value
+
+@options.listel("str")
+def linkwarn(context):
+	"Multiple link open warning threshold:"
+	return context.bot.options["linkwarn"]
+@linkwarn.setter
+def _(context,value):
+	try:
+		context.bot.options["linkwarn"] = int(value)
+	except ValueError: pass
+
+@options.listel("bool")
+def ignoresave(context):
+	"Save ignore list:"
+	return context.bot.options["ignoresave"]
+@ignoresave.setter
+def _(context,value):
+	global creds_readwrite,creds_entire
+	context.bot.options["ignoresave"] = value
+	if value:
+		creds_readwrite["ignores"] |= 2
+	else:
+		creds_readwrite["ignores"] &= ~2
+		creds_entire["ignores"].clear()
+
+@options.listel("bool")
+def bell(context):
+	"Console bell on reply:"
+	return context.bot.options["bell"]
+@bell.setter
+def _(context,value):
+	context.bot.options["bell"] = value
+
+@options.listel("bool")
+def two56(context):
+	"256 colors:"
+	return context.bot.options["256color"]
+@two56.setter
+def _(context,value):
+	context.bot.options["256color"] = value
+	context.parent.toggle256(context.bot.options["256color"])
+	context.recolorlines()
+
+@options.listel("bool")
+def htmlcolor(context):
+	"HTML colors:"
+	return context.bot.options["htmlcolor"]
+@htmlcolor.setter
+def _(context,value):
+	context.bot.options["htmlcolor"] = value
+	context.recolorlines()
+@htmlcolor.drawer
+def _(mux,value,coloring):
+	'''Gray out if invalid due to 256 colors being off'''
+	htmlcolor.boolDrawer(mux,value,coloring)
+	if not mux.indices["two56"]._getter(mux.context):
+		coloring.clear()
+		coloring.insertColor(0,mux.parent.get256color(245))
+
+@options.listel("bool")
+def anoncolor(context):
+	"Colorize anon names:"
+	return context.bot.options["anoncolor"]
+@anoncolor.setter
+def _(context,value):
+	context.bot.options["anoncolor"] = value
+	context.recolorlines()
+@anoncolor.drawer
+def _(mux,value,coloring):
+	'''Gray out if invalid due to 256 colors and HTML colors being off'''
+	anoncolor.boolDrawer(mux,value,coloring)
+	if not (mux.indices["two56"]._getter(mux.context) and \
+	mux.indices["htmlcolor"]._getter(mux.context)):
+		coloring.clear()
+		coloring.insertColor(0,mux.parent.get256color(245))
+
+#Extended overlay---------------------------------------------------------------
+class ChatangoOverlay(client.ChatOverlay):
 	def __init__(self,parent,bot):
 		#XXX not sure why, but lastlinks after the super raises an exception
 		self.lastlinks = []
 		self.visited_links = []
 
 		super(ChatangoOverlay, self).__init__(parent)
+		self.messages.canselect = False
 		self.bot = bot
-		self.canselect = False
 		self.addKeys({	"enter":	self.onenter
 						,"a-enter":	self.onaltenter
 						,"tab":		self.ontab
@@ -295,10 +480,13 @@ class ChatangoOverlay(client.MainOverlay):
 						,"f3":		self.listmembers
 						,"f4":		self.setformatting
 						,"f5":		self.setchannel
+						,"f6":		self.listreplies
+						,"f7":		self.pmConnect
 						,"f12":		self.options
+						,"^f":		self.ctrlf
+						,"^g":		self.openlastlink
 						,"^n":		self.addignore
 						,"^t":		self.joingroup
-						,"^g":		self.openlastlink
 						,"^r":		self.reloadclient
 				,"mouse-left":		self.clickOnLink
 				,"mouse-middle":	client.override(self.openSelectedLinks,1)
@@ -308,10 +496,11 @@ class ChatangoOverlay(client.MainOverlay):
 		#when we've gotten too many messages
 		group = self.bot.joinedGroup
 		if group:
-			self.canselect = False
+			self.messages.canselect = False
 			group.getMore()
 			#wait until we're done getting more
 			self.parent.newBlurb("Fetching more messages")
+		super(ChatangoOverlay,self)._maxselect()
 
 	def clear(self):
 		super(ChatangoOverlay, self).clear()
@@ -344,6 +533,7 @@ class ChatangoOverlay(client.MainOverlay):
 		if pos == -1: return 1
 		link = ""
 		smallest = -1
+		#look over all link matches; take the middle and find the smallest delta
 		for i in LINK_RE.finditer(str(msg[0])):
 			linkpos = (i.start() + i.end()) // 2
 			distance = abs(linkpos - pos)
@@ -362,6 +552,15 @@ class ChatangoOverlay(client.MainOverlay):
 			self.openSelectedLinks()
 			return
 		text = str(self.text)
+		firstSpace = text.find(' ')
+		if firstSpace != -1 and text[:firstSpace] == "/w":
+			secondSpace = text.find(' ',firstSpace+1)
+			if secondSpace != -1 and text[firstSpace+1] == "@":
+				user = text[firstSpace+2:secondSpace]
+				self.text.clear()
+				self.bot.tryPM(user,text[secondSpace+1:])
+			return
+			
 		#if it's not just spaces
 		if text.count(' ') != len(text):
 			#add it to the history
@@ -387,7 +586,7 @@ class ChatangoOverlay(client.MainOverlay):
 				if self.bot.me:
 					msg = msg.replace("@"+self.bot.me,"")
 				self.text.append("@{}: `{}`".format(name, msg.replace('`',"")))
-			except Exception as e: client.perror(e)
+			except: pass
 			return 
 		self.text.complete()
 	
@@ -397,8 +596,35 @@ class ChatangoOverlay(client.MainOverlay):
 
 		#enter key
 		def select(me):
+			'''Open link with selected opener'''
 			if not me.list: return
-			current = linksList[len(me.list)-me.it-1] #this enforces the wanted link is selected
+			#try to get selected links
+			alllinks = me.selectedList()
+			if len(alllinks):
+				#add the iterator; idempotent if already in set
+				alllinks.add(me.it)
+				#function to open all links, like in above selected message
+				def openall():
+					needRecolor = False
+					for i in alllinks:
+						current = me.raw[len(me.list)-i-1]
+						client.open_link(self.parent,current,me.mode)
+						if current not in self.visited_links:
+							self.visited_links.append(current)
+							needRecolor = True
+					#self explanatory
+					if needRecolor: self.recolorlines()
+
+				if len(alllinks) >= self.bot.options["linkwarn"]:
+					self.parent.holdBlurb(
+						"Really open {} links? (y/n)".format(len(alllinks)))
+					client.ConfirmOverlay(self.parent, openall).add()
+				else:
+					openall()
+				me.clear()
+				return -1
+
+			current = me.raw[len(me.list)-me.it-1] #this enforces the wanted link is selected
 			client.open_link(self.parent,current,me.mode)
 			if current not in self.visited_links:
 				self.visited_links.append(current)
@@ -406,23 +632,27 @@ class ChatangoOverlay(client.MainOverlay):
 			#exit
 			return -1
 
-		def drawVisited(string,i,maxval):
-			current = self.lastlinks[maxval-i-1] #this enforces the wanted link is selected
+		def drawVisited(me,string,i):
+			current = me.raw[len(me.list)-i-1]
 			try:
 				if current in self.visited_links:
 					string.insertColor(0,self.parent.get256color(245))
 			except: pass
 
-		box = client.ListOverlay(self.parent,[i.replace("https://","").replace("http://","")
-			for i in reversed(linksList)], drawVisited, client.getDefaults())
-		box.addKeys({"enter":select
-					,"tab": client.override(select)})
+		buildList = lambda raw: [i.replace("https://","").replace("http://","")
+			for i in reversed(raw)]
+
+		box = client.VisualListOverlay(self.parent, (buildList,linksList),
+			drawVisited, client.getDefaults())
+		box.addKeys({"enter":	select
+					,"tab": 	client.override(select)})
 		box.add()
 
 	def listmembers(self):
 		'''List members of current group'''
 		if self.bot.joinedGroup is None: return
 		def select(me):
+			'''Reply to user'''
 			current = me.list[me.it]
 			current = current.split(' ')[0]
 			if current[0] in "!#":
@@ -431,6 +661,7 @@ class ChatangoOverlay(client.MainOverlay):
 			self.text.append("@%s " % current)
 			return -1
 		def tab(me):
+			'''Ignore/unignore user'''
 			current = me.list[me.it]
 			current = current.split(' ')[0]
 			if current not in self.bot.ignores:
@@ -438,197 +669,79 @@ class ChatangoOverlay(client.MainOverlay):
 			else:
 				self.bot.ignores.remove(current)
 			self.redolines()
-
+		def drawIgnored(me,string,i):
+			selected = me.list[i]
+			if selected.split(' ')[0] not in self.bot.ignores: return
+			string[:-1]+'i'
+			string.insertColor(-1,3)
+	
 		users = self.bot.joinedGroup.userlist
 		dispList = {i:users.count(i) for i in users}
 		dispList = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
 			for i,j in dispList.items()])
-		def drawIgnored(string,i,maxval):
-			selected = dispList[i]
-			if selected.split(' ')[0] not in self.bot.ignores: return
-			string[:-1]+'i'
-			string.insertColor(-1,3)
-		
+	
 		box = client.ListOverlay(self.parent,dispList,drawIgnored)
 		box.addKeys({
-			"enter":select
-			,"tab":tab
+			"enter":	select
+			,"tab":		tab
 		})
 		box.add()
 
 	def setformatting(self):
 		'''Chatango formatting settings'''
-		#select which further input to display
-		def select(me):
-			formatting = self.bot.creds["formatting"]
-			furtherInput = None
-			#ask for font color
-			if me.it == 0:
-				def selectSlide(me):
-					formatting[0] = me.getHex()		#this is still by reference
-					self.bot.setFormatting()
-					return -1
-					
-				def enter(me):
-					if me.it < 12:
-						formatting[0] = me.getColor()
-						self.bot.setFormatting()
-						return -1
-					else:
-						me.openSliders(selectSlide)
-
-				furtherInput = client.ColorOverlay(self.parent,formatting[0])
-				furtherInput.addKeys({"enter":enter})
-			#ask for name color
-			elif me.it == 1:
-				def selectSlide(me):
-					formatting[1] = me.getHex()		#this is still by reference
-					self.bot.setFormatting()
-					return -1
-					
-				def enter(me):
-					if me.it < 12:
-						formatting[1] = me.getColor()
-						self.bot.setFormatting()
-						return -1
-					else:
-						me.openSliders(selectSlide)
-			
-				furtherInput = client.ColorOverlay(self.parent,formatting[1])
-				furtherInput.addKeys({"enter":enter})
-			#font face
-			elif me.it == 2:
-				def enter(me):
-					formatting[2] = str(me.it)
-					self.bot.setFormatting()
-					return -1
-				
-				furtherInput = client.ListOverlay(self.parent,FONT_FACES)
-				furtherInput.addKeys({"enter":enter})
-				furtherInput.it = int(formatting[2])
-			#ask for font size
-			elif me.it == 3:
-				def enter(me):
-					formatting[3] = FONT_SIZES[me.it]
-					self.bot.setFormatting()
-					return -1
-					
-				furtherInput = client.ListOverlay(self.parent,list(map(str,FONT_SIZES)))
-				furtherInput.addKeys({"enter":enter})
-				furtherInput.it = FONT_SIZES.index(formatting[3])
-			#insurance
-			if furtherInput is None: raise Exception("How is this error even possible?")
-			#add the overlay
-			furtherInput.add()
-			#set formatting, even if changes didn't occur
-			
-		box = client.ListOverlay(self.parent,["Font Color","Name Color","Font Face","Font Size"])
-		box.addKeys({"enter":select})
-		box.add()
+		formatting.add(self.parent,self)
 
 	def setchannel(self):
 		'''List channels'''
 		def select(me):
+			'''Set channel'''
 			self.bot.channel = me.it
 			return -1
 		def ontab(me):
+			'''Ignore/unignore channel'''
 			self.bot.filtered_channels[me.it] = \
 				not self.bot.filtered_channels[me.it]
 			self.redolines()
-		def drawActive(string,i,maxval):
+		def drawActive(me,string,i):
 			if self.bot.filtered_channels[i]: return
 			col = i and i+12 or 16
 			string.insertColor(-1,col)
 						
 		box = client.ListOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
 		box.addKeys({
-			"enter":select
-			,"tab":	ontab
+			"enter":	select
+			,"tab":		ontab
 		})
 		box.it = self.bot.channel
 		box.add()
 
 	def options(self):
 		'''Options'''
-		def select(me):
-			global creds_entire, creds_readwrite
+		options.add(self.parent,self)
 
-			if me.it == 0:		#mouse
-				self.bot.options["mouse"] ^= 1
-				self.parent.toggleMouse(self.bot.options["mouse"])
-				pass
-			elif me.it == 1:	#link opening
-				def update(entry):
-					try:
-						self.bot.options["linkwarn"] = int(entry)
-					except:	pass
-				furtherInput = client.InputOverlay(self.parent, "Warning threshold "+\
-					"for simultaneously opening links", update)
-				furtherInput.add()
-			elif me.it == 2:	#save ignores
-				self.bot.options["ignoresave"] ^= 1
-				if self.bot.options["ignoresave"]:
-					creds_readwrite["ignores"] |= 2
-				else:
-					creds_readwrite["ignores"] &= ~2
-					creds_entire["ignores"].clear()
-			elif me.it == 3:	#bell on reply
-				self.bot.options["bell"] ^= 1
-			elif me.it == 4:	#256 colors
-				self.bot.options["256color"] ^= 1
-				self.parent.toggle256(self.bot.options["256color"])
-				self.recolorlines()
-			elif me.it == 5:	#html colors
-				self.bot.options["htmlcolor"] ^= 1
-				self.recolorlines()
-			elif me.it == 6:	#colored anons
-				self.bot.options["anoncolor"] ^= 1
-				self.recolorlines()
-			
-		def drawOptions(string,i,maxval):
-			if i == 0:		#mouse
-				string[:-1]+(self.bot.options["mouse"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["mouse"] and 11 or 3)
-			elif i == 1:	#link opening
-				numlinks = str(self.bot.options["linkwarn"])
-				startpos = -len(numlinks)
-				string[:startpos]+numlinks
-				string.insertColor(startpos,4)
-			elif i == 2:	#save ignores
-				string[:-1]+(self.bot.options["ignoresave"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["ignoresave"] and 11 or 3)
-			elif i == 3:	#bell on reply
-				string[:-1]+(self.bot.options["bell"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["bell"] and 11 or 3)
-			elif i == 4:
-				string[:-1]+(self.bot.options["256color"] and "y" or "n")
-				string.insertColor(-1,self.bot.options["256color"] and 11 or 3)
-			elif i == 5:
-				string[:-1]+(self.bot.options["htmlcolor"] and "y" or "n")
-				#prereqs
-				if (self.bot.options["256color"]):
-					#colorize y/n
-					string.insertColor(-1,self.bot.options["htmlcolor"] and 11 or 3)
-				else:
-					try: #try making it grayed out
-						string.insertColor(0,self.parent.get256color(245))
-					except: pass
-			elif i == 6:
-				string[:-1]+(self.bot.options["anoncolor"] and "y" or "n")
-				#prereqs
-				if self.bot.options["256color"] and self.bot.options["htmlcolor"]:
-					string.insertColor(-1,self.bot.options["anoncolor"] and 11 or 3)
-				else:
-					try:
-						string.insertColor(0,self.parent.get256color(245))
-					except: pass
+	def listreplies(self):
+		'''List replies in a convenient overlay'''
+		callback = lambda _,isreply,__: isreply
+		client.addMessageScroller(self, callback
+			,msgEmpty	= "No replies have been accumulated"
+			,msgEarly	= "Earliest reply selected"
+			,msgLate	= "Latest reply selected")
 
-		box = client.ListOverlay(self.parent, OPTION_NAMES, drawOptions)
-		box.addKeys({
-			"enter":select
-			,"tab":	select
-			,' ':	select
-		})
+	def pmConnect(self):
+		self.parent.loop.create_task(self.bot.joinPMs())
+
+	def ctrlf(self):
+		'''Ctrl-f style message stepping'''
+		def search(string):
+			callback = lambda post,_,__: -1 != post.post.lower().find(string)
+			client.addMessageScroller(self, callback
+				,msgEmpty	= "No message containing `%s` found" % string
+				,msgEarly	= "No earlier instance of `%s`" % string
+				,msgLate	= "No later instance of `%s`" % string)
+
+		#minimalism
+		box = client.InputOverlay(self.parent,None,search)
+		box.text.setnonscroll("^f: ")
 		box.add()
 
 	def addignore(self):
@@ -666,11 +779,14 @@ class ChatangoOverlay(client.MainOverlay):
 		inp.add()
 
 	def filterMessage(self, post, isreply, ishistory):
+		user = post.user
+		if user[0] in ("!","#"):
+			user = post.user[1:]
 		return any((
 				#filtered channels
 				self.bot.filtered_channels[post.channel]
 				#ignored users
-				,post.user.lower() in self.bot.ignores
+				,user.lower() in self.bot.ignores
 		))
 
 	def colorizeMessage(self, msg, post, isreply, ishistory):
@@ -684,7 +800,7 @@ class ChatangoOverlay(client.MainOverlay):
 			#use name colors?
 			if not self.bot.options["htmlcolor"] or \
 			(self.bot.options["anoncolor"] and post.user[0] in "#!"):
-				raise Exception()
+				raise Exception
 			nameColor = self.parent.get256color(post.nColor)
 			fontColor = self.parent.get256color(post.fColor)
 		except Exception:
@@ -727,20 +843,20 @@ def getColor(name,init = 6,split = 109,rot = 6):
 		total ^= (n > split) and n or ~n
 	return (total+rot)%11
 
-def tabFile(path):
+def tabFile(patharg):
 	'''A file tabbing utility'''
-	findpart = path.rfind(path.sep)
+	findpart = patharg.rfind(path.sep)
 	#offset how much we remove
 	numadded = 0
-	initpath,search = path[:findpart+1], path[findpart+1:]
+	initpath,search = patharg[:findpart+1], patharg[findpart+1:]
 	try:
-		if not path or path[0] not in "~/": #try to generate full path
+		if not patharg or patharg[0] not in "~/": #try to generate full path
 			newpath = path.join(os.getcwd(),initpath)
-			ls = listdir(newpath)
+			ls = os.listdir(newpath)
 		else:
-			ls = listdir(path.expanduser(initpath))
+			ls = os.listdir(path.expanduser(initpath))
 	except (NotADirectoryError, FileNotFoundError):
-		client.perror("error occurred, aborting")
+		print("error occurred, aborting tab attempt on ", patharg)
 		return [],0
 		
 	suggestions = []
@@ -754,7 +870,7 @@ def tabFile(path):
 
 	if not suggestions:
 		return [],0
-	return suggestions,-len(path) + numadded
+	return suggestions,numadded - len(patharg)
 
 #stuff to do on startup
 @asyncio.coroutine
@@ -815,11 +931,7 @@ def startClient(loop,creds):
 		chatbot = getClient()
 		if not chatbot: return
 
-		keysList = client.ListOverlay(parent,dir(chatbot.mainOverlay))
-		keysList.addKeys({
-			"enter": lambda x: -1
-		})
-		return keysList
+		return chatbot.mainOverlay.getHelpOverlay()
 
 	@client.command("avatar",tabFile)
 	def avatar(parent,*args):
@@ -827,11 +939,19 @@ def startClient(loop,creds):
 		chatbot = getClient()
 		if not chatbot: return
 
-		path = path.expanduser(' '.join(args))
-		path = path.replace("\ ",' ')
-		chatbot.uploadAvatar(path)
+		location = path.expanduser(' '.join(args))
+		location = location.replace("\ ",' ')
 
-	#done preparing client constants-------------------------------------------------
+		if not location.find("file://"):
+			location = location[7:]
+		
+		success = chatbot.uploadAvatar(location)
+		if success:
+			parent.newBlurb("Successfully updated avatar")
+		else:
+			parent.newBlurb("Failed to update avatar")
+
+	#done preparing client constants--------------------------------------------
 	main = client.Main(loop=loop)
 	mainTask = main.start()
 	yield from main.prepared.wait()
@@ -889,7 +1009,7 @@ def startClient(loop,creds):
 
 	global _client
 	_client = ChatBot(main,creds)
-	return main.exited #the future to exit the loop
+	return mainTask,main.exited #the future to exit the loop
 
 #SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
 #custom and credential saving setup
@@ -995,7 +1115,7 @@ if __name__ == "__main__":
 	except (FileNotFoundError, ValueError):
 		pass
 	except Exception as exc:
-		raise IOError("Error reading creds! Aborting...") from exc
+		raise IOError("Fatal error reading creds! Aborting...") from exc
 
 	#finally import custom
 	if IMPORT_CUSTOM:
@@ -1004,19 +1124,20 @@ if __name__ == "__main__":
 
 	#start
 	loop = asyncio.get_event_loop()
-	if not hasattr(loop,"create_future"):
-		setattr(loop,"create_future",lambda: asyncio.Future(loop=loop))
+	mainTask = None
 	try:
 		start = startClient(loop,newCreds)
-		endFuture = loop.run_until_complete(start)
+		mainTask,endFuture = loop.run_until_complete(start)
 		if endFuture:
 			loop.run_until_complete(endFuture.wait())
-	except Exception as exc:
-		client.perror(exc)
+	except Exception:
+		import traceback
+		print("\x1b[31mFatal error occurred\x1b[m")
+		traceback.print_exc(file=sys.stderr)
 	finally:
-		try:
-				loop.run_until_complete(loop.shutdown_asyncgens())
-		except: pass
+		if mainTask != None and not mainTask.done():
+			mainTask.cancel()
+		loop.run_until_complete(loop.shutdown_asyncgens())
 		#close all loop IO
 		loop.close()
 		#save
@@ -1033,4 +1154,4 @@ if __name__ == "__main__":
 		except KeyError:
 			pass
 		except Exception as exc:
-			raise IOError("Error writing creds!") from exc
+			raise IOError("Fatal error writing creds!") from exc

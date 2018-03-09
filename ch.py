@@ -8,18 +8,38 @@ by those versions.
 '''
 #TODO	better modtools
 #TODO	property docstrings
-#TODO	I have no idea why, but PMs are failing in all implementations.
-#		Attempts to connect via websockets in a browser console also failed
-#		abandoning attempts to fix for a while
+#TODO	finish implementing PMs
+#TODO	Rename lastResponse and _last in GroupProtocol
 #
+#		when receiving "track" commands in private messages, each "track" download
+#		is followed like a `getblock` command
+#		
+#		pending checking if `getblock` is "get tracking block" or "get blocklist" (which is null)
+
 ################################
 #Python Imports
 ################################
-import os
 import random
 import re
 import urllib.request
 import asyncio
+import time
+from os.path import basename
+from socket import gaierror
+
+#enumerable constants
+FONT_FACES = \
+	["Arial"
+	,"Comic Sans"
+	,"Georgia"
+	,"Handwriting"
+	,"Impact"
+	,"Palatino"
+	,"Papyrus"
+	,"Times New Roman"
+	,"Typewriter" ]
+#limited sizes available for non-premium accounts
+FONT_SIZES = [9,10,11,12,13,14]
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1
@@ -31,7 +51,7 @@ THUMBNAIL_FIX_RE = re.compile(r"(https?://ust\.chatango\.com/.+?/)t(_\d+.\w+)")
 weights = [['5', 75], ['6', 75], ['7', 75], ['8', 75], ['16', 75], ['17', 75], ['18', 75], ['9', 95], ['11', 95], ['12', 95], ['13', 95], ['14', 95], ['15', 95], ['19', 110], ['23', 110], ['24', 110], ['25', 110], ['26', 110], ['28', 104], ['29', 104], ['30', 104], ['31', 104], ['32', 104], ['33', 104], ['35', 101], ['36', 101], ['37', 101], ['38', 101], ['39', 101], ['40', 101], ['41', 101], ['42', 101], ['43', 101], ['44', 101], ['45', 101], ['46', 101], ['47', 101], ['48', 101], ['49', 101], ['50', 101], ['52', 110], ['53', 110], ['55', 110], ['57', 110], ['58', 110], ['59', 110], ['60', 110], ['61', 110], ['62', 110], ['63', 110], ['64', 110], ['65', 110], ['66', 110], ['68', 95], ['71', 116], ['72', 116], ['73', 116], ['74', 116], ['75', 116], ['76', 116], ['77', 116], ['78', 116], ['79', 116], ['80', 116], ['81', 116], ['82', 116], ['83', 116], ['84', 116]]
 specials = {"de-livechat": 5, "ver-anime": 8, "watch-dragonball": 8, "narutowire": 10, "dbzepisodeorg": 10, "animelinkz": 20, "kiiiikiii": 21, "soccerjumbo": 21, "vipstand": 21, "cricket365live": 21, "pokemonepisodeorg": 22, "watchanimeonn": 22, "leeplarp": 27, "animeultimacom": 34, "rgsmotrisport": 51, "cricvid-hitcric-": 51, "tvtvanimefreak": 54, "stream2watch3": 56, "mitvcanal": 56, "sport24lt": 56, "ttvsports": 56, "eafangames": 56, "myfoxdfw": 67, "peliculas-flv": 69, "narutochatt": 70}
 
-HTML_CODES = \
+_HTML_CODES = \
 	[("&#39;","'")
 	,("&gt;",'>')
 	,("&lt;",'<')
@@ -56,7 +76,7 @@ def formatRaw(raw):
 		raw = raw[:start-acc] + rep + raw[end-acc:]
 		acc += end-start - len(rep)
 	raw.replace("&nbsp;",' ')
-	for i,j in HTML_CODES:
+	for i,j in _HTML_CODES:
 		raw = raw.replace(i,j)
 	#remove trailing \n's
 	while len(raw) and raw[-1] == "\n":
@@ -70,6 +90,17 @@ class Post:
 	Post objects have support for channels and formatting parsing
 	'''
 	def __init__(self, raw, msgtype):
+		if msgtype == 2:
+			self.user = raw[0]
+			self.time = float(raw[3])
+			self.post = formatRaw(':'.join(raw[5:]))
+			self.nColor = ''
+			self.fColor = ''
+			self.fSize = 12
+			self.fFace = 0
+			self.channel = 0
+			return
+
 		self.time = float(raw[0])
 		self.uid = raw[3]
 		self.unid = raw[4]
@@ -94,6 +125,12 @@ class Post:
 				self.fColor = ''
 				self.fSize = 12
 			self.fFace = int(tag.group(5) or 0)
+		else:
+			self.nColor = ''
+			self.fColor = ''
+			self.fSize = 12
+			self.fFace = 0
+
 		#user parsing
 		user = raw[1].lower()
 		if not user:
@@ -141,12 +178,12 @@ class _Generate:
 			if gw >= num2:
 				return i
 
-	def pmAuth(self):
+	def pmAuth(username,password):
 		'''Request auth cookie for PMs'''
 		login = urllib.request.urlopen("http://chatango.com/login",
 			  data = urllib.parse.urlencode({
-				 "user_id":		self.username
-				,"password":	self.password
+				 "user_id":		username
+				,"password":	password
 				,"storecookie":	"on"
 				,"checkerrors":	"yes" 
 				}).encode())
@@ -176,7 +213,7 @@ class _Multipart(urllib.request.Request):
 					v[1].close()
 					#then set the filename to filename
 					multiform.append((self.DISPOSITION % k) + \
-						"; filename=\"%s\"" % os.path.basename(v[1].name))
+						"; filename=\"%s\"" % basename(v[1].name))
 					multiform.append("Content-Type: %s" % v[0])
 				except AttributeError as ae:
 					raise ValueError("expected file-like object") from ae
@@ -206,6 +243,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		self._pingTask = None
 		#socket stuff
 		self._transport = None
+		self.lastResponse = -1
 		self.connected = False
 		self._rbuff = b""
 		#user id
@@ -227,6 +265,7 @@ class ChatangoProtocol(asyncio.Protocol):
 				self._loop.create_task(receive(args[1:]))
 			except AttributeError: pass
 		self._rbuff = commands[-1]
+		self.lastResponse = self._loop.time()
 
 	def connection_lost(self, exc):
 		'''Cancel the ping task and fire onConnectionError'''
@@ -251,7 +290,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		except AttributeError: pass
 
 	@asyncio.coroutine
-	def disconnect(self):
+	def disconnect(self,raiseError=False):
 		'''Safely close the transport. Prevents firing onConnectionError 'lost' '''
 		if self._transport:
 			self._transport.close()
@@ -259,25 +298,28 @@ class ChatangoProtocol(asyncio.Protocol):
 		if self._pingTask:
 			self._pingTask.cancel()
 			self._pingTask = None
-		self.connected = False
+		self.connected = raiseError
 
 	@asyncio.coroutine
 	def ping(self):
 		'''Send a ping to keep the transport alive'''
-		while True:
+		while 60 > self._loop.time() - self.lastResponse:
 			self.sendCommand("")
 			yield from asyncio.sleep(self._pingDelay)
+		self._transport.close()
 
+	"""
 	@asyncio.coroutine
 	def _recv_premium(self, args):
 		'''Receive premium command. Called for both PM and Group'''
 		#TODO write setBgMode and setRecordingMode
-		if float(args[1]) > self._loop.time():
+		if float(args[1]) > time.time():
 			self._storage._premium = True
 			if self._storage._messageBackground: self.setBgMode(1)
 			if self._storage._messageRecord: self.setRecordingMode(1)
 		else:
 			self._storage._premium = False
+	"""
 
 class GroupProtocol(ChatangoProtocol):
 	'''Protocol interpreter for Chatango group commands'''
@@ -293,6 +335,7 @@ class GroupProtocol(ChatangoProtocol):
 		#if i cared, i'd put this property-setting in a super method
 		self._transport = transport
 		self.connected = True
+		self.lastResponse = self._loop.time()
 		self.sendCommand("bauth", self._storage._name, self._uid, self._manager.username,
 			self._manager.password, firstcmd = True)
 
@@ -495,6 +538,115 @@ class GroupProtocol(ChatangoProtocol):
 		'''Request updated banlist (Mod)'''
 		self.sendCommand("blocklist", "block", "", "next", "500")
 
+class PMProtocol(ChatangoProtocol):
+	'''Protocol interpreter for Chatango private message commands'''
+	def __init__(self, manager, authkey, loop=None):
+		super(PMProtocol,self).__init__(manager,Privates(self),loop=loop)
+		self.authkey = authkey
+
+	def connection_made(self, transport):
+		'''Begins communication with and connects to the PM server'''
+		#if i cared, i'd put this property-setting in a super method
+		self._transport = transport
+		self.connected = True
+		self.lastResponse = self._loop.time()
+		self.sendCommand("tlogin",self.authKey,self._uid,firstcmd = True)
+
+	def _recv_seller_name(self,*args):
+		#seller_name returns two arguments: the session id called with tlogin and
+		#the username; neither of these are important except as a sanity check
+		pass
+
+	@asyncio.coroutine
+	def _recv_OK(self,*args):
+		self.callEvent("onPMConnect")
+		self.sendCommand("settings")
+		self.sendCommand("wl")	#friends list
+		self._pingTask = self._loop.create_task(self.ping())
+
+	@asyncio.coroutine
+	def _recv_msg(self,args):
+		post = Post(args,2)
+		self.callEvent("onPrivateMessage", post, False)
+
+	@asyncio.coroutine
+	def _recv_msgoff(self,args):
+		post = Post(args,2)
+		self.callEvent("onPrivateMessage", post, True)
+
+	@asyncio.coroutine
+	def _recv_wl(self,args):
+		'''Received friends list (watch list)'''
+		self._storage._watchList = {}
+		it = iter(args)
+		try:
+			for i in it:
+				#username
+				self._storage._watchList[i] = \
+					(float(next(it))			#last message
+					,next(it))					#online/offline/app
+				next(it)						#lagging 0
+		except StopIteration: pass
+		self.callEvent("onWatchList")
+
+	@asyncio.coroutine
+	def _recv_track(self,args):
+		'''Received tracked user'''
+		#0: username
+		#1: time last online
+		#2: online/offline/app
+		track = self._storage._trackList
+		track[args[0]] = (float(args[1]),args[2])
+		self.callEvent("onTrack")
+
+	@asyncio.coroutine
+	def _recv_connect(self,args):
+		'''Received check online'''
+		#TODO:
+		#0:	username
+		#1:	last message time
+		#2:	online/offline/app/invalid (not a real person or is a group)
+
+	@asyncio.coroutine
+	def _recv_wladd(self,args):
+		'''Received addition to watch list'''
+		#0:	username
+		#1:	online/offline/app
+		#2:	last message time
+		self._storage._watchList[args[0]] = \
+			(float(args[2])
+			,args[1])
+		self.callEvent("onWatchListUpdate")
+		
+	@asyncio.coroutine
+	def _recv_wldelete(self,args):
+		'''Received deletion from watch list'''
+		#0:	username
+		#1:	'deleted'
+		#2:	0
+		if self._storage._watchList.get(args[0]):
+			del self._storage._watchList[args[0]]
+		self.callEvent("onWatchListUpdate")
+
+	@asyncio.coroutine
+	def _recv_status(self,args):
+		'''Received status update'''
+		#0: username
+		#1: last time online
+		#2:	online/offline/app
+		#update watch
+		if self._storage._watchList.get(args[0]):
+			self._storage._watchList[args[0]] = \
+				(float(args[1])
+				,args[2])
+			self.callEvent("onWatchListUpdate")
+		#update track
+		if self._storage._trackList.get(args[0]):
+			self._storage._trackList[args[0]] = \
+				(float(args[1])
+				,args[2])
+			self.callEvent("onTrack")
+
 class Connection:
 	'''Virtual class for storing responses from protocols'''
 	def __init__(self, protocol):
@@ -568,7 +720,7 @@ class Group(Connection):
 		channel = (((channel&2)<<2 | (channel&1))<<8)
 		if not html:
 			#replace HTML equivalents
-			for i,j in reversed(HTML_CODES):
+			for i,j in reversed(_HTML_CODES):
 				post = post.replace(j,i)
 			post = post.replace('\n',"<br/>")
 		if len(post) > self._maxLength:
@@ -655,24 +807,55 @@ class Group(Connection):
 		if user == self._owner: return 2
 		if user in self._mods: return 1
 		return 0
-		
+
+class Privates(Connection):
+	'''
+	Class representing high-level private message communication and storage
+	'''
+	def __init__(self,protocol):
+		super(Privates,self).__init__(protocol)
+
+		self._watchList = {}	#analogous to a friends list, but not mutual
+		self._trackList = {}	#dict of users to whom `track` has been issued
+
+	def sendPost(self,user,post,html=False):
+		if not html:
+			#replace HTML equivalents
+			for i,j in reversed(_HTML_CODES):
+				post = post.replace(j,i)
+			post = post.replace('\n',"<br/>")
+		self._protocol.sendCommand("msg",user,"<m>{}</m>".format(post))
+
+def _connectionLostHandler(loop,context):
+	failedProtocol = context.get("protocol")
+	if isinstance(failedProtocol,ChatangoProtocol):
+		loop.create_task(failedProtocol.disconnect(True))
+	else:
+		loop.default_exception_handler(context)
 
 class Manager:
 	'''
 	Factory that creates and manages connections to chatango.
 	This class also propogates all events from groups
 	'''
-	def __init__(self, username, password, loop=None):
+	def __init__(self, username, password, PMs = False, loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		self._groups = []
+		self.PMs = None
+		if PMs:
+			self.loop.create_task(self.joinPMs())
 		self.username = username
 		self.password = password
+		
+		loop.set_exception_handler(_connectionLostHandler)
 
 	def __del__(self):
 		if self.loop.is_closed(): return
 		for i in self._groups:
 			#disconnect (and cancel all ping tasks)
 			self.loop.run_until_complete(i._protocol.disconnect())
+		if self.PMs is not None:
+			self.PMs._protocol.disconnect()
 
 	@asyncio.coroutine
 	def joinGroup(self, groupName, port=443):
@@ -680,17 +863,22 @@ class Manager:
 		groupName = groupName.lower()
 
 		server = _Generate.serverNum(groupName)
-		if server is None: raise Exception("Malformed room token: " + room)
+		if server is None: raise ValueError("malformed room token " + room)
 
 		#already joined group
 		if groupName != self.username and groupName not in self._groups:
-			ret = GroupProtocol(groupName, self)
-			yield from self.loop.create_connection(lambda: ret,
-				"s{}.chatango.com".format(server), port)
-			self._groups.append(ret._storage)
-			return ret._storage
+			try:
+				ret = GroupProtocol(groupName, self)
+				yield from self.loop.create_connection(lambda: ret,
+					"s{}.chatango.com".format(server), port)
+				self._groups.append(ret._storage)
+				return ret._storage
+			except gaierror as e:
+				raise ConnectionError("could not connect to group server") from e
+		elif groupName == self.username:
+			self.joinPMs()
 		else:
-			raise Exception("Attempted to join group multiple times")
+			raise ValueError("Attempted to join group multiple times")
 
 	@asyncio.coroutine
 	def leaveGroup(self, groupName):
@@ -705,15 +893,34 @@ class Manager:
 			self._groups.pop(index)
 
 	@asyncio.coroutine
+	def joinPMs(self, port=5222):
+		if self.PMs is None:
+			try:
+				authkey = _Generate.pmAuth(self.username,self.password)
+				ret = PMProtocol(self,authkey)
+				yield from self.loop.create_connection(lambda: ret,
+					"c1.chatango.com",port)
+				self.PMs = ret._storage
+			except gaierror as e:
+				raise ConnectionError("could not connect to PM server") from e
+
+	@asyncio.coroutine
+	def leavePMs(self):
+		if self.PMs is not None:
+			yield from self.PMs._protocol.disconnect()
+			self.PMs = None
+
+	@asyncio.coroutine
 	def leaveAll(self):
-		'''Disconnect from all groups'''
+		'''Disconnect from all groups and PMs'''
 		for group in self._groups:
 			yield from group._protocol.disconnect()
 		self._groups.clear()
+		yield from self.leavePMs()
 
-	def uploadAvatar(self, path):
-		'''Upload an avatar with path `path`'''
-		extension = path[path.rfind('.')+1:].lower()
+	def uploadAvatar(self, location):
+		'''Upload an avatar with path `location`'''
+		extension = location[location.rfind('.')+1:].lower()
 		if extension == "jpg": extension = "jpeg"
 		elif extension not in ("png","jpeg"):
 			return False
@@ -725,6 +932,6 @@ class Manager:
 				,"arch":		"h5"
 				,"src":			"group"
 				,"action":		"fullpic"
-				,"Filedata":	("image/%s" % extension, open(path,"br"))
+				,"Filedata":	("image/%s" % extension, open(location,"br"))
 			}))
 		return True

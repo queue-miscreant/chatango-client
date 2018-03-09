@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.283185
+Version 6.2831853
 --------------------------
 A terminal application written in python with curses input and ANSI escape-colored output.   
 Used to implement a client for chatango, an online chatting service.   
@@ -14,6 +14,7 @@ My custom script: https://puu.sh/tmIef/9592c56d10.py
 
 Requires livestreamer, youtube-dl, and xclip, but if you don't already have
 these, seriously consider installing them  
+Also the link is broken until someone decides to ~~play some games~~ watch some movies.
 
 If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
 
@@ -32,14 +33,16 @@ Features:
 * Client commands
 	* Type \`help while the input box is empty to display a list of commands implemented
 * Mouse support
-* Chat filters based on message attributes
+* Ctrl-f substring searching and reply accumulation
+	* Jumping to found messages
 
 
 Dependencies:
 --------------------------
 * Python 3
 * Python ncurses (included on most distros, python cygwin)
-### Technically these are optional since you can change how they open  
+
+Technically these are optional since you can change how they open  
 * Feh image viewer
 * MPV
 
@@ -63,7 +66,8 @@ The following terminals are NOT supported or have restricted features:
 * Console2 (256 color mode)
 * cmd.exe (Doesn't support ANSI escapes)
 * Powershell (Same as cmd.exe)
-Untested:
+
+Testing limited:
 * PuTTY
 
 Links in browser WILL NOT open correctly by default. There are two solutions: 
@@ -88,18 +92,51 @@ The comment about symlinking to /usr/local/bin still works.
 
 Changelog
 =========================
-## v6.283185 *2016/1/16*
+## v6.28318530 *2018/2/26*
+* Reworked Messages storage object
+	* Scrolling is no longer limited to selecting the highest message
+	* Drawing is no longer selectively from the top or bottom depending on message height
+	* Arbitrary length lines that can be recalculated at whim with redolines
+	* Redolines and recolorlines are no longer arbitrarily coroutines
+* Added InputMuxer, a class to help build menus that manipulate a list variables in some context
+	* Formatting and options now produce overlays through this
+* Added MessageScrollOverlay and addMessageScroll, a helper function which builds instances of the former
+	* Features message scrolling on keypresses `a-k` and `a-j`, `n` and `N`
+	* Jump to message on keypress `enter`
+	* Built ctrl-f message searching on top of these functions
+
+## v6.2831853 *2018/1/18*
+* Rewrote much of the infrastructure with asyncio
+	* Uses callbacks and futures for things like InputOverlays
+	* Rewrote ch.py (the chatango library) with async calls
+* If a message is very long, then selecting the next message down will display more of it instead
+* Added lazy re-colorization, line breaking, and fitering
+* Added DisplayOverlay, which displays (lists of) strings or Coloring objects
+	* Used in implementation of reply accumulator and ctrl-f
+* Added more vim-like features to ListOverlays
+	* Added VisualListOverlay, which allows selecting a set of elements from its list at once
+	* Added `g` and `G` keybindings that go to the beginning and end of the list
+* Segregated non-display functions and classes in client/display into its own file, client/util
+* Separated out Messages container and MainOverlay
+	* Added method to Messages which allows iteration over items for which a lambda returns true
+* Made resize and display calls asynchronous
+* Moved error message for importing client/overlay into overlay.Main.run, since that more actively requires it
+* Better, but imperfect filesystem tabbing that completes file paths
+* Bugfix where attempting to bind multiple alt keys would fail binding all but the last
+* Bugfix where clicking on whitespace without list entries in ListOverlays would crash them
+
+## v6.283185 *2017/3/25*
 * "Better" extensibility
 	* Changed import order to allow importing classes like ChatBot
 	* Moved credentials into directory ~/.cubecli
 	* Moved custom.py into ~/.cubecli
-	* All legacy updates should be handled automatically by the main script
+	* All legacy credential files should be handled automatically by the main script
 * Tinkered some with how scrollables draw, but it's still buggy
 * Added cyclical scrolling
 	* That is, tab will generate a list and more tabs (and s-tabs) will cycle
-* Bugfix that made ESC do nothing
+* Bugfix where ESC did nothing
 
-## v6.28318	*2016/1/16*
+## v6.28318	*2017/1/16*
 * Added mouse support again
 	* Clicking on links in main interface
 	* Automatically supported in ListOverlays
@@ -181,7 +218,7 @@ Changelog
 * Reorganized client.py into its own package (i.e, client/)
 	* Improves readability, but cross imports seem... strange.
 * Instead of mainOverlay.display calculating from selector position, three variables are used to track selection
-	* Less same time-complexity, half the iterations
+	* Same time complexity, half the iterations
 * Moved link opening under client/, and builtins in chatango.py to the new file
 * I honestly don't know if this should constitute its own version number, but okay
 
@@ -268,7 +305,7 @@ Changelog
 
 ## v3.1	*2016/2/20*
 * Changed colorer arguments. Made client more generalized so that argument list is pulled from the bot.
-* Modified the name colorer to use intene colors on certain names. Should be easier to tell names apart
+* Modified the name colorer to use intense colors on certain names. Should be easier to tell names apart
 * Added chat filtering (space in F5 menu)
 	* Drawing filtered channels in the menu pending
 
@@ -279,9 +316,9 @@ Changelog
 
 ## v3.0	*2016/2/17*
 * Added channel support
-	* 	Packets sent to chatango were XOR encrypted, so this was a little difficult
+	* Packets sent to chatango were XOR encrypted, so this was a little difficult
 * Added channel selector (F5)
-	* 	Filters are still unimplemented
+	* Filters are still unimplemented
 * Doing that "import bot and get credentials" was a bad idea
 * Removed aux.py file; reformatted 
 * Added new coloring feature. Messages are now drawn in parts corresponding to color.
@@ -328,7 +365,7 @@ Changelog
 ## v1.4 *2015/11/12*
 * Added user display list (F3)
 * Reorganized program: extended chat bot now in its own file
-	* 	New container that handles relations between the class instead of tightly coupling them
+	* New container that handles relations between the class instead of tightly coupling them
 * Fixed bug where lines without spaces would cause an infinite loop
 * Fixed regexes to end links at newline or space
 * Reformatted color hash to give "friends" the color they wanted
