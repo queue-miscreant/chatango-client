@@ -1922,7 +1922,7 @@ class Main:
 	_afterDone = []
 	def __init__(self,loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
-		if not hasattr(loop,"create_future")
+		if not hasattr(loop,"create_future"):
 			setattr(loop,"create_future",lambda: asyncio.Future(loop=loop))
 		self._displaybuffer = sys.stdout
 		#general state
