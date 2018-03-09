@@ -1870,7 +1870,7 @@ class InputMux:
 				furtherInput = ListOverlay(self.parent.parent
 					,li)		#enum entries
 				furtherInput.it = index
-				setCallback = lambda me: self._setter(self.parent.context,me.it)
+				setCallback = lambda me: self._setter(self.parent.context,me.it) or -1
 				furtherInput.addKeys(
 					{'tab':		setCallback
 					,'enter':	setCallback
@@ -2012,6 +2012,8 @@ class Main:
 	def resize(self):
 		'''Resize the GUI'''
 		newy, newx = self._screen.getmaxyx()
+		#mintty doesn't like drawing the last column
+		if sys.platform == "cygwin": newx -= 1
 		#magic number, but who cares; lines for text, blurbs, and reverse info
 		newy -= 3
 		try:

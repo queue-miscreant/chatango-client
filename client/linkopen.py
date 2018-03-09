@@ -10,22 +10,19 @@ open_link expects an instance of display.Main as its first argument.
 All openers are made into coroutines so that create_subprocess_exec can be
 yielded from. open_link creates a task in the Main instance's loop
 '''
-#TODO add commandline arguments to IMG_PATH and MPV_PATH
-#		like (IMG_PATH, args)
-
 import re
 import os	#for stupid stdout/err hack
 import sys	#cygwin
 import asyncio
 from subprocess import DEVNULL
 
-#from what I can tell, there are no good command line image viewers
-#that can handle links in windows, so I'm defaulting this to browser
-#vlc and mpv exist for windows though, so just change client.linkopen.MPV_PATH
-IMG_PATH = "feh"
-MPV_PATH = "mpv"
+IMG_ARGS = ["feh"]
+MPV_ARGS = ["mpv","--pause"]
 if sys.platform == "cygwin":
-	IMG_PATH = ""
+	#from what I can tell, there are no good command line image viewers
+	#that can handle links in windows, so I'm defaulting images to browser
+	#vlc and mpv exist for windows though, so just change client.linkopen.MPV_ARGS
+	IMG_ARGS = []
 	if os.environ.get("BROWSER") is None:
 		#prioritize cygstart for windows users
 		os.environ["BROWSER"] = os.path.pathsep.join(["cygstart","chrome",
@@ -135,31 +132,40 @@ class opener:
 @opener("extension","png:large")
 def images(main, link, ext):
 	'''Start feh (or replaced image viewer) in main.loop'''
-	if not IMG_PATH:
-		return browser(main,link)
+	if not IMG_ARGS:
+		ret = yield from browser(main,link)
+		return ret
 	main.newBlurb("Displaying image... (%s)" % ext)
-	args = [IMG_PATH, link]
+	args = [*IMG_ARGS, link]
 	try:
 		yield from asyncio.create_subprocess_exec(*args
 			,stdin=DEVNULL,stdout=DEVNULL,stderr=DEVNULL,loop=main.loop)
 	except:
-		main.newBlurb("No viewer %s found"%IMG_PATH)
+		main.newBlurb("Image viewer %s not found, defaulting to browser" % \
+			IMG_ARGS[0])
+		IMG_ARGS = []
+		ret = yield from browser(main,link)
+		return ret
 	
 @opener("extension","webm")
 @opener("extension","mp4")
 @opener("extension","gif")
 def videos(main, link, ext):
 	'''Start mpv (or replaced video player) in main.loop'''
-	if not MPV_PATH:
+	if not MPV_ARGS:
 		ret = yield from browser(main,link)
 		return ret
 	main.newBlurb("Playing video... ({})".format(ext))
-	args = [MPV_PATH, link, "--pause"]
+	args = [*MPV_ARGS, link]
 	try:
 		yield from asyncio.create_subprocess_exec(*args
 			,stdin=DEVNULL,stdout=DEVNULL,stderr=DEVNULL,loop=main.loop)
 	except:
-		main.newBlurb("No player %s found"%MPV_PATH)
+		main.newBlurb("Video player %s not found, defaulting to browser" % \
+			MPV_ARGS[0])
+		MPV_ARGS = []
+		ret = yield from browser(main,link)
+		return ret
 
 @opener
 def browser(main, link):
