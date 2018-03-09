@@ -650,9 +650,10 @@ class ColorOverlay(ListOverlay,Box):
 			initcolor = [int(initcolor[i*2:(i+1)*2],16) for i in range(3)]
 		if type(initcolor) is list and len(initcolor) == 3:
 			self.initcolor = initcolor
-			divs = [divmod(i*6/255,1)[1] for i in initcolor]
+			#how much each color corrseponds to some color from the genspecturm
+			divs = [divmod(i*6/255,1) for i in initcolor]
 			#if each error is low enough to be looked for
-			if all([i < .05 for i in divs]):
+			if all([i[1] < .05 for i in divs]):
 				for i,j in enumerate(self._spectrum[:3]):
 					find = j.index([k[0] for k in divs])
 					if find+1:
