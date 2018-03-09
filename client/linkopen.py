@@ -23,7 +23,7 @@ if sys.platform == "cygwin":
 	#that can handle links in windows, so I'm defaulting images to browser
 	#vlc and mpv exist for windows though, so just change client.linkopen.MPV_ARGS
 	IMG_ARGS = []
-	if os.environ.get("BROWSER") is None:
+	if os.getenv("BROWSER") is None:
 		#prioritize cygstart for windows users
 		os.environ["BROWSER"] = os.path.pathsep.join(["cygstart","chrome",
 			"firefox","waterfox","palemoon"])
@@ -132,6 +132,7 @@ class opener:
 @opener("extension","png:large")
 def images(main, link, ext):
 	'''Start feh (or replaced image viewer) in main.loop'''
+	global IMG_ARGS
 	if not IMG_ARGS:
 		ret = yield from browser(main,link)
 		return ret
@@ -143,7 +144,7 @@ def images(main, link, ext):
 	except:
 		main.newBlurb("Image viewer %s not found, defaulting to browser" % \
 			IMG_ARGS[0])
-		IMG_ARGS = []
+		IMG_ARGS.clear()
 		ret = yield from browser(main,link)
 		return ret
 	
@@ -152,6 +153,7 @@ def images(main, link, ext):
 @opener("extension","gif")
 def videos(main, link, ext):
 	'''Start mpv (or replaced video player) in main.loop'''
+	global MPV_ARGS
 	if not MPV_ARGS:
 		ret = yield from browser(main,link)
 		return ret
@@ -163,7 +165,7 @@ def videos(main, link, ext):
 	except:
 		main.newBlurb("Video player %s not found, defaulting to browser" % \
 			MPV_ARGS[0])
-		MPV_ARGS = []
+		MPV_ARGS.clear()
 		ret = yield from browser(main,link)
 		return ret
 

@@ -95,6 +95,7 @@ DISPLAY_INIT	= "\x1b[;f%s\x1b[?25l" % CLEAR_FORMATTING
 #format with tuple (row number, string)
 #move cursor, clear formatting, print string, clear garbage, and return cursor
 SINGLE_LINE		= "\x1b[%d;f" + CLEAR_FORMATTING +"%s\x1b[K" + RETURN_CURSOR
+RESERVE_LINES 	= 3
 
 #DISPLAY CLASSES----------------------------------------------------------
 class SizeException(Exception):
@@ -166,6 +167,7 @@ class OverlayBase:
 		self.index = None			#index in the stack
 		self._keys = {
 			3:		staticize(self.parent.stop,doc="Exit client")
+			,12:	self.parent.redrawAll
 			,27:	self._callalt
 			#no post on resize
 			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1
@@ -420,7 +422,15 @@ class TextOverlay(OverlayBase):
 			return self._onSentinel()
 		#allow unicode input with the bytes().decode()
 		#take out characters that can't be decoded
-		uni = bytes([i for i in chars if i<256]).decode()
+		buffer = []
+		controlFlag = False
+		for i in chars:
+			if i == 194 or controlFlag:
+				controlFlag ^= 1
+				continue
+			buffer.append(i)
+		if not buffer: return
+		uni = bytes(buffer).decode()
 		return self.text.append(self._transformPaste(uni))
 
 	def _onSentinel(self):
@@ -1097,11 +1107,6 @@ class Messages:
 				self.redolines(recolor = needRecolor)
 			return 1
 
-	def dump(self):
-		print("selector: %d, startheight: %d"%(self.selector,self.startheight))
-		print("linesup: %d, distance: %d"%(self.linesup,self.distance))
-		print("innerheight: %d" % self.innerheight)
-
 	def getselected(self):
 		'''
 		Frontend for getting the selected message. Returns a 4-list:
@@ -1669,11 +1674,11 @@ class ChatOverlay(TextOverlay):
 
 	def redolines(self, recolor = False):
 		self.messages.redolines(recolor = recolor)
-		self.parent.loop.create_task(self.parent.display())
+		self.parent.scheduleDisplay()
 		
 	def recolorlines(self):
 		self.messages.recolorlines()
-		self.parent.loop.create_task(self.parent.display())
+		self.parent.scheduleDisplay()
 
 	#MESSAGE ADDITION----------------------------------------------------------
 	@asyncio.coroutine
@@ -1965,6 +1970,9 @@ class Main:
 			self._displaybuffer.write(i+"\x1b[K\n\r")
 		self._displaybuffer.write(RETURN_CURSOR)
 
+	def scheduleDisplay(self):
+		self.loop.create_task(self.display())
+
 	def _updateinput(self):
 		'''Input display backend'''
 		if not (self.active and self.candisplay): return
@@ -2008,14 +2016,20 @@ class Main:
 		self._displaybuffer.write(SINGLE_LINE % (self.y+3, "\x1b[7m" + \
 			templeft + (" "*room) + tempright + "\x1b[m"))
 
+	def redrawAll(self):
+		self.scheduleDisplay()
+		self.newBlurb()
+		self.updateinfo()
+		self._updateinput()
+
 	@asyncio.coroutine
 	def resize(self):
 		'''Resize the GUI'''
-		newy, newx = self._screen.getmaxyx()
-		#mintty doesn't like drawing the last column
-		if sys.platform == "cygwin": newx -= 1
+		newy, newx	 = self._screen.getmaxyx()
+		#some terminals don't like drawing the last column
+		if os.getenv("TERM") == "xterm": newx -= 1
 		#magic number, but who cares; lines for text, blurbs, and reverse info
-		newy -= 3
+		newy -= RESERVE_LINES
 		try:
 			for i in self._ins:
 				yield from i.resize(newx,newy)
@@ -2025,8 +2039,8 @@ class Main:
 			return
 		self.x,self.y = newx,newy
 		self.candisplay = 1
-		yield from self.display()
 		self.updateinfo()
+		yield from self.display()
 		self._updateinput()
 
 	#Blurb Drawing Frontends----------------------------------------------------
@@ -2054,7 +2068,7 @@ class Main:
 		self._ins.append(new)
 		if new.replace: self._lastReplace = new.index
 		#display is not strictly called beforehand, so better safe than sorry
-		self.loop.create_task(self.display())
+		self.scheduleDisplay()
 
 	def popOverlay(self,overlay):
 		'''Pop the overlay `overlay`'''
@@ -2067,7 +2081,7 @@ class Main:
 					newReplace = start
 					break
 			self._lastReplace = newReplace
-		self.loop.create_task(self.display())
+		self.scheduleDisplay()
 
 	def addScrollable(self,newScroll):
 		'''Add a new scrollable and return it'''
@@ -2196,7 +2210,7 @@ class Main:
 	def toggle256(self,state):
 		'''Turn the mode to 256 colors, and if undefined, define colors'''
 		self._two56 = state
-		if state and not hasattr(self,"two56start"): #not defined on startup
+		if state and not hasattr(self,"_two56start"): #not defined on startup
 			self._two56start = len(_COLORS) + rawNum(0)
 			def256colors()
 

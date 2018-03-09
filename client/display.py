@@ -116,7 +116,8 @@ class Coloring:
 	def __init__(self,string):
 		global _CAN_DEFINE_EFFECTS
 		_CAN_DEFINE_EFFECTS = False
-		self._str = string
+		#TODO move fractur mapping into coloring
+		self._str = string.replace(chr(136),'')
 		self._positions = []
 		self._formatting = []
 		self._maxpos = -1
