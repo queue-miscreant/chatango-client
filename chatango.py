@@ -349,6 +349,7 @@ def fontcolor(context):
 @fontcolor.setter
 def _(context,value):
 	context.bot.creds["formatting"][0] = client.ColorOverlay.toHex(value)
+	context.bot.setFormatting()
 
 @formatting.listel("color")
 def namecolor(context):
@@ -357,6 +358,7 @@ def namecolor(context):
 @namecolor.setter
 def _(context,value):
 	context.bot.creds["formatting"][1] = client.ColorOverlay.toHex(value)
+	context.bot.setFormatting()
 
 @formatting.listel("enum")
 def fontface(context):
@@ -367,6 +369,7 @@ def fontface(context):
 @fontface.setter
 def _(context,value):
 	context.bot.creds["formatting"][2] = str(value)
+	context.bot.setFormatting()
 
 @formatting.listel("enum")
 def fontsize(context):
@@ -377,6 +380,7 @@ def fontsize(context):
 @fontsize.setter
 def _(context,value):
 	context.bot.creds["formatting"][3] = ch.FONT_SIZES[value]
+	context.bot.setFormatting()
 
 #Options InputMux---------------------------------------------------------------
 options = client.InputMux()	#options mux
