@@ -137,7 +137,7 @@ def images(main, link, ext):
 		ret = yield from browser(main,link)
 		return ret
 	main.newBlurb("Displaying image... (%s)" % ext)
-	args = [*IMG_ARGS, link]
+	args = IMG_ARGS + [link]
 	try:
 		yield from asyncio.create_subprocess_exec(*args
 			,stdin=DEVNULL,stdout=DEVNULL,stderr=DEVNULL,loop=main.loop)
@@ -158,7 +158,7 @@ def videos(main, link, ext):
 		ret = yield from browser(main,link)
 		return ret
 	main.newBlurb("Playing video... ({})".format(ext))
-	args = [*MPV_ARGS, link]
+	args = MPV_ARGS + [link]
 	try:
 		yield from asyncio.create_subprocess_exec(*args
 			,stdin=DEVNULL,stdout=DEVNULL,stderr=DEVNULL,loop=main.loop)
