@@ -3,18 +3,17 @@ Ultra-Meme Chatango CLIent
 Version 6.2831853
 --------------------------
 A terminal application written in python with curses input and ANSI escape-colored output.   
-Used to implement a client for chatango, an online chatting service.   
+Used to implement a client for chatango, an online chatroom.
 Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.  
 I recommend making a symlink in /usr/local/bin/ so you don't have to navigate to the folder,
 or especially have a million files in ~/
 
 This client is based on [chlib.py](https://github.com/cellsheet/chlib), and uses [python wcwidth](https://github.com/jquast/wcwidth).
 
-My custom script: https://puu.sh/tmIef/9592c56d10.py
+My custom script: https://puu.sh/zEtkO/8a752442b4.py
 
 Requires livestreamer, youtube-dl, and xclip, but if you don't already have
-these, seriously consider installing them  
-Also the link is broken until someone decides to ~~play some games~~ watch some movies.
+these, seriously consider installing them.
 
 If you want to extend the client somehow, consider looking at the [docs](DOCS.md)
 
@@ -42,7 +41,7 @@ Dependencies:
 * Python 3
 * Python ncurses (included on most distros, python cygwin)
 
-Technically these are optional since you can change how they open  
+Optional: (see below for changing)
 * Feh image viewer
 * MPV
 
@@ -53,39 +52,41 @@ If you want to use some other program like ImageMagick to open images,
 you'll have to do the following in a custom file
 ```
 from lib import client.linkopen
-client.linkopen.IMG_PATH = "animate"
+client.linkopen.IMG_ARGS = ["animate",...]
 ```
-And similarly for replacing mpv.
+Where ... represents the more command line arguments. Similarly can be done 
+to replace mpv (using `MPV_ARGS`).
 
 
 Windows (Cygwin):
 -----------------
-If you have python installed in cygwin, then drawing and sending messages work
-fine in MinTTY, the cygwin default terminal emulator.
+The Python installation under cygwin works mostly fine for input
+and drawing within MinTTY, the cygwin default terminal emulator.
 The following terminals are NOT supported or have restricted features:
-* Console2 (256 color mode)
-* cmd.exe (Doesn't support ANSI escapes)
-* Powershell (Same as cmd.exe)
+* Console2	 (Partially; 256 color mode works incorrectly)
+* cmd.exe	 (Unsupported; lacks ANSI escapes)
+* Powershell (Unsupported; see cmd.exe)
 
 Testing limited:
 * PuTTY
 
-Links in browser WILL NOT open correctly by default. There are two solutions: 
-* adding the browser to the Windows PATH environment variable, or
-* specifying a BROWSER environment variable (as in `BROWSER=chrome chatango.py`)
-The latter implies that there is a link to the executable in /usr/bin in cygwin.
-This can be created with `ln -s /cygdrive/c/Program\ Files/.../[browser executable].exe /usr/bin`
+Links in browser may not open correctly by default. The program defaults to using
+`cygstart`, which uses the Windows default for paths beginning with "http(s)://"
+If this is not the case, then you must do one of two things:
+* add the browser's directory to the Windows PATH environment variable, or
+* specify a BROWSER environment variable (as in `BROWSER=chrome chatango.py`)
+The latter implies that there is a link to the executable in `/usr/bin` in cygwin.
+This can be created with
+`ln -s /cygdrive/c/Program\ Files/.../[browser executable].exe /usr/bin`
 
-To preserve the value of BROWSER, write a line in ~/.bashrc like `BROWSER=chrome`
+To preserve the value of BROWSER, write a line in ~/.bashrc like `export BROWSER=chrome`
 If python detects cygwin (that is, if `sys.platform` is `cygwin`), then linkopen.py
 assumes Firefox and Chrome if BROWSER is null.
 
-There are few good image viewers in windows that support command line args,
-and fewer if any that support opening links from command line. By default,
-the image viewer will redirect opening the browser. To do the same thing with
-videos, change `client.linkopen.MPV_PATH` (as shown above) to `""`.
-
-The comment about symlinking to /usr/local/bin still works.
+There are few good image viewers in windows that support command line arguments,
+and fewer if any that resolve such paths with HTTP. By default, the program will
+viewer will use the browser through `cygstart`. If you'd prefer to do the same with
+videos, change `client.linkopen.MPV_ARGS` (as shown above) to `[]`.
 
 [This fork](https://gitgud.io/JJXB/chatango-client/tree/master) has more information
 
