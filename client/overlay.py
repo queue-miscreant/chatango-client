@@ -718,7 +718,7 @@ class ColorOverlay(ListOverlay,Box):
 	def openSliders(self):
 		furtherInput = ColorSliderOverlay(self.parent,
 			self._callback,self.initcolor)
-		furtherInput.add()
+		self.swap(furtherInput)
 
 	@staticmethod
 	def _genspectrum():
@@ -750,6 +750,7 @@ class ColorSliderOverlay(OverlayBase,Box):
 		if not (isinstance(initcolor,tuple) or isinstance(initcolor,list)):
 			raise TypeError("initcolor must be list or tuple")
 		self.color = list(initcolor)
+		self._updateText()
 		self._rgb = 0
 		self._callback = callback
 		self._keys.update(
@@ -768,6 +769,7 @@ class ColorSliderOverlay(OverlayBase,Box):
 			,curses.KEY_RIGHT:	staticize(self.chmode,1)
 			,curses.KEY_LEFT:	staticize(self.chmode,-1)
 		})
+
 	@asyncio.coroutine
 	def __call__(self,lines):
 		'''Display 3 bars, their names, values, and string in hex'''
@@ -797,17 +799,25 @@ class ColorSliderOverlay(OverlayBase,Box):
 		lines[-5] = self.box_part(names) #4 lines
 		lines[-4] = self.box_part(vals) #3 line
 		lines[-3] = sep #2 lines
-		lines[-2] = self.box_part(self.toHex(self.color).rjust(int(wide*1.5)+3)) #1
+		lines[-2] = self.box_part(format(self._coloredText).rjust(int(wide*1.5)+3)) #1
 		lines[-1] = self.box_bottom() #last line
+
 	def _select(self):
-		self._callback(tuple(self.color))
+		return self._callback(tuple(self.color))
+
 	#predefined self-traversal methods
 	def increment(self,amt):
 		'''Increase the selected color by amt'''
 		self.color[self._rgb] = max(0,min(255, self.color[self._rgb] + amt))
+		self._updateText()
+
 	def chmode(self,amt):
 		'''Go to the color amt to the right'''
 		self._rgb = (self._rgb + amt) % 3
+
+	def _updateText(self):
+		self._coloredText = Coloring(self.toHex(self.color))
+		self._coloredText.insertColor(0,self.parent.get256color(self.color))
 
 	@staticmethod
 	def toHex(color):
@@ -2260,9 +2270,13 @@ class Main:
 			return rawNum(0)
 		
 		try:
-			partsLen = len(color)//3
-			in216 = [int(int(color[i*partsLen:(i+1)*partsLen],16)*6/(16**partsLen))
-				 for i in range(3)]
+			if isinstance(color,str):
+				partsLen = len(color)//3
+				in216 = [int(int(color[i*partsLen:(i+1)*partsLen],16)*5/\
+					(16**partsLen)) for i in range(3)]
+			else:
+				in216 = [int(color[i]*5/255) for i in range(3)]
+				
 			#too white or too black
 			if sum(in216) < 2 or sum(in216) > 34:
 				raise AttributeError
