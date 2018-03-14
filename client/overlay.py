@@ -613,15 +613,24 @@ class VisualListOverlay(ListOverlay,Box):
 		if self._startSelect + 1: #already selecting
 			if self.it < self._startSelect:
 				#+1 because toggleselect already toggles the element
-				self._selectBuffer = set(range(self.it,self._startSelect+1))
+				self._selectBuffer = set(range(self.it,self._startSelect))
 			else:
-				self._selectBuffer = set(range(self._startSelect,self.it+1))
+				self._selectBuffer = set(range(self._startSelect+1,self.it+1))
 
-	def toggle(self,*args):
+	def gotoEdge(self,isBeginning):
+		'''Move to the end of the list, unless specified to be the beginning'''
+		if isBeginning:
+			self.it = 0
+			self._selectBuffer = set(range(self.it,self._startSelect+1))
+		else:
+			self.it = self._numentries-1
+			self._selectBuffer = set(range(self._startSelect,self.it+1))
+
+	def toggle(self):
 		'''Toggle the current line'''
 		self._selected = self._selected.symmetric_difference((self.it,))
 	
-	def toggleSelect(self,*args):
+	def toggleSelect(self):
 		'''Toggle visual mode selecting'''
 		if self._startSelect + 1:	#already selecting
 			#canonize the select
@@ -630,6 +639,7 @@ class VisualListOverlay(ListOverlay,Box):
 			self._selectBuffer = set()
 			self._startSelect = -1
 			return
+		self.toggle()
 		self._startSelect = self.it
 
 	def selectedList(self):
@@ -661,16 +671,16 @@ class ColorOverlay(ListOverlay,Box):
 		if type(initcolor) is list and len(initcolor) == 3:
 			self.initcolor = initcolor
 			#how much each color corrseponds to some color from the genspecturm
-			divs = [divmod(i*6/255,1) for i in initcolor]
+			divs = [divmod(i*5/255,1) for i in initcolor]
 			#if each error is low enough to be looked for
 			if all([i[1] < .05 for i in divs]):
 				for i,j in enumerate(self._spectrum[:3]):
-					find = j.index([k[0] for k in divs])
-					if find+1:
+					try:
+						find = j.index(tuple(int(k[0]) for k in divs))
 						self.it = find
 						self.mode = i
 						break
-				self.it = len(self._COLOR_LIST)-1
+					except ValueError: pass
 			else:
 				self.it = len(self._COLOR_LIST)-1
 		self._callback = callback
@@ -729,11 +739,6 @@ class ColorOverlay(ListOverlay,Box):
 		grayscale = range(12)
 
 		return [spectrum,shade,tint,grayscale]
-
-	@staticmethod
-	def toHex(color):
-		'''Get self.color in hex form'''
-		return ''.join([hex(i)[2:].rjust(2,'0') for i in color])
 
 class ColorSliderOverlay(OverlayBase,Box):
 	'''Display 3 bars for red, green, and blue.'''
@@ -803,6 +808,11 @@ class ColorSliderOverlay(OverlayBase,Box):
 	def chmode(self,amt):
 		'''Go to the color amt to the right'''
 		self._rgb = (self._rgb + amt) % 3
+
+	@staticmethod
+	def toHex(color):
+		'''Get self.color in hex form'''
+		return ''.join([hex(i)[2:].rjust(2,'0') for i in color])
 
 class InputOverlay(TextOverlay,Box):
 	'''Creates a future for the contents of a Scrollable input'''
@@ -1335,9 +1345,8 @@ class Messages:
 		msg = [message, args, dummyLength, self.msgID]
 		self.msgID += 1
 		self.allMessages.insert(0,msg)
-		#we actually need to draw it; `not startheight` signifies full messages
-		#while lazyfilter checking ensures that prepending to lines is valid
-		if dummyLength and not self.startheight and self.lazyFilter[1] == -1:
+		#lazyfilter checking ensures that prepending to lines is valid
+		if dummyLength and self.lazyFilter[1] == -1:
 			new = message.breaklines(self.parent.parent.x,self._INDENT)
 			self.lines[0:0] = new
 			msg[2] = len(new)
@@ -1350,7 +1359,7 @@ class Messages:
 			raise TypeError("delete requires callable")
 
 		msgno = self.startheight+1
-		height = self.allMessage[-msgno][2]-self.innerheight
+		height = self.allMessages[-msgno][2]-self.innerheight
 
 		while height <= self.parent.parent.y-1:
 			if (test(self.allMessages[-msgno],result)):
@@ -1401,8 +1410,14 @@ class Messages:
 		Redraw necessary afterward.
 		'''
 		self.selector = messageIndex
+		#TODO maybe try to draw up, then back down if too few lines to fill up the top?
 		self.startheight = messageIndex-1
 		self.redolines()
+
+	def scrollToTop(self):
+		top = len(self.allMessages)
+		if self.selector == top: return -1
+		self.scrollToMessage(top)
 
 	def iterateWith(self,callback):
 		'''
@@ -1672,6 +1687,13 @@ class ChatOverlay(TextOverlay):
 			self.parent._updateinput()
 		return 1
 
+	def selectmax(self):
+		'''Select top message'''
+		if not self.messages.canselect: return 1
+		if self.messages.scrollToTop() == -1:
+			self._maxselect()
+		return 1
+
 	def redolines(self, recolor = False):
 		self.messages.redolines(recolor = recolor)
 		self.parent.scheduleDisplay()
@@ -1864,7 +1886,8 @@ class InputMux:
 			furtherInput = None
 			if self._type == "color":
 				furtherInput = ColorOverlay(self.parent.parent
-					,lambda ret: self._setter(self.parent.context,ret) #callback
+					#callback
+					,lambda ret: self._setter(self.parent.context,ret) or -1
 					,self._getter(self.parent.context))			#initial color
 			elif self._type == "str":
 				furtherInput = InputOverlay(self.parent.parent

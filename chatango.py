@@ -348,7 +348,7 @@ def fontcolor(context):
 	return context.bot.creds["formatting"][0]
 @fontcolor.setter
 def _(context,value):
-	context.bot.creds["formatting"][0] = client.ColorOverlay.toHex(value)
+	context.bot.creds["formatting"][0] = client.ColorSliderOverlay.toHex(value)
 	context.bot.setFormatting()
 
 @formatting.listel("color")
@@ -357,7 +357,7 @@ def namecolor(context):
 	return context.bot.creds["formatting"][1]
 @namecolor.setter
 def _(context,value):
-	context.bot.creds["formatting"][1] = client.ColorOverlay.toHex(value)
+	context.bot.creds["formatting"][1] = client.ColorSliderOverlay.toHex(value)
 	context.bot.setFormatting()
 
 @formatting.listel("enum")
@@ -479,6 +479,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		self.bot = bot
 		self.addKeys({	"enter":	self.onenter
 						,"a-enter":	self.onaltenter
+						,"a-g":		self.selectmax
 						,"tab":		self.ontab
 						,"f2":		self.linklist
 						,"f3":		self.listmembers
