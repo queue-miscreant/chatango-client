@@ -156,7 +156,7 @@ class Coloring:
 			lastEffect = nextEffect
 		ret += self._str[tracker:]
 		return ret + CLEAR_FORMATTING
-
+	"""
 	def __getitem__(self,sliced):
 		'''Set the string to a slice of itself'''
 		self._str = self._str[sliced]
@@ -174,6 +174,49 @@ class Coloring:
 			self._positions[pos] = i + len(other)
 		self._maxpos += len(other)
 		return self
+	"""
+
+	def subSlice(self,sub,start,end=None):
+		'''
+		Overwrite rest of string at position `start`; optionally end overwrite
+		at position `end`. Basically works as slice assignment.
+		'''
+		if start < 0:	start	= max(0,start+len(self._str))
+		pos = 0
+		for pos,i in enumerate(self._positions):
+			if i >= start: break
+		self._positions =	self._positions[:pos]
+		self._formatting =	self._positions[:pos]
+			
+		if end:
+			if end < 0:	end		= max(0,len(self._str))
+			for pos,i in enumerate(self._positions):
+				if i > start:
+					self._positions[pos] = i + len(sub)
+			last = self.findColor(start) or rawNum(0)
+			self._insertColor(end,last)
+			self._str = self._str[:start] + sub + self._str[end:]
+			return
+		self._str = self._str[:start] + sub
+
+	def addIndicator(self,sub,color=None):
+		'''
+		Replace some spaces at the end of a string. Optionally inserts a color
+		for the string `sub`. Useful for ListOverlays.
+		'''
+		pos,columns = 1,collen(sub)
+		while pos <= columns:
+			if self._str[-pos-1] != ' ': #keep a space, so pos-1
+				if columns < pos-1: #fewer columns in `sub` than room in _str
+					raise DisplayException("Not enough room for indicator %s" %\
+						sub)
+				sub = sub[:columnslice(sub,pos-2)] + "…"
+				break
+			pos += 1
+		pos -= 1
+		self._str = self._str[:-pos] + sub
+		if color:
+			self.insertColor(-pos,color)
 
 	def coloredAt(self,position):
 		'''return a bool that represents if that position is colored yet'''

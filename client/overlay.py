@@ -21,10 +21,11 @@ from time import time,localtime,strftime as format_time
 from .display import *
 from .util import staticize,override,escapeText,LazyIterList,History
 
-__all__ =	["CHAR_COMMAND","Box","OverlayBase","TextOverlay","InputOverlay"
-			,"ListOverlay","VisualListOverlay","ColorOverlay"
+__all__ =	["CHAR_COMMAND","quitlambda","Box","OverlayBase","TextOverlay"
+			,"InputOverlay","ListOverlay","VisualListOverlay","ColorOverlay"
 			,"ColorSliderOverlay","ConfirmOverlay","CommandOverlay"
-			,"DisplayOverlay","ChatOverlay","addMessageScroller","InputMux","Main"]
+			,"DisplayOverlay","ChatOverlay","addMessageScroller","InputMux"
+			,"Main"]
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -910,6 +911,7 @@ class DisplayOverlay(OverlayBase,Box):
 			,ord('k'):			up
 			,ord('j'):			down
 			,ord('q'):			quitlambda
+			,ord('H'):			self.openHelp
 		})
 
 	def changeDisplay(self,strings):
@@ -1928,12 +1930,8 @@ class InputMux:
 		@staticmethod
 		def stringDrawer(mux,value,coloring):
 			'''Default string drawer'''
-			#TODO don't draw string if it exceeds some threshold,
-			#like half of the length of the list entry (= mux.parent.parent.x-2)
 			val = str(value)
-			startpos = -len(val)
-			coloring[:startpos]+val
-			coloring.insertColor(startpos,4)	#yellow
+			coloring.addIndicator(val,4)	#yellow TODO move these colors from chatango.py into client/display
 		@classmethod
 		def enumDrawer(cls,mux,value,coloring):
 			'''Default enum drawer'''
@@ -1942,8 +1940,7 @@ class InputMux:
 		@staticmethod
 		def boolDrawer(mux,value,coloring):
 			'''Default bool drawer'''
-			coloring[:-1]+(value and "y" or "n")
-			coloring.insertColor(-1,value and 11 or 3)
+			coloring.addIndicator(value and "y" or "n", value and 11 or 3)
 
 	def listel(self,dataType):
 		'''
@@ -2050,6 +2047,7 @@ class Main:
 			templeft + (" "*room) + tempright + "\x1b[m"))
 
 	def redrawAll(self):
+		'''Force redraw'''
 		self.scheduleDisplay()
 		self.newBlurb()
 		self.updateinfo()

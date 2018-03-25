@@ -40,6 +40,7 @@ FONT_FACES = \
 	,"Typewriter" ]
 #limited sizes available for non-premium accounts
 FONT_SIZES = [9,10,11,12,13,14]
+CHANNEL_NAMES = ["None","Red","Blue","Both"]
 
 BigMessage_Cut = 0
 BigMessage_Multiple = 1

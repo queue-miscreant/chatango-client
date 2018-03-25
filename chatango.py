@@ -677,8 +677,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		def drawIgnored(me,string,i):
 			selected = me.list[i]
 			if selected.split(' ')[0] not in self.bot.ignores: return
-			string[:-1]+'i'
-			string.insertColor(-1,3)
+			string.addIndicator('i',3)
 	
 		users = self.bot.joinedGroup.userlist
 		dispList = {i:users.count(i) for i in users}
@@ -712,7 +711,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			col = i and i+12 or 16
 			string.insertColor(-1,col)
 						
-		box = client.ListOverlay(self.parent,["None","Red","Blue","Both"],drawActive)
+		box = client.ListOverlay(self.parent,ch.CHANNEL_NAMES,drawActive)
 		box.addKeys({
 			"enter":	select
 			,"tab":		ontab
