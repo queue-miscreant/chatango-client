@@ -1931,7 +1931,7 @@ class InputMux:
 		def stringDrawer(mux,value,coloring):
 			'''Default string drawer'''
 			val = str(value)
-			coloring.addIndicator(val,4)	#yellow TODO move these colors from chatango.py into client/display
+			coloring.addIndicator(val,rawNum(7))	#yellow
 		@classmethod
 		def enumDrawer(cls,mux,value,coloring):
 			'''Default enum drawer'''
@@ -1940,7 +1940,8 @@ class InputMux:
 		@staticmethod
 		def boolDrawer(mux,value,coloring):
 			'''Default bool drawer'''
-			coloring.addIndicator(value and "y" or "n", value and 11 or 3)
+			coloring.addIndicator(value and "y" or "n", value and rawNum(6) \
+				or rawNum(5))
 
 	def listel(self,dataType):
 		'''

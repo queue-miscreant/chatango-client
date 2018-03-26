@@ -47,11 +47,14 @@ _NUM_EFFECTS = len(_EFFECTS)
 _EFFECTS_BITS = (1 << _NUM_EFFECTS)-1
 _CAN_DEFINE_EFFECTS = True
 #storage for defined pairs
-_COLORS =	["\x1b[39;22;49m"	#Normal/Normal
-			,"\x1b[31;22;47m"	#Red/White
-			,"\x1b[31;22;41m"	#red
-			,"\x1b[32;22;42m"	#green
-			,"\x1b[34;22;44m"	#blue
+_COLORS =	["\x1b[39;22;49m"	#Normal/Normal			0
+			,"\x1b[31;22;47m"	#Red/White				1
+			,"\x1b[31;22;41m"	#red	(ColorSliders)	2
+			,"\x1b[32;22;42m"	#green	(ColorSliders)	3
+			,"\x1b[34;22;44m"	#blue	(ColorSliders)	4
+			,"\x1b[31;22;49m"	#red	(InputMux)		5
+			,"\x1b[32;22;49m"	#green	(InputMux)		6
+			,"\x1b[33;22;49m"	#yellow	(InputMux)		7
 			]
 _NUM_PREDEFINED = len(_COLORS)
 CHAR_CURSOR = "\x1b[s"
