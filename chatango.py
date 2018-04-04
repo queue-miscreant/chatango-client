@@ -72,6 +72,7 @@ DEFAULT_FORMATTING = \
 	,"0"		#font face
 	,12]		#font size
 
+begin_colors = client.numDefinedColors()
 #ChatBot related functionality--------------------------------------------------
 _client = None
 def getClient():
@@ -486,7 +487,7 @@ class ChatangoOverlay(client.ChatOverlay):
 						,"f4":		self.setformatting
 						,"f5":		self.setchannel
 						,"f6":		self.listreplies
-						,"f7":		self.pmConnect
+#						,"f7":		self.pmConnect
 						,"f12":		self.options
 						,"^f":		self.ctrlf
 						,"^g":		self.openlastlink
@@ -708,7 +709,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			self.redolines()
 		def drawActive(me,string,i):
 			if self.bot.filtered_channels[i]: return
-			col = i and i+12 or 16
+			col = begin_colors + (i and i+12 or 16)
 			string.insertColor(-1,col)
 						
 		box = client.ListOverlay(self.parent,ch.CHANNEL_NAMES,drawActive)
@@ -812,7 +813,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			fontColor = getColor(post.user)
 			
 		#greentext, font color
-		textColor = lambda x: x[0] == '>' and 11 or fontColor
+		textColor = lambda x: x[0] == '>' and begin_colors+11 or fontColor
 		msg.colorByRegex(LINE_RE, textColor, group = 3)
 
 		#links in white
@@ -832,7 +833,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		if isreply:   msg.addGlobalEffect(0,1)
 		if ishistory: msg.addGlobalEffect(1,1)
 		#channel
-		msg.insertColor(0,post.channel + 12)
+		msg.insertColor(0,begin_colors + post.channel + 12)
 
 LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$",re.MULTILINE)
 REPLY_RE = re.compile(r"@\w+?\b")
@@ -845,7 +846,7 @@ def getColor(name,init = 6,split = 109,rot = 6):
 	for i in name:
 		n = ord(i)
 		total ^= (n > split) and n or ~n
-	return (total+rot)%11
+	return begin_colors + (total+rot)%11
 
 def tabFile(patharg):
 	'''A file tabbing utility'''
@@ -879,14 +880,8 @@ def tabFile(patharg):
 #stuff to do on startup
 @asyncio.coroutine
 def startClient(loop,creds):
-	global creds_entire, creds_readwrite
-	#colors in this file because ChatangoOverlay depends on it directly
-	#Non-256 colors
-#	TODO use 'predefined' numbers
-#		base = numPreceding()
-#		...
-#		color('string',base+15)
-#	global _beginning = client.
+	global creds_entire, creds_readwrite,begin_colors
+	begin_colors = client.numDefinedColors()
 	ordering = \
 		("blue"
 		,"cyan"

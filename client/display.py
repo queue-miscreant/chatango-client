@@ -13,8 +13,8 @@ from .util import Tokenize
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT","_COLORS"
-			,"SELECT_AND_MOVE","DisplayException","def256colors"
-			,"getColor","rawNum","collen","numdrawing","columnslice"
+			,"SELECT_AND_MOVE","DisplayException","def256colors","getColor"
+			,"rawNum","numDefinedColors","collen","numdrawing","columnslice"
 			,"Coloring","Scrollable","ScrollSuggest"]
 
 #REGEXES------------------------------------------------------------------------
@@ -113,6 +113,14 @@ def rawNum(c):
 	'''
 	if c < 0: raise DisplayException("raw numbers must not be below 0")
 	return c - _NUM_PREDEFINED
+
+def numDefinedColors():
+	'''
+	Get the beginning index in _COLORS (adjusted for _NUM_PREDEFINED) befor
+	more colors are defined. Used in toggle256.
+	'''
+	return len(_COLORS) - _NUM_PREDEFINED
+
 
 class Coloring:
 	'''Container for a string and coloring to be done'''

@@ -2014,14 +2014,14 @@ class Main:
 	def _printblurb(self,blurb,time):
 		'''Blurb display backend'''
 		if not (self.active and self.candisplay): return
-		#TODO queue a blurb instead
-		if self.last < 0: return
 		#try to queue a blurb	
 		if blurb == "": pass
 		elif isinstance(blurb,Coloring):
 			self._blurbQueue = blurb.breaklines(self.x)
 		else:
 			self._blurbQueue = Coloring(blurb).breaklines(self.x)
+		#holding a message?
+		if self.last < 0: return
 		#next blurb is either a pop from the last message or nothing
 		if len(self._blurbQueue):
 			blurb = self._blurbQueue.pop(0)
@@ -2243,7 +2243,7 @@ class Main:
 		'''Turn the mode to 256 colors, and if undefined, define colors'''
 		self._two56 = state
 		if state and not hasattr(self,"_two56start"): #not defined on startup
-			self._two56start = len(_COLORS) + rawNum(0)
+			self._two56start = numDefinedColors()
 			def256colors()
 
 	def toggleMouse(self,state):
