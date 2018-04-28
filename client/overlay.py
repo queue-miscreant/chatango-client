@@ -952,7 +952,7 @@ class DisplayOverlay(OverlayBase,Box):
 	@asyncio.coroutine
 	def resize(self,newx,newy):
 		self.formatted = [j	for i in self.rawlist
-			for j in i.breaklines(self.parent.x-2,outdent=outdent)]
+			for j in i.breaklines(self.parent.x-2,outdent=self._outdent)]
 		self._numprompts = len(self.formatted)
 		#bigger than the box holding it
 		if self._numprompts > self.parent.y-2:
@@ -1216,7 +1216,9 @@ class Messages:
 
 		select = self.selector+1
 		addlines = 0
-		while not addlines and select <= len(self.allMessages):
+		while not addlines:
+			if select > len(self.allMessages):
+				return 0
 			addlines = self.applyLazies(select,1)
 			select += 1
 
@@ -1271,10 +1273,10 @@ class Messages:
 
 		select = self.selector-1
 		addlines = 0
-		while not addlines and select <= len(self.allMessages):
+		while not addlines and select > 0:
 			addlines = self.applyLazies(select,-1)
 			select -= 1
-		select += 1
+		select += (addlines > 0)
 
 		lastLines = self.allMessages[-self.selector][2]
 		nextPos = self.linesup + self.distance - lastLines - addlines
@@ -1421,15 +1423,30 @@ class Messages:
 		Directly set selector and startheight and redolines.
 		Redraw necessary afterward.
 		'''
-		self.selector = messageIndex
+		start = messageIndex
+		i = self.allMessages[-start]
+		while start < len(self.allMessages) and not i[2]:
+			start += 1
+			i = self.allMessages[-start]
+
+		#try again going downwards if we need to (the last message is blank)
+		if start == len(self.allMessages) and not i[2]:
+			start = messageIndex-1
+			i = self.allMessages[-start]
+			while start > 1 and not i[2]:
+				start -= 1
+				i = self.allMessages[-start]
+		
+		self.selector = start
+
 		#TODO maybe try to draw up, then back down if too few lines to fill up the top?
 		self.startheight = messageIndex-1
 		self.redolines()
 
 	def scrollToTop(self):
-		top = len(self.allMessages)
+		top = self.selector
+		self.scrollToMessage(len(self.allMessages))
 		if self.selector == top: return -1
-		self.scrollToMessage(top)
 
 	def iterateWith(self,callback):
 		'''
@@ -1451,36 +1468,39 @@ class Messages:
 		or if the width has changed
 		'''
 		#search for a fitting message to set as selector
-		i = self.allMessages[-self.selector]
-		while self.selector > 0 and ((i[1] is not None) and \
-		self.parent.filterMessage(*i[1])):
-			self.selector -= 1
-			i = self.allMessages[-self.selector]
+		start = self.selector or 1
+		i = self.allMessages[-start]
+		while start < len(self.allMessages) and (i[1] is not None)\
+		and self.parent.filterMessage(*i[1]):
+			start += 1
+			i = self.allMessages[-start]
+		#only need if we were selecting to begin with
+		self.selector = self.selector and start
 
 		#a new start height must be decided
-		if width or height or self.selector <= self.startheight:
+		if width or height or self.selector:
 			self.startheight = max(0,self.selector-1)
 		if width is None: width = self.parent.parent.x
 		if height is None: height = self.parent.parent.y
 		#must change lazyColor bounds 
 		if self.startheight: recolor = True	
 
-		startMessage = self.allMessages[-self.startheight-1]
-		if recolor and startMessage[1] is not None:	#don't decolor system messages
-			startMessage[0].clear()
-			self.parent.colorizeMessage(startMessage[0],*startMessage[1])
-		newlines = startMessage[0].breaklines(width,self._INDENT)
-		startMessage[2] = len(newlines)
+		if recolor and i[1] is not None:	#don't decolor system messages
+			i[0].clear()
+			self.parent.colorizeMessage(i[0],*i[1])
+		newlines = i[0].breaklines(width,self._INDENT)
+		#guaranteed to be an actual line by above loop
+		i[2] = len(newlines)
 
-		self.innerheight = max(0,startMessage[2] - height)
+		self.innerheight = max(0,i[2] - height)
 		#distance only if we're still selecting
-		self.distance = min(height,self.selector and startMessage[2])
+		self.distance = min(height,self.selector and i[2])
 		self.linesup = self.innerheight
 
-		msgno, lineno = self.startheight+2, self.distance
+		msgno, lineno = start+1, self.distance
 	
-		self.lazyFilter[0]	= self.allMessages[-self.startheight][3] \
-								if self.startheight	else -1
+		self.lazyFilter[0]	= self.allMessages[-max(0,start-1)][3] \
+								if self.selector else -1
 		
 		while lineno < height and msgno <= len(self.allMessages):
 			i = self.allMessages[-msgno]
@@ -1516,7 +1536,12 @@ class Messages:
 		width = self.parent.parent.x
 		height = self.parent.parent.y-1
 		
-		startMessage = self.allMessages[-self.startheight-1]
+		start = self.startheight+1
+		while self.allMessages[-start][2] == 0 and start <= len(self.allMessages):
+			#find a non-hidden message
+			start += 1
+		startMessage = self.allMessages[-start]
+
 		if startMessage[1] is not None:	#don't decolor system messages
 			startMessage[0].clear()
 			self.parent.colorizeMessage(startMessage[0],*startMessage[1])
@@ -1528,7 +1553,7 @@ class Messages:
 		self.lazyColor[0] = self.allMessages[-self.startheight][3] \
 								if self.startheight	else -1
 
-		lineno,msgno = startMessage[2]-self.innerheight,self.startheight+2
+		lineno,msgno = startMessage[2]-self.innerheight,start+1
 		while lineno < height and msgno <= len(self.allMessages):
 			i = self.allMessages[-msgno]
 			if i[1] is not None:	#don't decolor system messages
