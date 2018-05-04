@@ -54,7 +54,7 @@ you'll have to do the following in a custom file
 from lib import client.linkopen
 client.linkopen.IMG_ARGS = ["animate",...]
 ```
-Where ... represents the more command line arguments. Similarly can be done 
+Where ... represents more command line arguments. Similarly can be done 
 to replace mpv (using `MPV_ARGS`).
 
 
@@ -72,16 +72,14 @@ Testing limited:
 
 Links in browser may not open correctly by default. The program defaults to using
 `cygstart`, which uses the Windows default for paths beginning with "http(s)://"
-If this is not the case, then you must do one of two things:
-* add the browser's directory to the Windows PATH environment variable, or
-* specify a BROWSER environment variable (as in `BROWSER=chrome chatango.py`)
+If you wish to modify this, you can do one of two things:
+* add your preferred browser's directory to the Windows PATH environment variable, or
+* specify a BROWSER (cygwin) environment variable (as in `BROWSER=chrome chatango.py`)
 The latter implies that there is a link to the executable in `/usr/bin` in cygwin.
 This can be created with
 `ln -s /cygdrive/c/Program\ Files/.../[browser executable].exe /usr/bin`
 
 To preserve the value of BROWSER, write a line in ~/.bashrc like `export BROWSER=chrome`
-If python detects cygwin (that is, if `sys.platform` is `cygwin`), then linkopen.py
-assumes Firefox and Chrome if BROWSER is null.
 
 There are few good image viewers in windows that support command line arguments,
 and fewer if any that resolve such paths with HTTP. By default, the program will
