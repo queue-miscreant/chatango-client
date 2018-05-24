@@ -393,6 +393,7 @@ class TextOverlay(OverlayBase):
 			ord('h'):		self.text.wordback
 			,ord('l'):		self.text.wordnext
 			,127:			self.text.delword
+			,curses.KEY_BACKSPACE:			self.text.delword
 			,330:			self.text.delnextword	#TODO tmux alternative
 		})
 

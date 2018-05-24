@@ -392,6 +392,7 @@ def mouse(context):
 @mouse.setter
 def _(context,value):
 	context.bot.options["mouse"] = value
+	context.parent.toggleMouse(value)
 
 @options.listel("str")
 def linkwarn(context):
