@@ -492,8 +492,8 @@ class ListOverlay(OverlayBase,Box):
 			,ord('l'):	right
 			,ord('h'):	left
 			,ord('H'):	self.openHelp
-			,ord('g'):	staticize(self.gotoEdge,1,doc="Go to list beginning")
-			,ord('G'):	staticize(self.gotoEdge,0,doc="Go to list end")
+			,ord('g'):	staticize(self.gotoEdge,0,doc="Go to list beginning")
+			,ord('G'):	staticize(self.gotoEdge,1,doc="Go to list end")
 			,ord('q'):	quitlambda
 			,curses.KEY_DOWN:	down
 			,curses.KEY_UP:		up
@@ -560,23 +560,46 @@ class ListOverlay(OverlayBase,Box):
 		lines[-1] = self.box_bottom(self._modes[self.mode])
 		return lines
 
+	def _domove(self,dest):
+		'''
+		Set self.it to some value. Useful for inherited classes that need to
+		update some other member when self.it changes (like VisualListOverlay)
+		'''
+		self.it = dest
+
 	#predefined list iteration methods
 	def increment(self,amt):
 		'''Move self.it by amt'''
 		if not self._numentries: return
-		self.it += amt
-		self.it %= self._numentries
+		j = (self.it + amt) % self._numentries
+		self._domove(j)
 
 	def chmode(self,amt):
 		'''Move to mode amt over, with looparound'''
 		self.mode = (self.mode + amt) % self._nummodes
 
-	def gotoEdge(self,isBeginning):
-		'''Move to the end of the list, unless specified to be the beginning'''
-		if isBeginning:
-			self.it = 0
-		else:
-			self.it = self._numentries-1
+	def gotoEdge(self,isEnd):
+		'''Move to the beginning or end of the list'''
+		self._domove(0+(isEnd and (self._numentries-1)))
+
+	def _gotoLambda(self,func,direction):
+		'''
+		Move to a list entry for which `func` returns True.
+		`direction` = 0 for closer to the top, 1 for closer to the bottom.
+		`func`'s signature should be (ListOverlay, list element index)
+		'''
+		for i in range(self._numentries-self.it-1 if direction else self.it):
+			j = direction and (self.it+i+1) or (self.it-i-1)
+			if func(j):
+				return self._domove(j)
+		return self._domove(0+(direction and (self._numentries-1)))
+	
+	def gotoLambda(self,func):
+		'''
+		Frontend for _gotoLambda that returns both backward and forward
+		callbacks
+		'''
+		return tuple(staticize(self._gotoLambda,func,i) for i in range(2))
 
 	def regenList(self,_):
 		'''Regenerate list based on raw list reference'''
@@ -604,29 +627,19 @@ class VisualListOverlay(ListOverlay,Box):
 			,ord('v'):	self.toggleSelect
 		})
 
+	def _domove(self,dest):
+		'''Update selection'''
+		if self._startSelect + 1:
+			if dest < self._startSelect:	#selecting below start
+				self._selectBuffer = set(range(dest,self._startSelect))
+			else:
+				self._selectBuffer = set(range(self._startSelect+1,dest+1))
+		self.it = dest 
+
 	def clear(self,*args):
 		self._selected = set()	#list of indices selected by visual mode
 		self._selectBuffer = set()
 		self._startSelect = -1
-
-	def increment(self,amt):
-		'''New implemetation of increment that updates the visual lines'''
-		super(VisualListOverlay,self).increment(amt)
-		if self._startSelect + 1: #already selecting
-			if self.it < self._startSelect:
-				#+1 because toggleselect already toggles the element
-				self._selectBuffer = set(range(self.it,self._startSelect))
-			else:
-				self._selectBuffer = set(range(self._startSelect+1,self.it+1))
-
-	def gotoEdge(self,isBeginning):
-		'''Move to the end of the list, unless specified to be the beginning'''
-		if isBeginning:
-			self.it = 0
-			self._selectBuffer = set(range(self.it,self._startSelect+1))
-		else:
-			self.it = self._numentries-1
-			self._selectBuffer = set(range(self._startSelect,self.it+1))
 
 	def toggle(self):
 		'''Toggle the current line'''

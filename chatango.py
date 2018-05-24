@@ -651,8 +651,16 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		box = client.VisualListOverlay(self.parent, (buildList,linksList),
 			drawVisited, client.getDefaults())
+		def findNew(i):
+			return 	(box.raw[len(box.list)-i-1] in self.visited_links) ^\
+					(box.raw[len(box.list)-box.it-1] in self.visited_links)
+		prevNew,nextNew = box.gotoLambda(findNew)
+
 		box.addKeys({"enter":	select
-					,"tab": 	client.override(select)})
+					,"tab": 	client.override(select) })
+		box.addKeys({"a-k":		prevNew
+					,"a-j":		nextNew},areMethods=1)
+
 		box.add()
 
 	def listmembers(self):
