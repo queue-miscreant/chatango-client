@@ -552,13 +552,18 @@ class ListOverlay(OverlayBase,Box):
 			row = (len(value) > maxx) and value[:max(half,1)] + \
 				"..." + value[min(-half+3,-1):] or value
 			row = Coloring(self.box_just(row))
-			if value and self._drawOther is not None:
-				self._drawOther(self,row,i+partition)
-			if i+partition == self.it:
-				row.addGlobalEffect(0)
+			if i+partition < len(self.list):
+				self._drawLine(row,i+partition)
 			lines[i+1] = self.box_noform(format(row))
 		lines[-1] = self.box_bottom(self._modes[self.mode])
 		return lines
+
+	def _drawLine(self,line,number):
+		'''Callback to run to modify display of each line. '''
+		if self._drawOther is not None:
+			self._drawOther(self,line,number)
+		if number == self.it:	#reverse video on selected line
+			line.addGlobalEffect(0)
 
 	def _domove(self,dest):
 		'''
@@ -611,13 +616,8 @@ class VisualListOverlay(ListOverlay,Box):
 	'''ListOverlay with visual mode like in vim: can select multiple rows'''
 	replace = True
 
-	def __init__(self,parent,outList,drawOther = None,modes = [""]):
-		#new draw callback that adds an underline to selected elements
-		def draw(me,row,pos):
-			if pos in me.selectedList():
-				row.addGlobalEffect(1)
-			drawOther(me,row,pos)
-		super(VisualListOverlay,self).__init__(parent,outList,draw,modes)
+	def __init__(self,parent,*args,**kwargs):
+		super(VisualListOverlay,self).__init__(parent,*args,**kwargs)
 
 		self.clear()	#clear/initialize the selected data
 		
@@ -636,6 +636,12 @@ class VisualListOverlay(ListOverlay,Box):
 				self._selectBuffer = set(range(self._startSelect+1,dest+1))
 		self.it = dest 
 
+	def _drawLine(self,line,number):
+		'''New draw callback that adds an underline to selected elements'''
+		super(VisualListOverlay,self)._drawLine(line,number)
+		if number in self.selectedList():
+			line.addGlobalEffect(1)
+
 	def clear(self,*args):
 		self._selected = set()	#list of indices selected by visual mode
 		self._selectBuffer = set()
@@ -643,14 +649,13 @@ class VisualListOverlay(ListOverlay,Box):
 
 	def toggle(self):
 		'''Toggle the current line'''
-		self._selected = self._selected.symmetric_difference((self.it,))
+		self._selected.symmetric_difference_update((self.it,))
 	
 	def toggleSelect(self):
 		'''Toggle visual mode selecting'''
 		if self._startSelect + 1:	#already selecting
 			#canonize the select
-			self._selected = \
-				self._selected.symmetric_difference(self._selectBuffer)
+			self._selected.symmetric_difference_update(self._selectBuffer)
 			self._selectBuffer = set()
 			self._startSelect = -1
 			return
@@ -1057,6 +1062,7 @@ class CommandOverlay(TextOverlay):
 			cls._commands[commandname] = func
 			if complete:
 				cls._commandComplete[commandname] = complete
+			return func
 				
 		return wrapper
 

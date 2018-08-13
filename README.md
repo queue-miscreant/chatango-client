@@ -63,15 +63,20 @@ Windows (Cygwin):
 The Python installation under cygwin works mostly fine for input
 and drawing within MinTTY, the cygwin default terminal emulator.
 The following terminals are NOT supported or have restricted features:
-* Console2	 (Partially; 256 color mode works incorrectly)
-* cmd.exe	 (Unsupported; lacks ANSI escapes)
-* Powershell (Unsupported; see cmd.exe)
+* Console2
+	* Partially; 256 color mode works incorrectly
+* cmd.exe
+	* Unsupported; thought it now has ANSI escapes, the keys that the program recognizes may differ
+* Powershell
+	* Unsupported; see cmd.exe
 
 Testing limited:
 * PuTTY
 
-Links in browser may not open correctly by default. The program defaults to using
-`cygstart`, which uses the Windows default for paths beginning with "http(s)://"
+Links in browser may not open correctly by default. On cygwin, the program 
+defaults to using `cygstart`, which uses the Windows default for paths beginning
+with "http(s)://". On other platforms, the default is handled by the `webbrowser`
+Python module.
 If you wish to modify this, you can do one of two things:
 * add your preferred browser's directory to the Windows PATH environment variable, or
 * specify a BROWSER (cygwin) environment variable (as in `BROWSER=chrome chatango.py`)
@@ -82,7 +87,7 @@ This can be created with
 To preserve the value of BROWSER, write a line in ~/.bashrc like `export BROWSER=chrome`
 
 There are few good image viewers in windows that support command line arguments,
-and fewer if any that resolve such paths with HTTP. By default, the program will
+and fewer if any that attempt to resolve paths with HTTP. By default, the program will
 viewer will use the browser through `cygstart`. If you'd prefer to do the same with
 videos, change `client.linkopen.MPV_ARGS` (as shown above) to `[]`.
 
@@ -115,7 +120,7 @@ Changelog
 * Added more vim-like features to ListOverlays
 	* Added VisualListOverlay, which allows selecting a set of elements from its list at once
 	* Added `g` and `G` keybindings that go to the beginning and end of the list
-* Segregated non-display functions and classes in client/display into its own file, client/util
+* Segregated non-display functions and classes in client/display into its own file, client/util.py
 * Separated out Messages container and MainOverlay
 	* Added method to Messages which allows iteration over items for which a lambda returns true
 * Made resize and display calls asynchronous

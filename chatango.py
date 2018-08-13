@@ -120,11 +120,12 @@ def parsePost(post, me, ishistory):
 			if newlineCounter < 2:
 				cooked += i
 			newlineCounter += 1
-		elif i == u'\u202d':
+		#technically not right, since RTL marks should match marks, and overrides overrides
+		elif ord(i) in (8206,8237):
 			cooked += rtlbuffer
 			rtlbuffer = ""
 			rtl = False
-		elif i == u'\u202e':
+		elif ord(i) in (8207,8238):
 			rtl = True
 		else:
 			newlineCounter = 0
@@ -152,7 +153,7 @@ class ChatBot(ch.Manager):
 		#default to the given user name
 		self.me = creds.get("user") or None
 		#list references
-		self.ignores = self.creds["ignores"]
+		self.ignores = set(self.creds["ignores"])
 		self.filtered_channels = self.creds["filtered_channels"]
 		self.options = self.creds["options"]
 
@@ -340,6 +341,77 @@ class ChatBot(ch.Manager):
 		else:
 			self.mainOverlay.msgSystem(
 				"Connection error occurred. Try joining another room with ^T")
+#List Overlay Extensions-------------------------------------------------------
+class LinkOverlay(client.VisualListOverlay):
+	'''List accumulated links'''
+	def __init__(self,parent,context):
+		'''
+		Context is assumed to be a ChatangoOverlay with
+		members `visited_links` and 
+		'''
+		self.context = context
+
+		buildList = lambda raw: [i.replace("https://","").replace("http://","")
+			for i in reversed(raw)]
+		super(LinkOverlay,self).__init__(parent,(buildList,context.lastlinks)
+			,modes=client.getDefaults())
+
+		findNew = lambda i: (self.raw[len(self.list)-i-1] in context.visited_links)^\
+					   (self.raw[len(self.list)-self.it-1] in context.visited_links)
+		prevNew,nextNew = self.gotoLambda(findNew)
+
+		self.addKeys({"tab": 	client.override(self.select) })
+		self.addKeys({"enter":	self.select
+					,"tab": 	client.override(self.select)
+					,"a-k":		prevNew
+					,"a-j":		nextNew},areMethods=1)
+
+	#enter key
+	def select(self):
+		'''Open link with selected opener'''
+		if not self.list: return
+		#try to get selected links
+		alllinks = self.selectedList()
+		if len(alllinks):
+			#add the iterator; idempotent if already in set
+			alllinks.add(self.it)
+			#function to open all links, like in above selected message
+			def openall():
+				needRecolor = False
+				for i in alllinks:
+					current = self.raw[len(self.list)-i-1]
+					client.open_link(self.parent,current,self.mode)
+					if current not in self.context.visited_links:
+						self.context.visited_links.append(current)
+						needRecolor = True
+				#self explanatory
+				if needRecolor: self.context.recolorlines()
+
+			if len(alllinks) >= self.context.bot.options["linkwarn"]:
+				self.parent.holdBlurb(
+					"Really open {} links? (y/n)".format(len(alllinks)))
+				client.ConfirmOverlay(self.parent, openall).add()
+			else:
+				openall()
+			self.clear()
+			return -1
+
+		current = self.raw[len(self.list)-self.it-1] #this enforces the wanted link is selected
+		client.open_link(self.parent,current,self.mode)
+		if current not in self.context.visited_links:
+			self.context.visited_links.append(current)
+			self.context.recolorlines()
+		#exit
+		return -1
+
+	def _drawLine(self,string,i):
+		'''Draw visited links in a slightly grayer color'''
+		super(LinkOverlay,self)._drawLine(string,i)
+		current = self.raw[len(self.list)-i-1]
+		try:
+			if current in self.context.visited_links:
+				string.insertColor(0,self.parent.get256color(245))
+		except: pass
 
 #Formatting InputMux------------------------------------------------------------
 formatting = client.InputMux()	#formatting mux
@@ -599,69 +671,7 @@ class ChatangoOverlay(client.ChatOverlay):
 	
 	def linklist(self):
 		'''List accumulated links'''
-		linksList = self.lastlinks
-
-		#enter key
-		def select(me):
-			'''Open link with selected opener'''
-			if not me.list: return
-			#try to get selected links
-			alllinks = me.selectedList()
-			if len(alllinks):
-				#add the iterator; idempotent if already in set
-				alllinks.add(me.it)
-				#function to open all links, like in above selected message
-				def openall():
-					needRecolor = False
-					for i in alllinks:
-						current = me.raw[len(me.list)-i-1]
-						client.open_link(self.parent,current,me.mode)
-						if current not in self.visited_links:
-							self.visited_links.append(current)
-							needRecolor = True
-					#self explanatory
-					if needRecolor: self.recolorlines()
-
-				if len(alllinks) >= self.bot.options["linkwarn"]:
-					self.parent.holdBlurb(
-						"Really open {} links? (y/n)".format(len(alllinks)))
-					client.ConfirmOverlay(self.parent, openall).add()
-				else:
-					openall()
-				me.clear()
-				return -1
-
-			current = me.raw[len(me.list)-me.it-1] #this enforces the wanted link is selected
-			client.open_link(self.parent,current,me.mode)
-			if current not in self.visited_links:
-				self.visited_links.append(current)
-				self.recolorlines()
-			#exit
-			return -1
-
-		def drawVisited(me,string,i):
-			current = me.raw[len(me.list)-i-1]
-			try:
-				if current in self.visited_links:
-					string.insertColor(0,self.parent.get256color(245))
-			except: pass
-
-		buildList = lambda raw: [i.replace("https://","").replace("http://","")
-			for i in reversed(raw)]
-
-		box = client.VisualListOverlay(self.parent, (buildList,linksList),
-			drawVisited, client.getDefaults())
-		def findNew(i):
-			return 	(box.raw[len(box.list)-i-1] in self.visited_links) ^\
-					(box.raw[len(box.list)-box.it-1] in self.visited_links)
-		prevNew,nextNew = box.gotoLambda(findNew)
-
-		box.addKeys({"enter":	select
-					,"tab": 	client.override(select) })
-		box.addKeys({"a-k":		prevNew
-					,"a-j":		nextNew},areMethods=1)
-
-		box.add()
+		LinkOverlay(self.parent,self).add()
 
 	def listmembers(self):
 		'''List members of current group'''
@@ -679,10 +689,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			'''Ignore/unignore user'''
 			current = me.list[me.it]
 			current = current.split(' ')[0]
-			if current not in self.bot.ignores:
-				self.bot.ignores.append(current)
-			else:
-				self.bot.ignores.remove(current)
+			self.bot.ignores.symmetric_difference_update((current,))
 			self.redolines()
 		def drawIgnored(me,string,i):
 			selected = me.list[i]
@@ -767,7 +774,7 @@ class ChatangoOverlay(client.ChatOverlay):
 				name = message[1][0].user
 				if name[0] in "!#": name = name[1:]
 				if name in self.bot.ignores: return
-				self.bot.ignores.append(name)
+				self.bot.ignores.add(name)
 				self.redolines()
 			except: pass
 		return
@@ -915,7 +922,7 @@ def startClient(loop,creds):
 
 		if '@' == person[0]: person = person[1:]
 		if person in chatbot.ignores: return
-		chatbot.ignores.append(person)
+		chatbot.ignores.add(person)
 		chatbot.mainOverlay.redolines()
 
 	@client.command("unignore")
@@ -1148,6 +1155,9 @@ if __name__ == "__main__":
 		loop.run_until_complete(loop.shutdown_asyncgens())
 		#close all loop IO
 		loop.close()
+		if _client and _client.bot:
+			#this is a set and not a list reference, so we update the list now
+			newCreds["ignores"] = list(_client.bot.ignores)
 		#save
 		try:
 			jsonData = {}
