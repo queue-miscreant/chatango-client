@@ -30,7 +30,7 @@ if sys.platform == "cygwin":
 
 import webbrowser
 
-__all__ =	["getDefaults","opener","open_link","images","videos","browser"]
+__all__ =	["getDefaults","getExtension","opener","open_link","images","videos","browser"]
 
 #extension recognizing regex
 _POST_FORMAT_RE = re.compile(r"\.(\w+)[&/\?]?")
@@ -45,6 +45,11 @@ def getDefaults():
 	'''
 	return ["default"] + [i.__name__ for i in open_link._defaults]
 
+def getExtension(link):
+	try:
+		return _POST_FORMAT_RE.findall(link)[-1]
+	except NameError: return
+
 #---------------------------------------------------------------
 class open_link:
 	'''Open a link with the declared openers'''
@@ -56,13 +61,13 @@ class open_link:
 	_lambdalut = []
 
 	def __init__(self,client,link,default = 0):
-		ext = _POST_FORMAT_RE.findall(link)
+		ext = getExtension(link)
 		if not default:
 			#check from ext
-			if len(ext) > 1:
-				run = self._exts.get(ext[-1].lower())
+			if ext:
+				run = self._exts.get(ext.lower())
 				if run:
-					client.loop.create_task(run(client,link,ext[-1]))
+					client.loop.create_task(run(client,link,ext))
 					return
 			#check for patterns
 			for i,j in self._sites.items():
@@ -83,6 +88,10 @@ class open_link:
 			client.loop.create_task(self._defaults[default](client,link))
 			return
 		client.loop.create_task(self._defaults[default-1](client,link))
+
+	@classmethod
+	def extensionOpeners(self):
+		return self._exts.keys()
 
 class opener:
 	'''

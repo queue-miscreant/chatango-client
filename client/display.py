@@ -19,7 +19,7 @@ __all__ =	["CLEAR_FORMATTING","CHAR_CURSOR","SELECT","_COLORS"
 
 #REGEXES------------------------------------------------------------------------
 #sane textbox splitting characters
-_SANE_TEXTBOX =	r"\s\-/`~,;"
+_SANE_TEXTBOX =	r"\s\-\+/`~,;="
 #sane textbox word-backspace
 _UP_TO_WORD_RE =re.compile("([^{0}]*[{0}])*[^{0}]+[{0}]*".format(_SANE_TEXTBOX))
 #sane textbox word-delete
@@ -215,6 +215,7 @@ class Coloring:
 		Replace some spaces at the end of a string. Optionally inserts a color
 		for the string `sub`. Useful for ListOverlays.
 		'''
+		if sub == "": return
 		pos,columns = 1,collen(sub)
 		while pos <= columns:
 			if self._str[-pos-1] != ' ': #keep a space, so pos-1

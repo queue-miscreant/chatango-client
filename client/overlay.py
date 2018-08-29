@@ -487,6 +487,7 @@ class ListOverlay(OverlayBase,Box):
 
 		self._keys.update(
 			{ord('r')-ord('a')+1:	self.regenList	#ctrl-r
+			,ord('w')-ord('a')+1:	quitlambda		#ctrl-w
 			,ord('j'):	down	#V I M
 			,ord('k'):	up
 			,ord('l'):	right
@@ -639,7 +640,7 @@ class VisualListOverlay(ListOverlay,Box):
 	def _drawLine(self,line,number):
 		'''New draw callback that adds an underline to selected elements'''
 		super(VisualListOverlay,self)._drawLine(line,number)
-		if number in self.selectedList():
+		if number in self._selectedIndex():
 			line.addGlobalEffect(1)
 
 	def clear(self,*args):
@@ -662,9 +663,19 @@ class VisualListOverlay(ListOverlay,Box):
 		self.toggle()
 		self._startSelect = self.it
 
-	def selectedList(self):
+	def _selectedIndex(self):
 		'''Get list (set) of selected and buffered indices'''
 		return self._selected.symmetric_difference(self._selectBuffer)
+
+	def selectedList(self):
+		'''Get list of selected items'''
+		indices = self._selectedIndex()
+		#add the iterator; idempotent if already in set
+		#here so that the currently selected line doesn't draw an underline
+		indices.add(self.it)
+		if self.raw:
+			return [self.raw[len(self.list)-i-1] for i in indices]
+		return [self.list[i] for i in indices]
 
 	def clearQuit(self,*args):
 		'''Clear the selection or quit the overlay'''
@@ -800,7 +811,7 @@ class ColorSliderOverlay(OverlayBase,Box):
 		lines[0] = self.box_top()
 		for i in range(space):
 			string = ""
-			#draw on this line (ratio of space alotted to line number = ratio of number to 255)
+			#draw on this line (ratio of space = ratio of value to 255)
 			for j in range(3):
 				if ((space-i)*255 < (self.color[j]*space)):
 					string += getColor(rawNum(j+2))
@@ -847,17 +858,20 @@ class ColorSliderOverlay(OverlayBase,Box):
 class InputOverlay(TextOverlay,Box):
 	'''Creates a future for the contents of a Scrollable input'''
 	replace = False
-	def __init__(self, parent, prompt, callback = None, password = False):
+	def __init__(self, parent, prompt, callback = None, password = False
+	, default = ""):
 		super(InputOverlay, self).__init__(parent)
 		self._future = parent.loop.create_future()
 		if prompt is None:
 			self._prompt, self._prompts, self._numprompts = None, [], 0
 		else:
-			self._prompt = prompt if isinstance(prompt,Coloring) else Coloring(prompt)
+			self._prompt = prompt if isinstance(prompt,Coloring) \
+				else Coloring(prompt)
 			self._prompts = self._prompt.breaklines(parent.x-2)
 			self._numprompts = len(self._prompts)
 
 		self.text.password = password
+		self.text.setstr(default)
 		self._keys.update({
 			10:		staticize(self._finish)
 			,127:	staticize(self._backspacewrap)
@@ -1881,7 +1895,9 @@ class InputMux:
 	def _drawing(self,me,string,i):
 		'''Defer to the _ListEl's local drawer'''
 		element = self.indices[self._ordering[i]]
-		element._drawer(self,element._getter(self.context),string)
+		#needs a drawer and a getter
+		if element._drawer and element._getter:
+			element._drawer(self,element._getter(self.context),string)
 
 	class _ListEl:
 		'''
@@ -1915,6 +1931,11 @@ class InputMux:
 				self._drawer = self.enumDrawer
 			elif self._type == "bool":
 				self._drawer = self.boolDrawer
+			elif self._type == "button":
+				self._drawer = None
+				self._getter = None
+				self._setter = func
+				return
 			else:	#invalid type
 				raise TypeError("input type %s not recognized"%self._type)
 
@@ -1949,7 +1970,8 @@ class InputMux:
 			elif self._type == "str":
 				furtherInput = InputOverlay(self.parent.parent
 					,self._doc								#input window text
-					,lambda ret: self._setter(self.parent.context,ret)) #callback
+					,lambda ret: self._setter(self.parent.context,ret) #callback
+					,default = self._getter(self.parent.context))
 			elif self._type == "enum":
 				li,index = self._getter(self.parent.context)
 				furtherInput = ListOverlay(self.parent.parent
@@ -1965,6 +1987,8 @@ class InputMux:
 				self._setter(self.parent.context,
 					not self._getter(self.parent.context))	#toggle
 				return
+			elif self._type == "button":
+				return self._setter(self.parent.context)
 			furtherInput.add()
 			
 		@staticmethod

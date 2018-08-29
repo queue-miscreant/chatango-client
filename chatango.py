@@ -362,6 +362,7 @@ class LinkOverlay(client.VisualListOverlay):
 
 		self.addKeys({"tab": 	client.override(self.select) })
 		self.addKeys({"enter":	self.select
+					,"i":		self.openImages
 					,"tab": 	client.override(self.select)
 					,"a-k":		prevNew
 					,"a-j":		nextNew},areMethods=1)
@@ -374,28 +375,11 @@ class LinkOverlay(client.VisualListOverlay):
 		alllinks = self.selectedList()
 		if len(alllinks):
 			#add the iterator; idempotent if already in set
-			alllinks.add(self.it)
-			#function to open all links, like in above selected message
-			def openall():
-				needRecolor = False
-				for i in alllinks:
-					current = self.raw[len(self.list)-i-1]
-					client.open_link(self.parent,current,self.mode)
-					if current not in self.context.visited_links:
-						self.context.visited_links.append(current)
-						needRecolor = True
-				#self explanatory
-				if needRecolor: self.context.recolorlines()
-
-			if len(alllinks) >= self.context.bot.options["linkwarn"]:
-				self.parent.holdBlurb(
-					"Really open {} links? (y/n)".format(len(alllinks)))
-				client.ConfirmOverlay(self.parent, openall).add()
-			else:
-				openall()
+			self.context.openLinks(alllinks, self.mode)
 			self.clear()
 			return -1
 
+		assert False,"Somehow accessed selection"
 		current = self.raw[len(self.list)-self.it-1] #this enforces the wanted link is selected
 		client.open_link(self.parent,current,self.mode)
 		if current not in self.context.visited_links:
@@ -403,6 +387,15 @@ class LinkOverlay(client.VisualListOverlay):
 			self.context.recolorlines()
 		#exit
 		return -1
+
+	def openImages(self):
+		links = []
+		for i,j in enumerate(self.list):
+			actual = self.raw[len(self.list)-i-1]
+			if (client.getExtension(j).lower() in ("png","jpg","jpeg")) and \
+			(actual not in self.context.visited_links):
+				links.append(actual)
+		self.context.openLinks(links, self.mode)
 
 	def _drawLine(self,string,i):
 		'''Draw visited links in a slightly grayer color'''
@@ -591,21 +584,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			msg = message[1][0].post
 		except: return
 		alllinks = LINK_RE.findall(msg)
-		def openall():
-			for i in alllinks:
-				client.open_link(self.parent,i)
-				if i not in self.visited_links:
-					self.visited_links.append(i)
-			#don't recolor if the list is empty
-			#need to recolor ALL lines, not just this one
-			if alllinks: self.recolorlines()
-				
-		if len(alllinks) >= self.bot.options["linkwarn"]:
-			self.parent.holdBlurb(
-				"Really open {} links? (y/n)".format(len(alllinks)))
-			client.ConfirmOverlay(self.parent, openall).add()
-		else:
-			openall()
+		self.openLinks(alllinks)
 
 	def clickOnLink(self,x,y):
 		msg, pos = self.messages.getMessageFromPosition(x,y)
@@ -792,6 +771,24 @@ class ChatangoOverlay(client.ChatOverlay):
 		if last not in self.visited_links:
 			self.visited_links.append(last)
 			self.recolorlines()
+
+	def openLinks(self, links, mode = 0):
+		def o():
+			for i in links:
+				if type(i) == int: i = self.raw[i]
+				client.open_link(self.parent,i,mode)
+				if i not in self.visited_links:
+					self.visited_links.append(i)
+			#don't recolor if the list is empty
+			#need to recolor ALL lines, not just this one
+			if links: self.recolorlines()
+			
+		if len(links) >= self.bot.options["linkwarn"]:
+			self.parent.holdBlurb(
+				"Really open {} links? (y/n)".format(len(links)))
+			client.ConfirmOverlay(self.parent, o).add()
+		else:
+			o()
 
 	def joingroup(self):
 		'''Join a new group'''
