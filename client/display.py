@@ -585,6 +585,7 @@ class Scrollable:
 	def setstr(self,new):
 		'''Set content of scrollable'''
 		self._str = new
+		print(type(new))
 		self.end()
 
 	def setnonscroll(self,new):

@@ -487,7 +487,6 @@ class ListOverlay(OverlayBase,Box):
 
 		self._keys.update(
 			{ord('r')-ord('a')+1:	self.regenList	#ctrl-r
-			,ord('w')-ord('a')+1:	quitlambda		#ctrl-w
 			,ord('j'):	down	#V I M
 			,ord('k'):	up
 			,ord('l'):	right
@@ -873,7 +872,8 @@ class InputOverlay(TextOverlay,Box):
 		self.text.password = password
 		self.text.setstr(default)
 		self._keys.update({
-			10:		staticize(self._finish)
+			ord('w')-ord('a')+1:	quitlambda		#ctrl-w
+			,10:	staticize(self._finish)
 			,127:	staticize(self._backspacewrap)
 		})
 		if callable(callback):
@@ -1042,7 +1042,7 @@ class CommandOverlay(TextOverlay):
 		'''Run command'''
 		#parse arguments like a command line: quotes enclose single args
 		args = escapeText(self.text)
-		self.history.append(self.text)
+		self.history.append(str(self.text))
 
 		if args[0] not in self._commands:
 			self.parent.newBlurb("Command \"{}\" not found".format(args[0]))
@@ -1902,7 +1902,7 @@ class InputMux:
 	class _ListEl:
 		'''
 		Decorator to create an input field with a certain data type.
-		dataType can be one of "str", "color", "enum", or "bool"
+		dataType can be one of "str", "color", "enum", "bool", or "button"
 		The __init__ is akin to a `@property` decorator: as a getter;
 		subsequent setters and drawers can be added from the return value
 		(bound to func.__name__); i.e. `@func.setter...`
@@ -1971,7 +1971,7 @@ class InputMux:
 				furtherInput = InputOverlay(self.parent.parent
 					,self._doc								#input window text
 					,lambda ret: self._setter(self.parent.context,ret) #callback
-					,default = self._getter(self.parent.context))
+					,default = str(self._getter(self.parent.context)))
 			elif self._type == "enum":
 				li,index = self._getter(self.parent.context)
 				furtherInput = ListOverlay(self.parent.parent
