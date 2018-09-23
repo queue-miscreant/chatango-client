@@ -167,8 +167,8 @@ class OverlayBase:
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
 		self._keys = {
-			3:		staticize(self.parent.stop,doc="Exit client")
-			,12:	self.parent.redrawAll
+			3:		staticize(self.parent.stop,doc="Exit client")	#^c
+			,12:	self.parent.redrawAll							#^l
 			,27:	self._callalt
 			#no post on resize
 			,curses.KEY_RESIZE:	lambda x: parent.resize() or 1
@@ -2140,9 +2140,9 @@ class Main:
 			return
 		self.x,self.y = newx,newy
 		self.candisplay = 1
+		self._updateinput()
 		self.updateinfo()
 		yield from self.display()
-		self._updateinput()
 
 	#Blurb Drawing Frontends----------------------------------------------------
 	def newBlurb(self,message = ""):
