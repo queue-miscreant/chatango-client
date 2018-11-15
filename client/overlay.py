@@ -872,7 +872,8 @@ class InputOverlay(TextOverlay,Box):
 		self.text.password = password
 		self.text.setstr(default)
 		self._keys.update({
-			ord('w')-ord('a')+1:	quitlambda		#ctrl-w
+			ord('d')-ord('a')+1:	quitlambda		#ctrl-d
+			,ord('w')-ord('a')+1:	quitlambda		#ctrl-w
 			,10:	staticize(self._finish)
 			,127:	staticize(self._backspacewrap)
 		})
@@ -1870,11 +1871,14 @@ class InputMux:
 	Abstraction for a set of adjustable values to display with a ListOverlay.
 	Comes pre-built with drawing for each kind of value.
 	'''
-	def __init__(self):
+	def __init__(self, confirmIfButton = True):
 		self._ordering = []
 		self.indices = {}
 		self.context = None
 		self.parent = None
+		self._confirmIfButton = confirmIfButton
+		self._hasButton = False
+		self._warnExit = False
 
 	def add(self,parent,context):
 		'''Add the muxer with ChatangoOverlay `parent`'''
@@ -1889,6 +1893,7 @@ class InputMux:
 			9:			selectSub
 			,10:		selectSub
 			,ord(' '):	selectSub
+			,ord('q'):	staticize(self.tryWarn, parent, overlay, doc=quitlambda.__doc__)
 		})
 		overlay.add()
 
@@ -1935,6 +1940,8 @@ class InputMux:
 				self._drawer = None
 				self._getter = None
 				self._setter = func
+				if self.parent._confirmIfButton:
+					self.parent._hasButton = True
 				return
 			else:	#invalid type
 				raise TypeError("input type %s not recognized"%self._type)
@@ -1986,10 +1993,11 @@ class InputMux:
 			elif self._type == "bool":
 				self._setter(self.parent.context,
 					not self._getter(self.parent.context))	#toggle
-				return
 			elif self._type == "button":
 				return self._setter(self.parent.context)
-			furtherInput.add()
+			self.parent._warnExit = self.parent._hasButton
+			if furtherInput:
+				furtherInput.add()
 			
 		@staticmethod
 		def colorDrawer(mux,value,coloring):
@@ -2019,6 +2027,15 @@ class InputMux:
 		@listel(dataType) (=> _ListEl(self,dataType,__decorated_func__))
 		'''
 		return staticize(self._ListEl,self,dataType)
+
+	def tryWarn(self, parent, listO):
+		if self._warnExit:
+			def o():
+				parent.popOverlay(listO)
+			parent.holdBlurb("Really close menu? (y/n)")
+			ConfirmOverlay(parent, o).add()
+			return
+		return -1
 
 #OVERLAY MANAGER----------------------------------------------------------------
 class Main:
@@ -2174,14 +2191,14 @@ class Main:
 	def popOverlay(self,overlay):
 		'''Pop the overlay `overlay`'''
 		del self._ins[overlay.index]
-		#look for the last replace
-		if overlay.index == self._lastReplace: 
-			newReplace = 0
-			for start in range(len(self._ins)):
-				if self._ins[-start-1].replace:
-					newReplace = start
-					break
-			self._lastReplace = newReplace
+		#look for the last replace and replace indices
+		newReplace = -1
+		for i in range(len(self._ins)):
+			if self._ins[i].replace \
+			and overlay.index == self._lastReplace: 
+				self._lastReplace = i
+				break
+			self._ins[i].index = i
 		self.scheduleDisplay()
 
 	def addScrollable(self,newScroll):
