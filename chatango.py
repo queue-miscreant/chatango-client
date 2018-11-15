@@ -94,9 +94,11 @@ badCharsets = [
 	,(range(120094,120094+26),ord('a'))	#lowercase math fractur
 ]
 
-def parsePost(post, me, ishistory):
+def parsePost(post, me, ishistory, altme = []):
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
+	for mes in altme:
+		isreply = isreply or ('@'+mes.lower() in post.post.lower())
 	
 	#remove egregiously large amounts of newlines (more than 2)
 	#also edit sections with right to left override
@@ -151,7 +153,8 @@ class ChatBot(ch.Manager):
 
 		self.creds = creds
 		#default to the given user name
-		self.me = creds.get("user") or None
+		self.me = creds.get("user") # or None
+		self.altme = []
 		#list references
 		self.ignores = set(self.creds["ignores"])
 		self.filtered_channels = self.creds["filtered_channels"]
@@ -275,7 +278,7 @@ class ChatBot(ch.Manager):
 		if user not in self.members:
 			self.members.append(user.lower())
 		self.parseLinks(post.post)
-		msg = parsePost(post, self.me, False)
+		msg = parsePost(post, self.me, False, altme=self.altme)
 		#						  isreply		ishistory
 		if self.options["bell"] and msg[2] and not msg[3] and \
 		not self.mainOverlay.filterMessage(*(msg[1:])):

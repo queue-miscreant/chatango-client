@@ -150,7 +150,7 @@ def images(main, link, ext):
 	try:
 		yield from asyncio.create_subprocess_exec(*args
 			,stdin=DEVNULL,stdout=DEVNULL,stderr=DEVNULL,loop=main.loop)
-	except:
+	except FileNotFoundError:
 		main.newBlurb("Image viewer %s not found, defaulting to browser" % \
 			IMG_ARGS[0])
 		IMG_ARGS.clear()
@@ -171,7 +171,7 @@ def videos(main, link, ext):
 	try:
 		yield from asyncio.create_subprocess_exec(*args
 			,stdin=DEVNULL,stdout=DEVNULL,stderr=DEVNULL,loop=main.loop)
-	except:
+	except FileNotFoundError:
 		main.newBlurb("Video player %s not found, defaulting to browser" % \
 			MPV_ARGS[0])
 		MPV_ARGS.clear()

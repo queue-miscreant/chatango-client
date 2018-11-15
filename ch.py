@@ -345,7 +345,7 @@ class GroupProtocol(ChatangoProtocol):
 	def _recv_ok(self, args):
 		'''Acknowledgement from server that login succeeded'''
 		if args[2] == 'C' and (not self._manager.password) and (not self._manager.username):
-			self._storage._anon = "!anon" + _Generate.aid(args[4], args[1])
+			self._storage._anon = "!anon" + _Generate.aid(self._storage._nColor, args[1])
 			self._storage._nColor = "CCC"
 		elif args[2] == 'C' and (not self._manager.password):
 			self.sendCommand("blogin", self._manager.username)
