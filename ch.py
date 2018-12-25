@@ -13,7 +13,7 @@ by those versions.
 #
 #		when receiving "track" commands in private messages, each "track" download
 #		is followed like a `getblock` command
-#		
+#
 #		pending checking if `getblock` is "get tracking block" or "get blocklist" (which is null)
 
 ################################
@@ -23,66 +23,70 @@ import random
 import re
 import urllib.request
 import asyncio
-import time
 from os.path import basename
 from socket import gaierror
+from functools import partial
 
 #enumerable constants
-FONT_FACES = \
-	["Arial"
-	,"Comic Sans"
-	,"Georgia"
-	,"Handwriting"
-	,"Impact"
-	,"Palatino"
-	,"Papyrus"
-	,"Times New Roman"
-	,"Typewriter" ]
+FONT_FACES = [
+	  "Arial"
+	, "Comic Sans"
+	, "Georgia"
+	, "Handwriting"
+	, "Impact"
+	, "Palatino"
+	, "Papyrus"
+	, "Times New Roman"
+	, "Typewriter"
+]
 #limited sizes available for non-premium accounts
-FONT_SIZES = [9,10,11,12,13,14]
-CHANNEL_NAMES = ["None","Red","Blue","Both"]
+FONT_SIZES = [9, 10, 11, 12, 13, 14]
+CHANNEL_NAMES = ["None", "Red", "Blue", "Both"]
 
-BigMessage_Cut = 0
-BigMessage_Multiple = 1
+BIGMESSAGE_CUT = 0
+BIGMESSAGE_MULTIPLE = 1
 
-POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\/>)?(<f x([0-9a-fA-F]{2,8})=\"([0-9a-zA-Z]*)\">)?")
+POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\\/>)?" + \
+	"(<f x([0-9a-fA-F]{2,8})=\"([0-9a-zA-Z]*)\">)?")
 XML_TAG_RE = re.compile("(</?(.*?)/?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust\.chatango\.com/.+?/)t(_\d+.\w+)")
 
-weights = [['5', 75], ['6', 75], ['7', 75], ['8', 75], ['16', 75], ['17', 75], ['18', 75], ['9', 95], ['11', 95], ['12', 95], ['13', 95], ['14', 95], ['15', 95], ['19', 110], ['23', 110], ['24', 110], ['25', 110], ['26', 110], ['28', 104], ['29', 104], ['30', 104], ['31', 104], ['32', 104], ['33', 104], ['35', 101], ['36', 101], ['37', 101], ['38', 101], ['39', 101], ['40', 101], ['41', 101], ['42', 101], ['43', 101], ['44', 101], ['45', 101], ['46', 101], ['47', 101], ['48', 101], ['49', 101], ['50', 101], ['52', 110], ['53', 110], ['55', 110], ['57', 110], ['58', 110], ['59', 110], ['60', 110], ['61', 110], ['62', 110], ['63', 110], ['64', 110], ['65', 110], ['66', 110], ['68', 95], ['71', 116], ['72', 116], ['73', 116], ['74', 116], ['75', 116], ['76', 116], ['77', 116], ['78', 116], ['79', 116], ['80', 116], ['81', 116], ['82', 116], ['83', 116], ['84', 116]]
-specials = {"de-livechat": 5, "ver-anime": 8, "watch-dragonball": 8, "narutowire": 10, "dbzepisodeorg": 10, "animelinkz": 20, "kiiiikiii": 21, "soccerjumbo": 21, "vipstand": 21, "cricket365live": 21, "pokemonepisodeorg": 22, "watchanimeonn": 22, "leeplarp": 27, "animeultimacom": 34, "rgsmotrisport": 51, "cricvid-hitcric-": 51, "tvtvanimefreak": 54, "stream2watch3": 56, "mitvcanal": 56, "sport24lt": 56, "ttvsports": 56, "eafangames": 56, "myfoxdfw": 67, "peliculas-flv": 69, "narutochatt": 70}
+WEIGHTS = [['5', 75], ['6', 75], ['7', 75], ['8', 75], ['16', 75], ['17', 75], ['18', 75], ['9', 95], ['11', 95], ['12', 95], ['13', 95], ['14', 95], ['15', 95], ['19', 110], ['23', 110], ['24', 110], ['25', 110], ['26', 110], ['28', 104], ['29', 104], ['30', 104], ['31', 104], ['32', 104], ['33', 104], ['35', 101], ['36', 101], ['37', 101], ['38', 101], ['39', 101], ['40', 101], ['41', 101], ['42', 101], ['43', 101], ['44', 101], ['45', 101], ['46', 101], ['47', 101], ['48', 101], ['49', 101], ['50', 101], ['52', 110], ['53', 110], ['55', 110], ['57', 110], ['58', 110], ['59', 110], ['60', 110], ['61', 110], ['62', 110], ['63', 110], ['64', 110], ['65', 110], ['66', 110], ['68', 95], ['71', 116], ['72', 116], ['73', 116], ['74', 116], ['75', 116], ['76', 116], ['77', 116], ['78', 116], ['79', 116], ['80', 116], ['81', 116], ['82', 116], ['83', 116], ['84', 116]]
+SPECIALS = {"de-livechat": 5, "ver-anime": 8, "watch-dragonball": 8, "narutowire": 10, "dbzepisodeorg": 10, "animelinkz": 20, "kiiiikiii": 21, "soccerjumbo": 21, "vipstand": 21, "cricket365live": 21, "pokemonepisodeorg": 22, "watchanimeonn": 22, "leeplarp": 27, "animeultimacom": 34, "rgsmotrisport": 51, "cricvid-hitcric-": 51, "tvtvanimefreak": 54, "stream2watch3": 56, "mitvcanal": 56, "sport24lt": 56, "ttvsports": 56, "eafangames": 56, "myfoxdfw": 67, "peliculas-flv": 69, "narutochatt": 70}
 
-_HTML_CODES = \
-	[("&#39;","'")
-	,("&gt;",'>')
-	,("&lt;",'<')
-	,("&quot;",'"')
-	,("&apos;","'")
-	,("&amp;",'&')
+_HTML_CODES = [
+	  ("&#39;", "'")
+	, ("&gt;", '>')
+	, ("&lt;", '<')
+	, ("&quot;", '"')
+	, ("&apos;", "'")
+	, ("&amp;", '&')
 ]
-def formatRaw(raw):
+def format_raw(raw):
 	'''
-	Format a raw html string into one with newlines 
+	Format a raw html string into one with newlines
 	instead of <br>s and all tags formatted out
 	'''
-	if len(raw) == 0: return raw
+	if not raw:
+		return raw
 	#replace <br>s with actual line breaks
 	#otherwise, remove html
 	acc = 0
 	for i in XML_TAG_RE.finditer(raw):
-		start,end = i.span(1)
+		start, end = i.span(1)
 		rep = ""
 		if i.group(2) == "br":
 			rep = '\n'
 		raw = raw[:start-acc] + rep + raw[end-acc:]
 		acc += end-start - len(rep)
-	raw.replace("&nbsp;",' ')
-	for i,j in _HTML_CODES:
-		raw = raw.replace(i,j)
+	raw.replace("&nbsp;", ' ')
+	for i, j in _HTML_CODES:
+		raw = raw.replace(i, j)
 	#remove trailing \n's
-	while len(raw) and raw[-1] == "\n":
+	while raw and raw[-1] == "\n":
 		raw = raw[:-1]
 	#thumbnail fix in chatango
+	raw = THUMBNAIL_FIX_RE.subn(r"\1l\2", raw)[0]
 	return raw
 
 class Post:
@@ -94,7 +98,7 @@ class Post:
 		if msgtype == 2:
 			self.user = raw[0]
 			self.time = float(raw[3])
-			self.post = formatRaw(':'.join(raw[5:]))
+			self.post = format_raw(':'.join(raw[5:]))
 			self.nColor = ''
 			self.fColor = ''
 			self.fSize = 12
@@ -108,8 +112,7 @@ class Post:
 		self.pnum = raw[5] if msgtype == 0 else None
 		self.msgid = raw[5] if msgtype == 1 else None
 		self.ip = raw[6]
-		almostCooked = formatRaw(':'.join(raw[9:]))
-		self.post = THUMBNAIL_FIX_RE.subn(r"\1l\2",almostCooked)[0]
+		self.post = format_raw(':'.join(raw[9:]))
 
 		tag = POST_TAG_RE.search(raw[9])
 		if tag:
@@ -148,46 +151,51 @@ class Post:
 
 class _Generate:
 	'''Generator functions for ids and server numbers'''
+	@staticmethod
 	def uid():
 		'''Generate user ID'''
 		return str(int(random.randrange(10 ** 15, (10 ** 16) - 1)))
 
+	@staticmethod
 	def aid(n, uid):
 		'''Generate anon ID'''
 		try:
 			n = n.rsplit('.', 1)[0]
 			n = n[-4:]
 			int(n)	#insurance that n is int-able
-		except:
+		except ValueError:
 			n = "3452"
-		return "".join(map(lambda i,v: str(int(i) + int(v))[-1],
-					   n, str(uid)[4:8]))
+		return "".join(map(lambda i, v: str(int(i) + int(v))[-1]
+			, n, str(uid)[4:8]))
 
-	def serverNum(group):
+	@staticmethod
+	def server_num(group):
 		'''Return server number'''
-		if group in specials.keys():
-			return specials[group]
+		if group in SPECIALS.keys():
+			return SPECIALS[group]
 		group = re.sub("-|_", 'q', group)
-		wt, gw = sum([n[1] for n in weights]), 0
+		wt, gw = sum([n[1] for n in WEIGHTS]), 0
 		try:
 			num1 = 1000 if len(group) < 7 else max(int(group[6:9], 36), 1000)
-			num2 = (int(group[:5],36) % num1) / num1
+			num2 = (int(group[:5], 36) % num1) / num1
 		except ValueError:
 			return
-		for i, v in weights:
-			gw += v / wt
+		for i, j in WEIGHTS:
+			gw += j / wt
 			if gw >= num2:
 				return i
 
-	def pmAuth(username,password):
+	@staticmethod
+	def pm_auth(username, password):
 		'''Request auth cookie for PMs'''
-		login = urllib.request.urlopen("http://chatango.com/login",
-			  data = urllib.parse.urlencode({
-				 "user_id":		username
-				,"password":	password
-				,"storecookie":	"on"
-				,"checkerrors":	"yes" 
-				}).encode())
+		data = urllib.parse.urlencode({
+			  "user_id":		username
+			, "password":		password
+			, "storecookie":	"on"
+			, "checkerrors":	"yes"
+		}).encode()
+
+		login = urllib.request.urlopen("http://chatango.com/login", data=data)
 		for i in login.headers.get_all("Set-Cookie"):
 			search = re.search("auth.chatango.com=(.*?);", i)
 			if search:
@@ -199,49 +207,50 @@ class _Multipart(urllib.request.Request):
 	MULTI_BOUNDARY = '---------------iM-in-Ur-pr07oc01'
 	DISPOSITION = "Content-Disposition: form-data; name=\"%s\""
 
-	def __init__(self, url, data, headers = {}):
+	def __init__(self, url, data, headers={}):
 		multiform = []
-		for k,v in data.items():
+		for i, j in data.items():
 			multiform.append("--" + self.MULTI_BOUNDARY) #add boundary
-			data = v
+			data = j
 			#the next part can have a (mime type, file) tuple
-			if isinstance(v,(tuple, list)):
-				if len(v) != 2:
+			if isinstance(j, (tuple, list)):
+				if len(j) != 2:
 					raise ValueError("improper multipart file tuple formatting")
 				try:
 					#try to read the file first
-					data = v[1].read()
-					v[1].close()
+					data = j[1].read()
 					#then set the filename to filename
-					multiform.append((self.DISPOSITION % k) + \
-						"; filename=\"%s\"" % basename(v[1].name))
-					multiform.append("Content-Type: %s" % v[0])
-				except AttributeError as ae:
-					raise ValueError("expected file-like object") from ae
+					multiform.append((self.DISPOSITION % i) + \
+						"; filename=\"%s\"" % basename(j[1].name))
+					multiform.append("Content-Type: %s" % j[0])
+				except AttributeError as exc:
+					raise ValueError("expected file-like object") from exc
 			else:
 				#no mime type supplied
-				multiform.append(self.DISPOSITION % k)
+				multiform.append(self.DISPOSITION % j)
 			multiform.append("")
 			multiform.append(data)
 		multiform.append("--" + self.MULTI_BOUNDARY + "--")
 		#encode multiform
-		request_body = (b"\r\n").join([isinstance(i,bytes) and i or i.encode() \
+		request_body = (b"\r\n").join([isinstance(i, bytes) and i or i.encode() \
 			for i in multiform])
 		
-		headers.update(	{"content-length":	str(len(request_body))
-						,"content-type":	"multipart/form-data; boundary=%s"%\
-							self.MULTI_BOUNDARY})
-
-		super(_Multipart, self).__init__(url, data = request_body, headers = headers)
+		headers.update({
+			  "content-length":	str(len(request_body))
+			, "content-type":	"multipart/form-data; boundary=%s"%\
+				self.MULTI_BOUNDARY
+		})
+		super().__init__(url, data=request_body, headers=headers)
 
 class ChatangoProtocol(asyncio.Protocol):
 	'''Virtual class interpreting chatango's protocol'''
-	_pingDelay = 15
+	_ping_delay = 15
+	_longest_ping = 60
 	def __init__(self, manager, storage, loop=None):
 		self._loop = manager.loop if loop is None else loop
 		self._storage = storage
 		self._manager = manager
-		self._pingTask = None
+		self._ping_task = None
 		#socket stuff
 		self._transport = None
 		self.lastResponse = -1
@@ -264,68 +273,55 @@ class ChatangoProtocol(asyncio.Protocol):
 				#create a task for the recv event
 				receive = getattr(self, "_recv_"+args[0])
 				self._loop.create_task(receive(args[1:]))
-			except AttributeError: pass
+			except AttributeError:
+				pass
 		self._rbuff = commands[-1]
 		self.lastResponse = self._loop.time()
 
 	def connection_lost(self, exc):
-		'''Cancel the ping task and fire onConnectionError'''
-		if self._pingTask:
-			self._loop.call_soon(self._pingTask.cancel)
+		'''Cancel the ping task and fire on_connection_error'''
+		if self._ping_task:
+			self._loop.call_soon(self._ping_task.cancel)
 		if self.connected: #connection lost if the transport closes abruptly
-			self.callEvent("onConnectionError",exc)
+			self.call_event("on_connection_error", exc)
 	#########################################
 
-	def sendCommand(self, *args, firstcmd = False):
+	def send_command(self, *args, firstcmd=False):
 		'''Send data to socket'''
 		if firstcmd:
 			self._transport.write(bytes(':'.join(args)+'\x00', "utf-8"))
 		else:
 			self._transport.write(bytes(':'.join(args)+'\r\n\x00', "utf-8"))
 
-	def callEvent(self, event, *args, **kw):
+	def call_event(self, event, *args, **kw):
 		'''Attempt to call manager's method'''
 		try:
 			event = getattr(self._manager, event)
 			self._loop.create_task(event(self._storage, *args, **kw))
-		except AttributeError: pass
+		except AttributeError:
+			pass
 
-	@asyncio.coroutine
-	def disconnect(self,raiseError=False):
-		'''Safely close the transport. Prevents firing onConnectionError 'lost' '''
+	async def disconnect(self, raise_error=False):
+		'''Safely close the transport. Prevents firing on_connection_error 'lost' '''
 		if self._transport:
 			self._transport.close()
 		#cancel the ping task now
-		if self._pingTask:
-			self._pingTask.cancel()
-			self._pingTask = None
-		self.connected = raiseError
+		if self._ping_task:
+			self._ping_task.cancel()
+			self._ping_task = None
+		self.connected = raise_error
 
-	@asyncio.coroutine
-	def ping(self):
+	async def ping(self):
 		'''Send a ping to keep the transport alive'''
-		while 60 > self._loop.time() - self.lastResponse:
-			self.sendCommand("")
-			yield from asyncio.sleep(self._pingDelay)
+		while self._loop.time() - self.lastResponse < self._longest_ping:
+			self.send_command("")
+			await asyncio.sleep(self._ping_delay)
 		self._transport.close()
-
-	"""
-	@asyncio.coroutine
-	def _recv_premium(self, args):
-		'''Receive premium command. Called for both PM and Group'''
-		#TODO write setBgMode and setRecordingMode
-		if float(args[1]) > time.time():
-			self._storage._premium = True
-			if self._storage._messageBackground: self.setBgMode(1)
-			if self._storage._messageRecord: self.setRecordingMode(1)
-		else:
-			self._storage._premium = False
-	"""
 
 class GroupProtocol(ChatangoProtocol):
 	'''Protocol interpreter for Chatango group commands'''
 	def __init__(self, room, manager, loop=None):
-		super(GroupProtocol,self).__init__(manager,Group(self,room),loop=loop)
+		super().__init__(manager, Group(self, room), loop=loop)
 		#intermediate message stuff and aux data for commands
 		self._messages = {}
 		self._history = []
@@ -337,21 +333,22 @@ class GroupProtocol(ChatangoProtocol):
 		self._transport = transport
 		self.connected = True
 		self.lastResponse = self._loop.time()
-		self.sendCommand("bauth", self._storage._name, self._uid, self._manager.username,
-			self._manager.password, firstcmd = True)
+		self.send_command("bauth", self._storage._name, self._uid, self._manager.username,
+			self._manager.password, firstcmd=True)
 
 	#--------------------------------------------------------------------------
-	@asyncio.coroutine
-	def _recv_ok(self, args):
+	async def _recv_ok(self, args):
 		'''Acknowledgement from server that login succeeded'''
-		if args[2] == 'C' and (not self._manager.password) and (not self._manager.username):
-			self._storage._anon = "!anon" + _Generate.aid(self._storage._nColor, args[1])
+		if args[2] == 'C' and (not self._manager.password) \
+		and (not self._manager.username):
 			self._storage._nColor = "CCC"
+			self._storage._anon = "!anon" + \
+				_Generate.aid(self._storage._nColor, args[1])
 		elif args[2] == 'C' and (not self._manager.password):
-			self.sendCommand("blogin", self._manager.username)
+			self.send_command("blogin", self._manager.username)
 		elif args[2] != 'M': #unsuccesful login
-			self.callEvent("onLoginFail")
-			yield from self.disconnect()
+			self.call_event("on_login_fail")
+			await self.disconnect()
 			return
 		#shouldn't be necessary, but if the room assigns us a new id
 		self._uid = args[1]
@@ -359,28 +356,25 @@ class GroupProtocol(ChatangoProtocol):
 		self._storage._mods = set(mod.split(',')[0].lower()
 			for mod in args[6].split(';'))
 		#create a ping
-		self._pingTask = self._loop.create_task(self.ping())
+		self._ping_task = self._loop.create_task(self.ping())
 
-	@asyncio.coroutine
-	def _recv_denied(self, args):
+	async def _recv_denied(self, _):
 		'''Acknowledgement that login was denied'''
-		self.callEvent("onDenied")
-		yield from self.disconnect()
-	
-	@asyncio.coroutine
-	def _recv_inited(self, args):
+		self.call_event("on_denied")
+		await self.disconnect()
+
+	async def _recv_inited(self, _):
 		'''Room inited, after recent messages have sent'''
 		#TODO weed out null commands
-		self.sendCommand("gparticipants")	#open up feed for members joining/leaving
-		self.sendCommand("getpremium", '1')	#try to turn on premium features
-		self.sendCommand("getbannedwords")	#what it says on the tin
-		self.sendCommand("getratelimit")	#i dunno
-		self.callEvent("onConnect")
-		self.callEvent("onHistoryDone", list(self._history)) #clone history
+		self.send_command("gparticipants")	#open up feed for members joining/leaving
+		self.send_command("getpremium", '1')	#try to turn on premium features
+		self.send_command("getbannedwords")	#what it says on the tin
+		self.send_command("getratelimit")	#i dunno
+		self.call_event("on_connect")
+		self.call_event("on_history_done", self._history.copy()) #clone history
 		self._history.clear()
 
-	@asyncio.coroutine
-	def _recv_gparticipants(self, args):
+	async def _recv_gparticipants(self, args):
 		'''Command that contains information of current room members'''
 		#gparticipants splits people by ;
 		people = ':'.join(args[1:]).split(';')
@@ -390,160 +384,154 @@ class GroupProtocol(ChatangoProtocol):
 				person = person.split(':')
 				if person[3] != "None" and person[4] == "None":
 					self._storage._users.append(person[3].lower())
-		self.callEvent("onParticipants")
+		self.call_event("on_participants")
 
-	@asyncio.coroutine
-	def _recv_participant(self, args):
+	async def _recv_participant(self, args):
 		'''New member joined or left'''
 		bit = args[0]
 		if bit == '0':	#left
 			user = args[3].lower()
 			if args[3] != "None" and user in self._storage._users:
 				self._storage._users.remove(user)
-				self.callEvent("onMemberLeave", user)
+				self.call_event("on_member_leave", user)
 			else:
-				self.callEvent("onMemberLeave", "anon")
+				self.call_event("on_member_leave", "anon")
 		elif bit == '1':	#joined
 			user = args[3].lower()
 			if args[3] != "None":
 				self._storage._users.append(user)
-				self.callEvent("onMemberJoin", user)
+				self.call_event("on_member_join", user)
 			else:
-				self.callEvent("onMemberJoin", "anon")
+				self.call_event("on_member_join", "anon")
 		elif bit == '2':	#tempname blogins
 			user = args[4].lower()
-			self.callEvent("onMemberJoin", user)
+			self.call_event("on_member_join", user)
 
-	@asyncio.coroutine
-	def _recv_bw(self, args):
+	async def _recv_bw(self, args):
 		'''Banned words'''
 		self._storage._bannedWords = args[0].split("%2C")
 
-	@asyncio.coroutine
-	def _recv_n(self, args):
+	async def _recv_n(self, args):
 		'''Number of users, in base 16'''
-		self._storage._usercount = int(args[0],16)
-		self.callEvent("onUsercount")
-		
-	@asyncio.coroutine
-	def _recv_b(self, args):
+		self._storage._usercount = int(args[0], 16)
+		self.call_event("on_usercount")
+
+	async def _recv_b(self, args):
 		'''Message received'''
 		post = Post(args, 0)
 		if post.time > self._last:
 			self._last = post.time
 		self._messages[post.pnum] = post
 
-	@asyncio.coroutine
-	def _recv_u(self,args):
+	async def _recv_u(self, args):
 		'''Message updated'''
 		post = self._messages.get(args[0])
 		if post:
 			del self._messages[args[0]]
 			post.msgid = args[1]
-			self.callEvent("onMessage", post)
+			self.call_event("on_message", post)
 		else:
-			self.callEvent("onDroppedMessage", args)
+			self.call_event("on_dropped_message", args)
 
-	@asyncio.coroutine
-	def _recv_i(self,args):
+	async def _recv_i(self, args):
 		'''Historical message'''
 		post = Post(args, 1)
 		if post.time > self._last:
 			self._last = post.time
 		self._history.append(post)
 
-	@asyncio.coroutine
-	def _recv_gotmore(self, args):
+	async def _recv_gotmore(self, _):
 		'''Received all historical messages'''
-		self.callEvent("onHistoryDone", list(self._history))
+		self.call_event("on_history_done", list(self._history))
 		self._history.clear()
 		self._storage._timesGot += 1
 
-	@asyncio.coroutine
-	def _recv_show_fw(self, args):
+	async def _recv_show_fw(self, _):
 		'''Flood warning'''
-		self.callEvent("onFloodWarning")
+		self.call_event("on_flood_warning")
 
-	@asyncio.coroutine
-	def _recv_show_tb(self, args):
+	async def _recv_show_tb(self, args):
 		'''Flood ban'''
-		self.callEvent("onFloodBan",int(args[0]))
+		self.call_event("on_flood_ban", int(args[0]))
 
-	@asyncio.coroutine
-	def _recv_tb(self, args):
+	async def _recv_tb(self, args):
 		'''Flood ban reminder'''
-		self.callEvent("onFloodBanRepeat",int(args[0]))
+		self.call_event("on_flood_ban_repeat", int(args[0]))
 
-	@asyncio.coroutine
-	def _recv_blocklist(self, args):
+	async def _recv_blocklist(self, args):
 		'''Received list of banned users'''
 		self._storage._banlist.clear()
 		sections = ':'.join(args).split(';')
 		for section in sections:
 			params = section.split(':')
-			if len(params) != 5: continue
-			if params[2] == "": continue
+			if len(params) != 5:
+				continue
+			if params[2] == "":
+				continue
 			self._storage._banlist.append((
-				params[0]	#unid
-				,params[1]	#ip
-				,params[2]	#target
-				,float(params[3]) #time
-				,params[4]	#src
+				  params[0]	#unid
+				, params[1]	#ip
+				, params[2]	#target
+				, float(params[3]) #time
+				, params[4]	#src
 			))
-		self.callEvent("onBanlistUpdate")
+		self.call_event("on_banlist_update")
 
-	@asyncio.coroutine
-	def _recv_blocked(self, args):
+	async def _recv_blocked(self, args):
 		'''User banned'''
-		if args[2] == "": return
+		if args[2] == "":
+			return
 		target = args[2]
 		user = args[3]
-		self._storage._banlist.append((args[0], args[1], target, float(args[4]), user))
-		self.callEvent("onBan", user, target)
-		self.requestBanlist()
+		self._storage._banlist.append((
+			  args[0]	#unid
+			, args[1]	#ip
+			, target
+			, float(args[3]) #time
+			, user
+		))
+		self.call_event("on_ban", user, target)
+		self.request_banlist()
 
-	@asyncio.coroutine
-	def _recv_unblocked(self, args):
+	async def _recv_unblocked(self, args):
 		'''User unbanned'''
-		if args[2] == "": return
+		if args[2] == "":
+			return
 		target = args[2]
 		user = args[3]
-		self.callEvent("onUnban", user, target)
-		self.requestBanlist()
+		self.call_event("on_unban", user, target)
+		self.request_banlist()
 
-	@asyncio.coroutine
-	def _recv_mods(self, args):
+	async def _recv_mods(self, args):
 		'''Moderators changed'''
 		mods = set(map(lambda x: x.lower(), args))
 		premods = self._storage._mods
 		for user in mods - premods: #modded
 			self._storage._mods.add(user)
-			self.callEvent("onModAdd", user)
+			self.call_event("on_mod_add", user)
 		for user in premods - mods: #demodded
 			self._storage._mods.remove(user)
-			self.callEvent("onModRemove", user)
-		self.callEvent("onModChange")
+			self.call_event("on_mod_remove", user)
+		self.call_event("on_mod_change")
 
-	@asyncio.coroutine
-	def _recv_delete(self, args):
+	async def _recv_delete(self, args):
 		'''Message deleted'''
-		self.callEvent("onMessageDelete", args[0])
+		self.call_event("on_message_delete", args[0])
 
-	@asyncio.coroutine
-	def _recv_deleteall(self, args):
+	async def _recv_deleteall(self, args):
 		'''Message delete (multiple)'''
 		for msgid in args:
-			self.callEvent("onMessageDelete", msgid)
+			self.call_event("on_message_delete", msgid)
 	#--------------------------------------------------------------------------
-	def requestBanlist(self):
+	def request_banlist(self):
 		'''Request updated banlist (Mod)'''
-		self.sendCommand("blocklist", "block", "", "next", "500")
+		self.send_command("blocklist", "block", "", "next", "500")
 
 class PMProtocol(ChatangoProtocol):
 	'''Protocol interpreter for Chatango private message commands'''
 	def __init__(self, manager, authkey, loop=None):
-		super(PMProtocol,self).__init__(manager,Privates(self),loop=loop)
-		self.authkey = authkey
+		super().__init__(manager, Privates(self), loop=loop)
+		self.auth_key = authkey
 
 	def connection_made(self, transport):
 		'''Begins communication with and connects to the PM server'''
@@ -551,102 +539,94 @@ class PMProtocol(ChatangoProtocol):
 		self._transport = transport
 		self.connected = True
 		self.lastResponse = self._loop.time()
-		self.sendCommand("tlogin",self.authKey,self._uid,firstcmd = True)
+		self.send_command("tlogin", self.auth_key, self._uid, firstcmd=True)
 
-	def _recv_seller_name(self,*args):
+	async def _recv_seller_name(self, *args):
 		#seller_name returns two arguments: the session id called with tlogin and
 		#the username; neither of these are important except as a sanity check
 		pass
 
-	@asyncio.coroutine
-	def _recv_OK(self,*args):
-		self.callEvent("onPMConnect")
-		self.sendCommand("settings")
-		self.sendCommand("wl")	#friends list
-		self._pingTask = self._loop.create_task(self.ping())
+	async def _recv_OK(self, args):
+		self.call_event("on_pm_connect")
+		self.send_command("settings")
+		self.send_send_cnd("wl")	#friends list
+		self._ping_task = self._loop.create_task(self.ping())
 
-	@asyncio.coroutine
-	def _recv_msg(self,args):
-		post = Post(args,2)
-		self.callEvent("onPrivateMessage", post, False)
+	async def _recv_msg(self, args):
+		post = Post(args, 2)
+		self.call_event("on_pm", post, False)
 
-	@asyncio.coroutine
-	def _recv_msgoff(self,args):
-		post = Post(args,2)
-		self.callEvent("onPrivateMessage", post, True)
+	async def _recv_msgoff(self, args):
+		post = Post(args, 2)
+		self.call_event("on_pm", post, True)
 
-	@asyncio.coroutine
-	def _recv_wl(self,args):
+	async def _recv_wl(self, args):
 		'''Received friends list (watch list)'''
 		self._storage._watchList = {}
 		it = iter(args)
 		try:
 			for i in it:
 				#username
-				self._storage._watchList[i] = \
-					(float(next(it))			#last message
-					,next(it))					#online/offline/app
+				self._storage._watchList[i] = (
+					  float(next(it))			#last message
+					, next(it))					#online/offline/app
 				next(it)						#lagging 0
-		except StopIteration: pass
-		self.callEvent("onWatchList")
+		except StopIteration:
+			pass
+		self.call_event("on_watchlist")
 
-	@asyncio.coroutine
-	def _recv_track(self,args):
+	async def _recv_track(self, args):
 		'''Received tracked user'''
 		#0: username
 		#1: time last online
 		#2: online/offline/app
 		track = self._storage._trackList
-		track[args[0]] = (float(args[1]),args[2])
-		self.callEvent("onTrack")
+		track[args[0]] = (float(args[1]), args[2])
+		self.call_event("on_track")
 
-	@asyncio.coroutine
-	def _recv_connect(self,args):
+	async def _recv_connect(self, args):
 		'''Received check online'''
-		#TODO:
+		#TODO
 		#0:	username
 		#1:	last message time
 		#2:	online/offline/app/invalid (not a real person or is a group)
 
-	@asyncio.coroutine
-	def _recv_wladd(self,args):
+	async def _recv_wladd(self, args):
 		'''Received addition to watch list'''
 		#0:	username
 		#1:	online/offline/app
 		#2:	last message time
-		self._storage._watchList[args[0]] = \
-			(float(args[2])
-			,args[1])
-		self.callEvent("onWatchListUpdate")
-		
-	@asyncio.coroutine
-	def _recv_wldelete(self,args):
+		self._storage._watchList[args[0]] = (
+			  float(args[2])
+			, args[1])
+		self.call_event("on_watchlist_update")
+
+	async def _recv_wldelete(self,args):
 		'''Received deletion from watch list'''
 		#0:	username
 		#1:	'deleted'
 		#2:	0
 		if self._storage._watchList.get(args[0]):
 			del self._storage._watchList[args[0]]
-		self.callEvent("onWatchListUpdate")
+		self.call_event("on_watchlist_update")
 
-	@asyncio.coroutine
-	def _recv_status(self,args):
+	async def _recv_status(self, args):
 		'''Received status update'''
 		#0: username
 		#1: last time online
 		#2:	online/offline/app
 		#update watch
 		if self._storage._watchList.get(args[0]):
-			self._storage._watchList[args[0]] = \
-				(float(args[1])
-				,args[2])
-			self.callEvent("onWatchListUpdate")
+			self._storage._watchList[args[0]] = (
+				  float(args[1])
+				, args[2])
+			self.call_event("on_watchlist_update")
 		#update track
 		if self._storage._trackList.get(args[0]):
-			self._storage._trackList[args[0]] = \
-				(float(args[1])
-				,args[2])
-			self.callEvent("onTrack")
+			self._storage._trackList[args[0]] = (
+				  float(args[1])
+				, args[2])
+			self.call_event("on_track")
 
 class Connection:
 	'''Virtual class for storing responses from protocols'''
@@ -660,7 +640,7 @@ class Connection:
 		self._messageRecord = False
 
 		#formatting
-		self._nColor = None	
+		self._nColor = None
 		self._fSize  = 11
 		self._fColor = ""
 		self._fFace  = 0
@@ -671,25 +651,32 @@ class Connection:
 
 	nColor = property(lambda self: self._nColor)
 	fColor = property(lambda self: self._fColor)
-	fSize  = property(lambda self: self._fSize)
-	fFace  = property(lambda self: self._fFace)
-		
+	fSize = property(lambda self: self._fSize)
+	fFace = property(lambda self: self._fFace)
+
 	@nColor.setter
-	def nColor(self,arg):
-		if not self._anon:	self._nColor = arg
+	def nColor(self, arg):
+		if not self._anon:
+			self._nColor = arg
+
 	@fColor.setter
-	def fColor(self,arg):	self._fColor = arg
+	def fColor(self, arg):
+		self._fColor = arg
+
 	@fSize.setter
-	def fSize(self,arg): 	self._fSize = min(22,max(9,arg))
+	def fSize(self, arg):
+		self._fSize = min(22, max(9, arg))
+
 	@fFace.setter
-	def fFace(self,arg): 	self._fFace = arg
-		
+	def fFace(self, arg):
+		self._fFace = arg
 
 class Group(Connection):
 	'''Class for high-level group communication and storing group information'''
 	_maxLength = 2000
-	def __init__(self,protocol,room):
-		super(Group,self).__init__(protocol)
+	_too_big_message = BIGMESSAGE_MULTIPLE
+	def __init__(self, protocol, room):
+		super().__init__(protocol)
 		#user information
 		self._name = room
 		self._owner = None
@@ -706,72 +693,71 @@ class Group(Connection):
 		#	Properties
 		#########################################
 
-	username  = property(lambda self: self._anon or self._protocol._manager.username)
-	name      = property(lambda self: self._name)
-	owner     = property(lambda self: self._owner)
-	modlist   = property(lambda self: set(self._mods))		#cloned set
-	userlist  = property(lambda self: list(self._users))	#cloned list
+	username = property(lambda self: self._anon or self._protocol._manager.username)
+	name = property(lambda self: self._name)
+	owner = property(lambda self: self._owner)
+	modlist = property(lambda self: set(self._mods))		#cloned set
+	userlist = property(lambda self: list(self._users))	#cloned list
 	usercount = property(lambda self: self._usercount)
-	banlist   = property(lambda self: [banned[2] for banned in self._banlist])	#by name; cloned
-	last      = property(lambda self: self._protocol._last) #this is nice for the user to access
+	banlist = property(lambda self: [banned[2] for banned in self._banlist])	#by name; cloned
+	last = property(lambda self: self._protocol._last) #this is nice for the user to access
 
-	@asyncio.coroutine
-	def sendPost(self, post, channel = 0, html = False):
+	def send_post(self, post, channel=0, html=False):
 		'''Send a post to the group'''
 		channel = (((channel&2)<<2 | (channel&1))<<8)
 		if not html:
 			#replace HTML equivalents
-			for i,j in reversed(_HTML_CODES):
-				post = post.replace(j,i)
-			post = post.replace('\n',"<br/>")
+			for i, j in reversed(_HTML_CODES):
+				post = post.replace(j, i)
+			post = post.replace('\n', "<br/>")
 		if len(post) > self._maxLength:
-			if self._tooBigMessage == BigMessage_Cut:
-				yield from self.sendPost(post[:self._maxLength], channel = channel, html = True)
-			elif self._tooBigMessage == BigMessage_Multiple:
-				while len(post) > 0:
+			if self._too_big_message == BIGMESSAGE_CUT:
+				self.send_post(post[:self._maxLength], channel=channel, html=True)
+			elif self._too_big_message == BIGMESSAGE_MULTIPLE:
+				while post:
 					sect = post[:self._maxLength]
 					post = post[self._maxLength:]
-					yield from self.sendPost(sect, channel, html = True)
+					self.send_post(sect, channel, html=True)
 			return
-		self._protocol.sendCommand("bm","meme",str(channel)
-			,"<n{}/><f x{:02d}{}=\"{}\">{}".format(self.nColor, self.fSize
+		self._protocol.send_command("bm", "meme", str(channel)
+			, "<n{}/><f x{:02d}{}=\"{}\">{}".format(self.nColor, self.fSize
 			, self.fColor, self.fFace, post))
 
-	def getMore(self, amt = 20):
+	def get_more(self, amt=20):
 		'''Get more historical messages'''
-		self._protocol.sendCommand("get_more",str(amt),str(self._timesGot))
+		self._protocol.send_command("get_more", str(amt), str(self._timesGot))
 
 	def flag(self, message):
 		'''
 		Flag a message
 		Argument `message` must be a `Post` object
 		'''
-		self._protocol.sendCommand("g_flag", message.msgid)
+		self._protocol.send_command("g_flag", message.msgid)
 
 	def delete(self, message):
 		'''
 		Delete a message (Mod)
 		Argument `message` must be a `Post` object
 		'''
-		if self.getLevel(self.username) > 0:
-			self._protocol.sendCommand("delmsg", message.msgid)
+		if self.get_level(self.username) > 0:
+			self._protocol.send_command("delmsg", message.msgid)
 
-	def clearUser(self, message):
+	def clear_user(self, message):
 		'''
 		Delete all of a user's messages (Mod)
 		Argument `message` must be a `Post` object
 		'''
-		if self.getLevel(self.username) > 0:
-			self._protocol.sendCommand("delallmsg", message.unid)
+		if self.get_level(self.username) > 0:
+			self._protocol.send_command("delallmsg", message.unid)
 
 	def ban(self, message):
 		'''
 		Ban a user from a message (Mod)
 		Argument `message` must be a `Post` object
 		'''
-		if self.getLevel(self.username) > 0:
-			self._protocol.sendCommand("block", message.user, message.ip, message.unid)
-  
+		if self.get_level(self.username) > 0:
+			self._protocol.send_command("block", message.user, message.ip, message.unid)
+
 	def unban(self, user):
 		'''
 		Unban a user by name (Mod)
@@ -783,156 +769,177 @@ class Group(Connection):
 				rec = record
 				break
 		if rec:
-			self._protocol.sendCommand("removeblock", rec[0], rec[1], rec[2])
+			self._protocol.send_command("removeblock", rec[0], rec[1], rec[2])
 			return True
-		else:
-			return False
+		return False
 
-	def addMod(self, user):
+	def add_mod(self, user):
 		'''Add moderator (Owner)'''
-		if self.getLevel(self.protocol._manager.username) == 2:
-			self._protocol.sendCommand("addmod", user)
+		if self.get_level(self.protocol._manager.username) == 2:
+			self._protocol.send_command("addmod", user)
 
-	def removeMod(self, user):
+	def remove_mod(self, user):
 		'''Remove moderator (Owner)'''
-		if self.getLevel(self.protocol._manager.username) == 2:
-			self._protocol.sendCommand("removemod", user)
+		if self.get_level(self.protocol._manager.username) == 2:
+			self._protocol.send_command("removemod", user)
 
 	def clearall(self):
 		'''Clear all messages (Owner)'''
-		if self.getLevel(self.username) == 2:
-			self._protocol.sendCommand("clearall")
+		if self.get_level(self.username) == 2:
+			self._protocol.send_command("clearall")
 
-	def getLevel(self, user):
+	def get_level(self, user):
 		'''Get level of permissions in group'''
-		if user == self._owner: return 2
-		if user in self._mods: return 1
+		if user == self._owner:
+			return 2
+		if user in self._mods:
+			return 1
 		return 0
 
 class Privates(Connection):
 	'''
 	Class representing high-level private message communication and storage
 	'''
-	def __init__(self,protocol):
-		super(Privates,self).__init__(protocol)
+	def __init__(self, protocol):
+		super().__init__(protocol)
 
 		self._watchList = {}	#analogous to a friends list, but not mutual
 		self._trackList = {}	#dict of users to whom `track` has been issued
 
-	def sendPost(self,user,post,html=False):
+	def send_post(self, user, post, html=False):
 		if not html:
 			#replace HTML equivalents
-			for i,j in reversed(_HTML_CODES):
-				post = post.replace(j,i)
-			post = post.replace('\n',"<br/>")
-		self._protocol.sendCommand("msg",user,"<m>{}</m>".format(post))
+			for i, j in reversed(_HTML_CODES):
+				post = post.replace(j, i)
+			post = post.replace('\n', "<br/>")
+		self._protocol.send_command("msg", user, "<m>{}</m>".format(post))
 
-def _connectionLostHandler(loop,context):
-	failedProtocol = context.get("protocol")
-	if isinstance(failedProtocol,ChatangoProtocol):
-		loop.create_task(failedProtocol.disconnect(True))
+def _connection_lost_handler(loop, context):
+	failed_protocol = context.get("protocol")
+	if isinstance(failed_protocol, ChatangoProtocol):
+		loop.create_task(failed_protocol.disconnect(True))
 	else:
 		loop.default_exception_handler(context)
 
 class Manager:
 	'''
-	Factory that creates and manages connections to chatango.
-	This class also propogates all events from groups
+	Creates and manages connections to chatango.
+	Also propogates events from joined groups
 	'''
-	def __init__(self, username, password, PMs = False, loop=None):
+	def __init__(self, username, password, pm=False, loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		self._groups = []
-		self.PMs = None
-		if PMs:
-			self.loop.create_task(self.joinPMs())
+		self.pm = None
+		if pm:
+			self.loop.create_task(self.join_pm())
 		self.username = username
 		self.password = password
-		
-		loop.set_exception_handler(_connectionLostHandler)
+
+		loop.set_exception_handler(_connection_lost_handler)
 
 	def __del__(self):
-		if self.loop.is_closed(): return
+		if self.loop.is_closed():
+			return
 		for i in self._groups:
 			#disconnect (and cancel all ping tasks)
 			self.loop.run_until_complete(i._protocol.disconnect())
-		if self.PMs is not None:
-			self.PMs._protocol.disconnect()
+		if self.pm is not None:
+			self.pm._protocol.disconnect()
 
-	@asyncio.coroutine
-	def joinGroup(self, groupName, port=443):
-		'''Join group `groupName`'''
-		groupName = groupName.lower()
+	@classmethod
+	def add_event(cls, eventname, func):
+		'''
+		Add an event handler.
+		`func` should have a keyword arg `ancestor`, the previous event handler
+		'''
+		ancestor = None
+		#limit modifiable attributes
+		if not eventname.startswith("on"):
+			raise ValueError("eventname must start with 'on'")
+		try:
+			ancestor = getattr(cls, eventname)
+		except AttributeError:
+			pass
+		#should be a partially applied function with
+		#the event ancestor (a coroutine generator)
+		setattr(cls, eventname, partial(func, ancestor=ancestor))
 
-		server = _Generate.serverNum(groupName)
-		if server is None: raise ValueError("malformed room token " + room)
+	async def join_group(self, group_name, port=443):
+		'''Join group `group_name`'''
+		group_name = group_name.lower()
+
+		server = _Generate.server_num(group_name)
+		if server is None:
+			raise ValueError("malformed room token " + group_name)
 
 		#already joined group
-		if groupName != self.username and groupName not in self._groups:
+		if group_name != self.username and group_name not in self._groups:
 			try:
-				ret = GroupProtocol(groupName, self)
-				yield from self.loop.create_connection(lambda: ret,
+				ret = GroupProtocol(group_name, self)
+				await self.loop.create_connection(lambda: ret,
 					"s{}.chatango.com".format(server), port)
 				self._groups.append(ret._storage)
 				return ret._storage
-			except gaierror as e:
-				raise ConnectionError("could not connect to group server") from e
-		elif groupName == self.username:
-			self.joinPMs()
+			except gaierror as exc:
+				raise ConnectionError("could not connect to group server") \
+				from exc
+		elif group_name == self.username:
+			return self.join_pm()
 		else:
 			raise ValueError("Attempted to join group multiple times")
 
-	@asyncio.coroutine
-	def leaveGroup(self, groupName):
-		'''Leave group `groupName`'''
-		if isinstance(groupName,Group): groupName = groupName.name
-		find = -1
-		for index,group in enumerate(self._groups):
-			if group.name == groupName:
-				yield from group._protocol.disconnect()
-				find = index
-		if find != -1:
-			self._groups.pop(index)
+	async def leave_group(self, group_name):
+		'''Leave group `group_name`'''
+		if isinstance(group_name, Group):
+			group_name = group_name.name
+		for index, group in enumerate(self._groups):
+			if group.name == group_name:
+				await group._protocol.disconnect()
+				self._groups.pop(index)
 
-	@asyncio.coroutine
-	def joinPMs(self, port=5222):
-		if self.PMs is None:
+	async def join_pm(self, port=5222):
+		'''Log into private messages and return Connection'''
+		if self.pm is None:
 			try:
-				authkey = _Generate.pmAuth(self.username,self.password)
-				ret = PMProtocol(self,authkey)
-				yield from self.loop.create_connection(lambda: ret,
-					"c1.chatango.com",port)
-				self.PMs = ret._storage
-			except gaierror as e:
-				raise ConnectionError("could not connect to PM server") from e
+				authkey = _Generate.pm_auth(self.username, self.password)
+				ret = PMProtocol(self, authkey)
+				await self.loop.create_connection(lambda: ret,
+					"c1.chatango.com", port)
+				self.pm = ret._storage
+			except gaierror as exc:
+				raise ConnectionError("could not connect to PM server") from exc
+		return self.pm
 
-	@asyncio.coroutine
-	def leavePMs(self):
-		if self.PMs is not None:
-			yield from self.PMs._protocol.disconnect()
-			self.PMs = None
+	async def leave_pm(self):
+		'''If logged into private messages, log out'''
+		if self.pm is not None:
+			await self.pm._protocol.disconnect()
+			self.pm = None
 
-	@asyncio.coroutine
-	def leaveAll(self):
+	async def leave_all(self):
 		'''Disconnect from all groups and PMs'''
 		for group in self._groups:
-			yield from group._protocol.disconnect()
+			await group._protocol.disconnect()
 		self._groups.clear()
-		yield from self.leavePMs()
+		await self.leave_pm()
 
-	def uploadAvatar(self, location):
+	def upload_avatar(self, location):
 		'''Upload an avatar with path `location`'''
 		extension = location[location.rfind('.')+1:].lower()
-		if extension == "jpg": extension = "jpeg"
-		elif extension not in ("png","jpeg"):
+		if extension == "jpg":
+			extension = "jpeg"
+		elif extension not in ("png", "jpeg"):
 			return False
 
-		urllib.request.urlopen(_Multipart('http://chatango.com/updateprofile',
-			data = {'u':		self.username
-				,'p':			self.password
-				,"auth":		"pwd"
-				,"arch":		"h5"
-				,"src":			"group"
-				,"action":		"fullpic"
-				,"Filedata":	("image/%s" % extension, open(location,"br"))
-			}))
+		with open(location, "br") as loc:
+			urllib.request.urlopen(_Multipart('http://chatango.com/updateprofile',
+				data={
+					  'u':			self.username
+					, 'p':			self.password
+					, "auth":		"pwd"
+					, "arch":		"h5"
+					, "src":		"group"
+					, "action":		"fullpic"
+					, "Filedata":	("image/%s" % extension, loc)
+				}))
 		return True

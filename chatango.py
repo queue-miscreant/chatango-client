@@ -1,136 +1,245 @@
 #!/usr/bin/env python3
-#chatango.py:
+#chatango.py
 '''
-cube's chatango client
-Usage:
-	python chatango.py [options]:
-	chatango [options]:
-
-	Start the chatango client. 
-
-Options:
-	-c user pass:	Input credentials
-	-g groupname:	Input group name
-	-r:				Relog
-	-nc:			No custom script import
-	--help:			Display this page
-
-Useful Key Bindings:
-	F2:		Link accumulator
-	F3:		List current group members
-	F4:		Chat formatting menu
-	F5:		Channels and filtering
-	F12:	Options menu
-
-	^G:		Open most recent link
-	^R:		Refresh current group
-	^T:		Switch to new group
+Chatango extension to client. Receives data from a Chatango room via `ChatBot`
+and displays it to the screen via `ChatangoOverlay`.
 '''
-#TODO	friendlier PM interface
-
-import os
-import os.path as path
+import json
+from os import path
 import asyncio
 import re
-import json
 
 import ch
 import client
-from functools import partial
+from client import linkopen
 
-__all__ = ["ChatBot","ChatangoOverlay","tabFile","convertTo256","getColor","getClient"]
+__all__ = ["ChatBot", "ChatangoOverlay", "create_colors", "get_color", "get_client"]
 
-#entire creds from file
-creds_entire = {} 
-#writability of keys of creds
-#1 = read only, 2 = write only, 3 = both
-creds_readwrite = {
-	 "user":	3
-	,"passwd":	3
-	,"room":	3
-	,"formatting":	3
-	,"options":	3
-	,"ignores":	1
-	,"filtered_channels":	3
-}
+#SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
+FILENAME = "chatango_creds"
+#custom and credential saving setup
+HOME_PATH = path.expanduser('~/.cubecli')
+CUSTOM_PATH = path.join(HOME_PATH, "custom")
+SAVE_PATH = path.join(HOME_PATH, FILENAME)
+#code ripped from stackoverflow questions/1057431
+CUSTOM_DOC = "ensures the `import custom` in will import all python files "\
+"in the directory"
+CUSTOM_INIT = '''
+"%s"
 
-#Constants----------------------------------------------------------------------
+from os.path import dirname, basename, isfile
+import glob
+modules = glob.glob(dirname(__file__)+"/*.py")
+__all__ = [basename(f)[:-3] for f in modules \
+			if not f.endswith("__init__.py") and isfile(f)]
+from . import *
+''' % CUSTOM_DOC
+def _write_init():
+	with open(path.join(CUSTOM_PATH, "__init__.py"), "w") as i:
+		i.write(CUSTOM_INIT)
+
+#REGEXES AND GLOBALS------------------------------------------------------------
 #look for whole word links starting with http:// or https://
-LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
+LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
+REPLY_RE = re.compile(r"@\w+?\b")
+QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
 
-DEFAULT_OPTIONS = \
-	{"mouse": 		False
-	,"linkwarn":	2
-	,"ignoresave":	False
-	,"bell":		True
-	,"256color":	False
-	,"htmlcolor":	True
-	,"anoncolor":	False}
-DEFAULT_FORMATTING = \
-	["DD9211"	#font color
-	,"232323"	#name color
-	,"0"		#font face
-	,12]		#font size
+BEGIN_COLORS = client.num_defined_colors()
+_CLIENT = None
 
-begin_colors = client.numDefinedColors()
+class _Persistent:
+	'''
+	A JSON manifest-like abstraction. Acts like a dict for the most part.
+	Add fields and their default value with add_field.
+	'''
+	def __init__(self):
+		#whether a particular value can be read_json, or write_json
+		self._readwrite = {}
+		#entire credentials file from read_json
+		self._entire = {}
+		#default value set by add_field
+		self._default = {}
+		#volatile data to be written to file
+		self._data = {}
+
+	def __str__(self):
+		ret = self._entire.copy()
+		for i, j in ret.items():
+			ret[i] = {
+				  "Base": self._data[i]
+				, "Data": j
+			}
+		return repr(ret)
+
+	def __getitem__(self, key):
+		return self._data.get(key)
+
+	def __setitem__(self, key, value):
+		self._data[key] = value
+
+	def add_field(self, field, default, readwrite=3):
+		'''Add a field to the JSON. `field` must be hashable (preferably str)'''
+		self._readwrite[field] = readwrite
+		if isinstance(default, (dict, list)):
+			default = default.copy()
+		self._default[field] = default
+		self._data[field] = self._default[field]
+		self._entire[field] = self._default[field]
+
+	def clear(self, field):
+		'''Clear a field, such that the next file write will be the default'''
+		self._entire[field] = self._default[field]
+
+	def read_json(self, filename):
+		'''Read fields from JSON `filename`'''
+		try:
+			with open(filename) as i:
+				json_data = json.load(i)
+			for i, bit in self._readwrite.items():
+				if bit&1:
+					self._data[i] = json_data.get(i)
+				self._entire[i] = json_data.get(i)
+		except (FileNotFoundError, ValueError):
+			pass
+		except Exception as exc:
+			raise IOError("Fatal error reading creds! Aborting...") from exc
+
+	def write_json(self, filename):
+		'''Write fields to JSON `filename`'''
+		try:
+			json_data = {}
+			for i, bit in self._readwrite.items():
+				if bit&2 or i not in self._entire:
+					json_data[i] = self._data[i]
+				else:	#"safe" credentials from last write
+					json_data[i] = self._entire[i]
+			encoder = json.JSONEncoder(ensure_ascii=False)
+			with open(filename, 'w') as out:
+				out.write(encoder.encode(json_data))
+		except Exception as exc:
+			raise IOError("Fatal error writing creds!") from exc
+
+	def no_rw(self, field):
+		'''Field will be neither read from file nor written to file'''
+		self._readwrite[field] = 0
+
+	def set_read(self, field):
+		'''Allow field to be read from file'''
+		self._readwrite[field] |= 1
+
+	def set_write(self, field):
+		'''Allow field to be written to file'''
+		self._readwrite[field] |= 2
+
+	def clear_read(self, field):
+		'''Disallow field to be read from file'''
+		self._readwrite[field] &= ~1
+
+	def clear_write(self, field):
+		'''Disallow field to be written to file'''
+		self._readwrite[field] &= ~2
+
+def make_creds():
+	'''Create canonical save file as _Persistent and return'''
+	creds = _Persistent()
+	creds.add_field("user", default=None)
+	creds.add_field("passwd", default=None)
+	creds.add_field("room", default=None)
+	creds.add_field("formatting", default=[
+		  "DD9211"	#font color
+		, "232323"	#name color
+		, "0"		#font face
+		, 12		#font size
+	])
+	creds.add_field("options", default={
+		  "mouse":		False
+		, "linkwarn":	2
+		, "ignoresave":	False
+		, "bell":		True
+		, "256color":	False
+		, "htmlcolor":	True
+		, "anoncolor":	False
+	})
+	creds.add_field("ignores", default=[], readwrite=1)
+	creds.add_field("filtered_channels", default=[0, 0, 0, 0])
+
+	return creds
+
+def create_colors():
+	'''Create colors used by classes defined here'''
+	global BEGIN_COLORS
+	BEGIN_COLORS = client.num_defined_colors()
+	ordering = (
+		  "blue"
+		, "cyan"
+		, "magenta"
+		, "red"
+		, "yellow"
+	)
+	for i in range(10):
+		client.def_color(ordering[i%5], intense=i//5)	#0-10: legacy
+	client.def_color("green", intense=True)
+	client.def_color("green")				#11:	>
+	client.def_color("none")				#12:	blank channel
+	client.def_color("red", "red")			#13:	red channel
+	client.def_color("blue", "blue")		#14:	blue channel
+	client.def_color("magenta", "magenta")	#15:	both channel
+	client.def_color("white", "white")		#16:	blank channel, visible
+
+#color by user's name
+def get_color(name, init=6, split=109, rot=6):
+	'''Old trivial hash for assigning colors from string `name`'''
+	if name.startswith("!anon"):
+		number = int(name[5:])
+		return BEGIN_COLORS + (number+rot)%11
+	if name.startswith("#"):
+		name = name[1:]
+	total = init
+	for i in map(ord, name):
+		total ^= (i > split) and i or ~i
+	return BEGIN_COLORS + (total+rot)%11
+
 #ChatBot related functionality--------------------------------------------------
-_client = None
-def getClient():
-	global _client
-	if isinstance(_client,ChatBot):
-		return _client
+def get_client():
+	'''Get the current client instance, or if none such exists, None'''
+	global _CLIENT
+	if isinstance(_CLIENT, ChatBot):
+		return _CLIENT
+	return None
 
-#fractur is broken, so change it to normal
-mapRange = lambda charid,inrange,beginchar: (charid in inrange) and (charid - \
-	inrange.start + beginchar)
-badCharsets = [
-	 (range(119964,119964+26),ord('A'))	#uppercase math
-	,(range(119990,119990+26),ord('a'))	#lowercase math
-	,(range(119860,119860+26),ord('A'))	#uppercase italic math
-	,(range(119886,119886+26),ord('a'))	#lowercase italic math
-	,(range(120172,120172+26),ord('A'))	#uppercase fractur
-	,(range(120198,120198+26),ord('a'))	#lowercase fractur
-	,(range(120068,120068+26),ord('A'))	#uppercase math fractur
-	,(range(120094,120094+26),ord('a'))	#lowercase math fractur
-]
-
-def parsePost(post, me, ishistory, altme = []):
+def parse_post(post, me, ishistory, alts=None):
+	'''Helper for parsing post.Post objects received from ch.py'''
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
-	for mes in altme:
-		isreply = isreply or ('@'+mes.lower() in post.post.lower())
-	
+	if alts is not None:
+		for alt in alts:
+			isreply = isreply or ('@'+alt.lower() in post.post.lower())
+
 	#remove egregiously large amounts of newlines (more than 2)
 	#also edit sections with right to left override
 	cooked = ""
-	newlineCounter = 0
+	newline_count = 0
 	rtlbuffer, rtl = "", False
 	for i in post.post:
-		#look for fractur and double-width fonts that don't comply with wcwidth
-		for f in badCharsets:
-			mapped = mapRange(ord(i),f[0],f[1])
-			if mapped:
-				i = chr(mapped)
-				break
-
 		if i == '\n':
 			#right-to-left sequences end on newlines
 			if rtl:
-				cooked += rtlbuffer + (newlineCounter < 2 and i or "")
+				cooked += rtlbuffer + (newline_count < 2 and i or "")
 				rtl = False
 				rtlbuffer = ""
-			if newlineCounter < 2:
+			if newline_count < 2:
 				cooked += i
-			newlineCounter += 1
-		#technically not right, since RTL marks should match marks, and overrides overrides
-		elif ord(i) in (8206,8237):
+			newline_count += 1
+		#technically not right, since RTL marks should match marks, and
+		#overrides overrides
+		elif ord(i) in (8206, 8237):
 			cooked += rtlbuffer
 			rtlbuffer = ""
 			rtl = False
-		elif ord(i) in (8207,8238):
+		elif ord(i) in (8207, 8238):
 			rtl = True
 		else:
-			newlineCounter = 0
+			newline_count = 0
 			if rtl:
 				rtlbuffer = i + rtlbuffer
 			else:
@@ -138,526 +247,453 @@ def parsePost(post, me, ishistory, altme = []):
 	if rtl:
 		cooked += rtlbuffer
 	#format as ' user: message'; the space is for the channel
-	msg = " {}: {}".format(post.user,cooked)
+	msg = " {}: {}".format(post.user, cooked)
 	#extra arguments. use in colorizers
 	return (msg, post, isreply, ishistory)
 
 class ChatBot(ch.Manager):
 	'''Bot for interacting with the chat'''
 	members = client.PromoteSet()
-	#event hookup
-
 	def __init__(self, parent, creds):
-		super(ChatBot,self).__init__(creds["user"],creds["passwd"]
-			,loop=parent.loop)
+		super().__init__(creds["user"], creds["passwd"]
+			, loop=parent.loop)
 
 		self.creds = creds
 		#default to the given user name
-		self.me = creds.get("user") # or None
-		self.altme = []
+		self.me = creds["user"]
+		self.alts = []
 		#list references
-		self.ignores = set(self.creds["ignores"])
-		self.filtered_channels = self.creds["filtered_channels"]
-		self.options = self.creds["options"]
+		self.ignores = set(creds["ignores"])
+		self.filtered_channels = creds["filtered_channels"]
+		self.options = creds["options"]
 
 		self.connecting = False
-		self.joinedGroup = None
+		self.joined_group = None
 		self.channel = 0
 
-		self.mainOverlay = ChatangoOverlay(parent,self)
-		self.mainOverlay.add()
+		self.overlay = ChatangoOverlay(parent, self)
+		self.overlay.add()
 
 		#disconnect from all groups on done
-		client.onDone(self.leaveAll())
+		client.on_done(self.graceful_exit())
 
 		#tabbing for members, ignoring the # and ! induced by anons and temps
-		client.Tokenize('@',self.members)
+		client.Tokenize('@', self.members)
 		self.loop.create_task(self.connect())
 
-	@classmethod
-	def addEvent(cls,eventname,func):
-		ancestor = None
-		#limit modifiable attributes
-		eventname = "on"+eventname
-		try:
-			ancestor = getattr(self,eventname)
-		except AttributeError: pass
-		#should be a partially applied function with 
-		#the event ancestor (a coroutine generator)
-		setattr(self,eventname,partial(func,ancestor=ancestor))
-	
-	@asyncio.coroutine
-	def connect(self):
-		if self.connecting: return
+	async def connect(self):
+		if self.connecting:
+			return
 		self.connecting = True
 		self.members.clear()
-		yield from self.mainOverlay.msgSystem("Connecting")
-		try:
-			yield from self.joinGroup(self.creds["room"])
-		except ConnectionError:
-			self.mainOverlay.msgSystem("Failed to connect to room '%s'" %
-				self.creds["room"])
-		finally:
-			self.connecting = False
-	
-	@asyncio.coroutine
-	def reconnect(self):
-		yield from self.leaveGroup(self.joinedGroup)
-		self.mainOverlay.clear()
-		yield from self.connect()
-	
-	@asyncio.coroutine
-	def changeGroup(self,newgroup):
-		yield from self.leaveGroup(self.joinedGroup)
-		self.creds["room"] = newgroup
-		self.mainOverlay.clear()
-		yield from self.joinGroup(newgroup)
+		self.overlay.msg_system("Connecting")
+		await self.join_group(self.creds["room"])
+		self.connecting = False
 
-	def setFormatting(self):
-		group = self.joinedGroup
-		
+	async def reconnect(self):
+		await self.leave_group(self.joined_group)
+		self.overlay.clear()
+		await self.connect()
+
+	async def join_group(self, group_name):
+		await self.leave_group(self.joined_group)
+		self.creds["room"] = group_name
+		self.overlay.clear()
+		try:
+			await super().join_group(group_name)
+		except (ConnectionError, ValueError):
+			self.overlay.msg_system("Failed to connect to room '%s'" %
+				self.creds["room"])
+
+	async def graceful_exit(self):
+		#this is a set and not a list reference, so we update the list now
+		self.creds["ignores"] = list(self.ignores)
+		await self.leave_all()
+
+	def set_formatting(self):
+		group = self.joined_group
+
 		group.fColor = self.creds["formatting"][0]
 		group.nColor = self.creds["formatting"][1]
 		group.fFace = self.creds["formatting"][2]
 		group.fSize = self.creds["formatting"][3]
-	
-	def tryPost(self,text):
-		if self.joinedGroup is None: return
-		self.loop.create_task(self.joinedGroup.sendPost(text,self.channel))
 
-	def tryPM(self,user,text):
-		if self.PMs is None: return
-		self.PMs.sendPost(user,text)
-		dummy = ch.Post((self.me,0,0,0,0,text),2)
-		self.loop.create_task(self.onPrivateMessage(None,dummy,False))
+	def send_post(self, text):
+		if self.joined_group is None:
+			return
+		self.joined_group.send_post(text, self.channel)
 
-	def parseLinks(self,raw,prepend = False):
-		'''
-		Add links to lastlinks. Prepend argument for adding links backwards,
-		like with historical messages.
-		'''
-		newLinks = []
-		#don't add the same link twice
-		for i in LINK_RE.findall(raw+' '):
-			if i not in newLinks:
-				newLinks.append(i)
-		if prepend:
-			newLinks.reverse()
-			self.mainOverlay.lastlinks = newLinks + self.mainOverlay.lastlinks
-		else:
-			self.mainOverlay.lastlinks.extend(newLinks)
-	
-	@asyncio.coroutine
-	def onConnect(self, group):
-		self.joinedGroup = group
-		self.setFormatting()
+	def send_pm(self, user, text):
+		if self.PMs is None:
+			return
+		self.pm.send_post(user, text)
+		dummy = ch.Post((self.me, 0, 0, 0, 0, text), 2)
+		self.loop.create_task(self.on_pm(None, dummy, False))
+
+	async def on_connect(self, group):
+		self.joined_group = group
+		self.set_formatting()
 		self.me = group.username
-		if self.me[0] in "!#": self.me = self.me[1:]
-		self.mainOverlay.parent.updateinfo(None,"{}@{}".format(self.me,group.name))
+		if self.me[0] in "!#":
+			self.me = self.me[1:]
+		self.overlay.parent.blurb.status(left="{}@{}".format(self.me, group.name))
 		#show last message time
-		yield from self.mainOverlay.msgSystem("Connected to "+group.name)
-		yield from self.mainOverlay.msgTime(group.last,"Last message at ")
-		yield from self.mainOverlay.msgTime()
+		self.overlay.msg_system("Connected to "+group.name)
+		self.overlay.msg_time(group.last, "Last message at ")
+		self.overlay.msg_time()
 
-	@asyncio.coroutine
-	def onPMConnect(self, group):
-		yield from self.mainOverlay.msgSystem("Connected to PMs")
+	async def on_pm_connect(self, _):
+		self.overlay.msg_system("Connected to PMs")
 
-	@asyncio.coroutine
-	def onPrivateMessage(self, group, post, historical):
-		user = post.user
-		msg = " {}: {}".format(post.user,post.post)
-		yield from self.mainOverlay.msgPost(msg,post,True,historical)
-		
-	@asyncio.coroutine
-	def onMessage(self, group, post):
-		'''On message. No event because you can just use ExamineMessage'''
+	async def on_pm(self, _, post, historical):
+		msg = " {}: {}".format(post.user, post.post)
+		self.overlay.msg_append(msg, post, True, historical)
+
+	async def on_message(self, _, post):
 		#double check for anons
 		user = post.user
-		if user[0] in '#!': user = user[1:]
+		if user[0] in '!#':
+			user = user[1:]
 		if user not in self.members:
 			self.members.append(user.lower())
-		self.parseLinks(post.post)
-		msg = parsePost(post, self.me, False, altme=self.altme)
+		self.overlay.parse_links(post.post)
+		msg = parse_post(post, self.me, False, alts=self.alts)
 		#						  isreply		ishistory
 		if self.options["bell"] and msg[2] and not msg[3] and \
-		not self.mainOverlay.filterMessage(*(msg[1:])):
-			self.mainOverlay.parent.soundBell()
+		not self.overlay.filter_message(*(msg[1:])):
+			self.overlay.parent.sound_bell()
 
 		self.members.promote(user.lower())
-		yield from self.mainOverlay.msgPost(*msg)
+		self.overlay.msg_append(*msg)
 
-	@asyncio.coroutine
-	def onHistoryDone(self, group, history):
-		'''On retrieved history'''
+	async def on_history_done(self, _, history):
 		for post in history:
 			user = post.user
-			if user[0] in '#!': user = user[1:]
+			if user[0] in '!#':
+				user = user[1:]
 			if user not in self.members:
 				self.members.append(user.lower())
-			self.parseLinks(post.post, True)
-			msg = parsePost(post, self.me, True)
-			yield from self.mainOverlay.msgPrepend(*msg)
-		self.mainOverlay.messages.canselect = True
+			self.overlay.parse_links(post.post, True)
+			msg = parse_post(post, self.me, True)
+			self.overlay.msg_prepend(*msg)
+		self.overlay.can_select = True
 
-	@asyncio.coroutine
-	def onFloodWarning(self, group):
-		yield from self.mainOverlay.msgSystem("Flood ban warning issued")
+	async def on_flood_warning(self, _):
+		self.overlay.msg_system("Flood ban warning issued")
 
-	@asyncio.coroutine
-	def onFloodBan(self, group, secs):
-		yield from self.onFloodBanRepeat(group, secs)
+	async def on_flood_ban(self, group, secs):
+		await self.on_flood_ban_repeat(group, secs)
 
-	@asyncio.coroutine
-	def onFloodBanRepeat(self, group, secs):
-		yield from self.mainOverlay.msgSystem("You are banned for %d seconds" %
-			secs)
-	
-	@asyncio.coroutine
-	def onParticipants(self, group):
+	async def on_flood_ban_repeat(self, _, secs):
+		self.overlay.msg_system("You are banned for %d seconds" % secs)
+
+	async def on_participants(self, group):
 		'''On received joined members.'''
 		self.members.extend(group.userlist)
-		self.mainOverlay.recolorlines()
+		self.overlay.recolor_lines()
 
-	@asyncio.coroutine
-	def onUsercount(self, group):
+	async def on_usercount(self, group):
 		'''On user count changed.'''
-		self.mainOverlay.parent.updateinfo(str(group.usercount))
+		self.overlay.parent.blurb.status(right=str(group.usercount))
 
-	@asyncio.coroutine
-	def onMemberJoin(self, group, user):
+	async def on_member_join(self, _, user):
 		if user != "anon":
 			self.members.append(user)
 		#notifications
-		self.mainOverlay.parent.newBlurb("%s has joined" % user)
+		self.overlay.parent.blurb.push("%s has joined" % user)
 
-	@asyncio.coroutine
-	def onMemberLeave(self, group, user):
-		self.mainOverlay.parent.newBlurb("%s has left" % user)
+	async def on_member_leave(self, _, user):
+		self.overlay.parent.blurb.push("%s has left" % user)
 
-	@asyncio.coroutine
-	def onConnectionError(self, group, error):
-		if isinstance(error,ConnectionResetError) or error == None:
-			self.mainOverlay.messages.stopSelect()
-			yield from self.mainOverlay.msgSystem(
-				"Connection lost; press ^R to reconnect")
+	async def on_connection_error(self, _, error):
+		if isinstance(error, (ConnectionResetError, type(None))):
+			self.overlay.messages.stop_select()
+			self.overlay.msg_system("Connection lost; press ^R to reconnect")
 		else:
-			self.mainOverlay.msgSystem(
+			self.overlay.msg_system(
 				"Connection error occurred. Try joining another room with ^T")
+
 #List Overlay Extensions-------------------------------------------------------
 class LinkOverlay(client.VisualListOverlay):
-	'''List accumulated links'''
-	def __init__(self,parent,context):
-		'''
-		Context is assumed to be a ChatangoOverlay with
-		members `visited_links` and 
-		'''
+	'''
+	List accumulated links
+	Context is assumed to be a ChatangoOverlay with members `visited_links` and
+	list_links
+	'''
+	def __init__(self, parent, context):
 		self.context = context
 
-		buildList = lambda raw: [i.replace("https://","").replace("http://","")
+		builder = lambda raw: [i.replace("https://", "").replace("http://", "")
 			for i in reversed(raw)]
-		super(LinkOverlay,self).__init__(parent,(buildList,context.lastlinks)
-			,modes=client.getDefaults())
+		super().__init__(parent, (builder, context.last_links)
+			, modes=["default"] + linkopen.get_defaults())
 
-		findNew = lambda i: (self.raw[len(self.list)-i-1] in context.visited_links)^\
+		find_new = lambda i: (self.raw[len(self.list)-i-1] in context.visited_links)^\
 					   (self.raw[len(self.list)-self.it-1] in context.visited_links)
-		prevNew,nextNew = self.gotoLambda(findNew)
+		prev_new, next_new = self.goto_lambda(find_new)
 
-		self.addKeys({"tab": 	client.override(self.select) })
-		self.addKeys({"enter":	self.select
-					,"i":		self.openImages
-					,"tab": 	client.override(self.select)
-					,"a-k":		prevNew
-					,"a-j":		nextNew},areMethods=1)
+		self.add_keys({
+			  "enter":	self.select
+			, "tab": 	client.override(self.select)
+			, "i":		self.open_images
+			, "a-k":	prev_new
+			, "a-j":	next_new
+		})
 
 	#enter key
 	def select(self):
 		'''Open link with selected opener'''
-		if not self.list: return
+		if not self.list:
+			return None
 		#try to get selected links
-		alllinks = self.selectedList()
-		if len(alllinks):
-			#add the iterator; idempotent if already in set
-			self.context.openLinks(alllinks, self.mode)
-			self.clear()
-			return -1
-
-		assert False,"Somehow accessed selection"
-		current = self.raw[len(self.list)-self.it-1] #this enforces the wanted link is selected
-		client.open_link(self.parent,current,self.mode)
-		if current not in self.context.visited_links:
-			self.context.visited_links.append(current)
-			self.context.recolorlines()
-		#exit
+		all_links = self.selected_list()
+		#add the iterator; idempotent if already in set
+		self.context.open_links(all_links, self.mode)
+		self.clear()
 		return -1
 
-	def openImages(self):
+	def open_images(self):
 		links = []
-		for i,j in enumerate(self.list):
+		for i, j in enumerate(self.list):
 			actual = self.raw[len(self.list)-i-1]
-			if (client.getExtension(j).lower() in ("png","jpg","jpeg")) and \
-			(actual not in self.context.visited_links):
+			if (linkopen.get_extension(j).lower() in ("png", "jpg", "jpeg")) \
+			and (actual not in self.context.visited_links):
 				links.append(actual)
-		self.context.openLinks(links, self.mode)
+		self.context.open_links(links, self.mode)
 
-	def _drawLine(self,string,i):
+	def _draw_line(self, line, number):
 		'''Draw visited links in a slightly grayer color'''
-		super(LinkOverlay,self)._drawLine(string,i)
-		current = self.raw[len(self.list)-i-1]
-		try:
-			if current in self.context.visited_links:
-				string.insertColor(0,self.parent.get256color(245))
-		except: pass
+		super()._draw_line(line, number)
+		current = self.raw[len(self.list)-number-1]
+		if current in self.context.visited_links:
+			line.insert_color(0, self.parent.two56.grayscale(12))
 
 #Formatting InputMux------------------------------------------------------------
-formatting = client.InputMux()	#formatting mux
-@formatting.listel("color")
+Formatting = client.InputMux()	#formatting mux
+@Formatting.listel("color")
 def fontcolor(context):
 	"Font Color"
 	return context.bot.creds["formatting"][0]
 @fontcolor.setter
-def _(context,value):
-	context.bot.creds["formatting"][0] = client.ColorSliderOverlay.toHex(value)
-	context.bot.setFormatting()
+def _(context, value):
+	context.bot.creds["formatting"][0] = \
+		client.ColorSliderOverlay.to_hex(value)
+	context.bot.set_formatting()
 
-@formatting.listel("color")
+@Formatting.listel("color")
 def namecolor(context):
 	"Name Color"
 	return context.bot.creds["formatting"][1]
 @namecolor.setter
-def _(context,value):
-	context.bot.creds["formatting"][1] = client.ColorSliderOverlay.toHex(value)
-	context.bot.setFormatting()
+def _(context, value):
+	context.bot.creds["formatting"][1] = \
+		client.ColorSliderOverlay.to_hex(value)
+	context.bot.set_formatting()
 
-@formatting.listel("enum")
+@Formatting.listel("enum")
 def fontface(context):
 	"Font Face"
 	tab = ch.FONT_FACES
 	index = context.bot.creds["formatting"][2]
-	return tab,int(index)
+	return tab, int(index)
 @fontface.setter
-def _(context,value):
+def _(context, value):
 	context.bot.creds["formatting"][2] = str(value)
-	context.bot.setFormatting()
+	context.bot.set_formatting()
 
-@formatting.listel("enum")
+@Formatting.listel("enum")
 def fontsize(context):
 	"Font Size"
 	tab = ch.FONT_SIZES
 	index = context.bot.creds["formatting"][3]
-	return list(map(str,tab)),tab.index(index)
+	return list(map(str, tab)), tab.index(index)
 @fontsize.setter
-def _(context,value):
+def _(context, value):
 	context.bot.creds["formatting"][3] = ch.FONT_SIZES[value]
-	context.bot.setFormatting()
+	context.bot.set_formatting()
 
 #Options InputMux---------------------------------------------------------------
-options = client.InputMux()	#options mux
-@options.listel("bool")
+Options = client.InputMux()	#options mux
+@Options.listel("bool")
 def mouse(context):
 	"Mouse:"
 	return context.bot.options["mouse"]
 @mouse.setter
-def _(context,value):
+def _(context, value):
 	context.bot.options["mouse"] = value
-	context.parent.toggleMouse(value)
+	context.parent.toggle_mouse(value)
 
-@options.listel("str")
+@Options.listel("str")
 def linkwarn(context):
 	"Multiple link open warning threshold:"
 	return context.bot.options["linkwarn"]
 @linkwarn.setter
-def _(context,value):
+def _(context, value):
 	try:
 		context.bot.options["linkwarn"] = int(value)
-	except ValueError: pass
+	except ValueError:
+		pass
 
-@options.listel("bool")
+@Options.listel("bool")
 def ignoresave(context):
 	"Save ignore list:"
 	return context.bot.options["ignoresave"]
 @ignoresave.setter
-def _(context,value):
-	global creds_readwrite,creds_entire
+def _(context, value):
+	creds = context.bot.creds
 	context.bot.options["ignoresave"] = value
 	if value:
-		creds_readwrite["ignores"] |= 2
+		creds.set_write("ignores")
 	else:
-		creds_readwrite["ignores"] &= ~2
-		creds_entire["ignores"].clear()
+		creds.clear_write("ignores")
+		creds.clear("ignores")
 
-@options.listel("bool")
+@Options.listel("bool")
 def bell(context):
 	"Console bell on reply:"
 	return context.bot.options["bell"]
 @bell.setter
-def _(context,value):
+def _(context, value):
 	context.bot.options["bell"] = value
 
-@options.listel("bool")
+@Options.listel("bool")
 def two56(context):
 	"256 colors:"
 	return context.bot.options["256color"]
 @two56.setter
-def _(context,value):
+def _(context, value):
 	context.bot.options["256color"] = value
-	context.parent.toggle256(context.bot.options["256color"])
-	context.recolorlines()
+	context.parent.two56.toggle(value)
+	context.recolor_lines()
 
-@options.listel("bool")
+@Options.listel("bool")
 def htmlcolor(context):
 	"HTML colors:"
 	return context.bot.options["htmlcolor"]
 @htmlcolor.setter
-def _(context,value):
+def _(context, value):
 	context.bot.options["htmlcolor"] = value
-	context.recolorlines()
+	context.recolor_lines()
 @htmlcolor.drawer
-def _(mux,value,coloring):
+def _(mux, value, coloring):
 	'''Gray out if invalid due to 256 colors being off'''
-	htmlcolor.boolDrawer(mux,value,coloring)
-	if not mux.indices["two56"]._getter(mux.context):
+	htmlcolor.draw_bool(mux, value, coloring)
+	if not two56.get(mux.context):
 		coloring.clear()
-		coloring.insertColor(0,mux.parent.get256color(245))
+		coloring.insert_color(0, mux.parent.two56.grayscale(12))
 
-@options.listel("bool")
+@Options.listel("bool")
 def anoncolor(context):
 	"Colorize anon names:"
 	return context.bot.options["anoncolor"]
 @anoncolor.setter
-def _(context,value):
+def _(context, value):
 	context.bot.options["anoncolor"] = value
-	context.recolorlines()
+	context.recolor_lines()
 @anoncolor.drawer
-def _(mux,value,coloring):
+def _(mux, value, coloring):
 	'''Gray out if invalid due to 256 colors and HTML colors being off'''
-	anoncolor.boolDrawer(mux,value,coloring)
-	if not (mux.indices["two56"]._getter(mux.context) and \
-	mux.indices["htmlcolor"]._getter(mux.context)):
+	anoncolor.draw_bool(mux, value, coloring)
+	if not (two56.get(mux.context) and htmlcolor.get(mux.context)):
 		coloring.clear()
-		coloring.insertColor(0,mux.parent.get256color(245))
+		coloring.insert_color(0, mux.parent.two56.grayscale(12))
 
 #Extended overlay---------------------------------------------------------------
 class ChatangoOverlay(client.ChatOverlay):
-	def __init__(self,parent,bot):
-		#XXX not sure why, but lastlinks after the super raises an exception
-		self.lastlinks = []
+	def __init__(self, parent, bot):
+		self.last_links = []
 		self.visited_links = []
 
-		super(ChatangoOverlay, self).__init__(parent)
-		self.messages.canselect = False
+		super().__init__(parent)
+		self.can_select = False
 		self.bot = bot
-		self.addKeys({	"enter":	self.onenter
-						,"a-enter":	self.onaltenter
-						,"a-g":		self.selectmax
-						,"tab":		self.ontab
-						,"f2":		self.linklist
-						,"f3":		self.listmembers
-						,"f4":		self.setformatting
-						,"f5":		self.setchannel
-						,"f6":		self.listreplies
-#						,"f7":		self.pmConnect
-						,"f12":		self.options
-						,"^f":		self.ctrlf
-						,"^g":		self.openlastlink
-						,"^n":		self.addignore
-						,"^t":		self.joingroup
-						,"^r":		self.reloadclient
-				,"mouse-left":		self.clickOnLink
-				,"mouse-middle":	client.override(self.openSelectedLinks,1)
-		},1)	#these are methods, so they're defined on __init__
+		self.add_keys({
+			  "enter":		self._enter
+			, "a-enter":	self._alt_enter
+			, "tab":		self._tab
+			, "a-g":		self.select_top
+			, "f2":			self._show_links
+			, "f3":			self._show_members
+			, "f4":			self._show_formatting
+			, "f5":			self._show_channels
+			, "f6":			self._replies_scroller
+#			, "f7":			self.pmConnect
+			, "f12":		self._show_options
+			, "^f":			self._search_scroller
+			, "^n":			self._add_ignore
+			, "^t":			self.join_group
+			, "^g":			self.open_last_link
+			, "^r":			self.reload_client
+			, "mouse-left":		self._click_link
+			, "mouse-middle":	client.override(self._open_selected_links, 1)
+		})
 
-	def _maxselect(self):
+	def _max_select(self):
 		#when we've gotten too many messages
-		group = self.bot.joinedGroup
+		group = self.bot.joined_group
 		if group:
-			self.messages.canselect = False
-			group.getMore()
+			self.can_select = False
+			group.get_more()
 			#wait until we're done getting more
-			self.parent.newBlurb("Fetching more messages")
-		super(ChatangoOverlay,self)._maxselect()
+			self.parent.blurb.push("Fetching more messages")
+		super()._max_select()
 
 	def clear(self):
-		super(ChatangoOverlay, self).clear()
-		self.lastlinks.clear()
-	
-	def openSelectedLinks(self):
-		message = self.messages.getselected()
-		try:	#don't bother if it's a system message (or one with no "post")
-			msg = message[1][0].post
-		except: return
-		alllinks = LINK_RE.findall(msg)
-		self.openLinks(alllinks)
+		super().clear()
+		self.last_links.clear()
 
-	def clickOnLink(self,x,y):
-		msg, pos = self.messages.getMessageFromPosition(x,y)
-		if pos == -1: return 1
-		link = ""
-		smallest = -1
-		#look over all link matches; take the middle and find the smallest delta
-		for i in LINK_RE.finditer(str(msg[0])):
-			linkpos = (i.start() + i.end()) // 2
-			distance = abs(linkpos - pos)
-			if distance < smallest or smallest == -1:
-				smallest = distance
-				link = i.group()
-		if link:
-			client.open_link(self.parent,link)
-			self.visited_links.append(link)
-			self.recolorlines()
-		return 1
-
-	def onenter(self):
+	def _enter(self):
 		'''Open selected message's links or send message'''
-		if self.messages.getselected():
-			self.openSelectedLinks()
+		if self.messages.get_selected():
+			self._open_selected_links()
 			return
 		text = str(self.text)
-		firstSpace = text.find(' ')
-		if firstSpace != -1 and text[:firstSpace] == "/w":
-			secondSpace = text.find(' ',firstSpace+1)
-			if secondSpace != -1 and text[firstSpace+1] == "@":
-				user = text[firstSpace+2:secondSpace]
-				self.text.clear()
-				self.bot.tryPM(user,text[secondSpace+1:])
-			return
-			
 		#if it's not just spaces
-		if text.count(' ') != len(text):
+		if not text.isspace():
 			#add it to the history
 			self.text.clear()
 			self.history.append(text)
 			#call the send
-			self.bot.tryPost(text)
-	
-	def onaltenter(self):
+			self.bot.send_post(text)
+
+	def _alt_enter(self):
 		'''Open link and don't stop selecting'''
-		if self.messages.getselected():
-			self.openSelectedLinks()
+		self._open_selected_links()
 		return 1
 
-	def ontab(self):
+	def _tab(self):
 		'''Reply to selected message or complete'''
-		message = self.messages.getselected()
+		message = self.messages.get_selected()
 		if message:
 			try:
 				#allmessages contain the colored message and arguments
-				msg,name = message[1][0].post, message[1][0].user
-				if name[0] in "!#": name = name[1:]
+				msg, name = message[1][0].post, message[1][0].user
+				if name[0] in "!#":
+					name = name[1:]
 				if self.bot.me:
-					msg = msg.replace("@"+self.bot.me,"")
-				self.text.append("@{}: `{}`".format(name, msg.replace('`',"")))
-			except: pass
-			return 
+					msg = msg.replace("@"+self.bot.me, "")
+				self.text.append("@{}: `{}`".format(name, msg.replace('`', "")))
+			except IndexError:
+				pass
+			return
 		self.text.complete()
-	
-	def linklist(self):
-		'''List accumulated links'''
-		LinkOverlay(self.parent,self).add()
 
-	def listmembers(self):
+	def _show_links(self):
+		'''List accumulated links'''
+		LinkOverlay(self.parent, self).add()
+
+	def _show_members(self):
 		'''List members of current group'''
-		if self.bot.joinedGroup is None: return
+		if self.bot.joined_group is None:
+			return
+		users = self.bot.joined_group.userlist
+		disp_list = {i:users.count(i) for i in users}
+		disp_list = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
+			for i, j in disp_list.items()])
+
+		box = client.ListOverlay(self.parent, disp_list)
+
+		@box.key_handler("enter")
 		def select(me):
 			'''Reply to user'''
 			current = me.list[me.it]
@@ -667,509 +703,416 @@ class ChatangoOverlay(client.ChatOverlay):
 			#reply
 			self.text.append("@%s " % current)
 			return -1
+
+		@box.key_handler("tab")
 		def tab(me):
 			'''Ignore/unignore user'''
 			current = me.list[me.it]
 			current = current.split(' ')[0]
 			self.bot.ignores.symmetric_difference_update((current,))
-			self.redolines()
-		def drawIgnored(me,string,i):
+			self.redo_lines()
+
+		@box.line_drawer
+		def draw_ignored(me, string, i):
 			selected = me.list[i]
-			if selected.split(' ')[0] not in self.bot.ignores: return
-			string.addIndicator('i',3)
-	
-		users = self.bot.joinedGroup.userlist
-		dispList = {i:users.count(i) for i in users}
-		dispList = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
-			for i,j in dispList.items()])
-	
-		box = client.ListOverlay(self.parent,dispList,drawIgnored)
-		box.addKeys({
-			"enter":	select
-			,"tab":		tab
-		})
+			if selected.split(' ')[0] not in self.bot.ignores:
+				return
+			string.add_indicator('i', 3)
+
 		box.add()
 
-	def setformatting(self):
+	def _show_formatting(self):
 		'''Chatango formatting settings'''
-		formatting.add(self.parent,self)
+		Formatting.add(self.parent, self)
 
-	def setchannel(self):
+	def _show_channels(self):
 		'''List channels'''
+		box = client.ListOverlay(self.parent, ch.CHANNEL_NAMES)
+		box.it = self.bot.channel
+
+		@box.key_handler("enter")
 		def select(me):
 			'''Set channel'''
 			self.bot.channel = me.it
 			return -1
-		def ontab(me):
+
+		@box.key_handler("tab")
+		def tab(me):
 			'''Ignore/unignore channel'''
 			self.bot.filtered_channels[me.it] = \
 				not self.bot.filtered_channels[me.it]
-			self.redolines()
-		def drawActive(me,string,i):
-			if self.bot.filtered_channels[i]: return
-			col = begin_colors + (i and i+12 or 16)
-			string.insertColor(-1,col)
-						
-		box = client.ListOverlay(self.parent,ch.CHANNEL_NAMES,drawActive)
-		box.addKeys({
-			"enter":	select
-			,"tab":		ontab
-		})
-		box.it = self.bot.channel
+			self.redo_lines()
+
+		@box.line_drawer
+		def draw_active(me, string, i):
+			if self.bot.filtered_channels[i]:
+				return
+			col = BEGIN_COLORS + (i and i+12 or 16)
+			string.insert_color(-1, col)
+
 		box.add()
 
-	def options(self):
+	def _show_options(self):
 		'''Options'''
-		options.add(self.parent,self)
+		Options.add(self.parent, self)
 
-	def listreplies(self):
-		'''List replies in a convenient overlay'''
-		callback = lambda _,isreply,__: isreply
-		client.addMessageScroller(self, callback
-			,msgEmpty	= "No replies have been accumulated"
-			,msgEarly	= "Earliest reply selected"
-			,msgLate	= "Latest reply selected")
+	def _replies_scroller(self):
+		'''List replies in message scroller'''
+		callback = lambda _, isreply, __: isreply
+		client.add_message_scroller(self, callback
+			, empty="No replies have been accumulated"
+			, early="Earliest reply selected"
+			, late="Latest reply selected")
 
-	def pmConnect(self):
-		self.parent.loop.create_task(self.bot.joinPMs())
-
-	def ctrlf(self):
-		'''Ctrl-f style message stepping'''
-		def search(string):
-			callback = lambda post,_,__: -1 != post.post.lower().find(string)
-			client.addMessageScroller(self, callback
-				,msgEmpty	= "No message containing `%s` found" % string
-				,msgEarly	= "No earlier instance of `%s`" % string
-				,msgLate	= "No later instance of `%s`" % string)
-
+	def _search_scroller(self):
+		'''Find message with some text'''
 		#minimalism
-		box = client.InputOverlay(self.parent,None,search)
+		box = client.InputOverlay(self.parent, None)
 		box.text.setnonscroll("^f: ")
+
+		@box.callback
+		def search(string):
+			callback = lambda post, _, __: -1 != post.post.lower().find(string)
+			client.add_message_scroller(self, callback
+				, empty="No message containing `%s` found" % string
+				, early="No earlier instance of `%s`" % string
+				, late="No later instance of `%s`" % string)
+
 		box.add()
 
-	def addignore(self):
+	def _add_ignore(self):
 		'''Add ignore from selected message'''
-		message = self.messages.getselected()
+		message = self.messages.get_selected()
 		if message:
 			try:
 				#allmessages contain the colored message and arguments
 				name = message[1][0].user
-				if name[0] in "!#": name = name[1:]
-				if name in self.bot.ignores: return
+				if name[0] in "!#":
+					name = name[1:]
+				if name in self.bot.ignores:
+					return
 				self.bot.ignores.add(name)
-				self.redolines()
-			except: pass
+				self.redo_lines()
+			except IndexError:
+				pass
 		return
+	#LINK RELATED--------------------------------------------------------------
+	def parse_links(self, raw, prepend=False):
+		'''
+		Add links to last_links. Prepend argument for adding links backwards,
+		like with historical messages.
+		'''
+		links = []
+		#don't add the same link twice
+		for i in linkopen.LINK_RE.findall(raw+' '):
+			if i not in links:
+				links.append(i)
+		if prepend:
+			links.reverse()
+			self.last_links = links + self.last_links
+		else:
+			self.last_links.extend(links)
 
-	def reloadclient(self):
-		'''Reload current group'''
-		self.parent.loop.create_task(self.bot.reconnect())
-
-	def openlastlink(self):
+	def open_last_link(self):
 		'''Open last link'''
-		linksList = self.lastlinks
-		if not linksList: return
-		last = linksList[-1]
-		client.open_link(self.parent,last)
+		links = self.last_links
+		if not links:
+			return
+		last = links[-1]
+		linkopen.open_link(self.parent, last)
 		if last not in self.visited_links:
 			self.visited_links.append(last)
-			self.recolorlines()
+			self.recolor_lines()
 
-	def openLinks(self, links, mode = 0):
-		def o():
+	def open_links(self, links, mode=0):
+		def callback():
 			for i in links:
-				if type(i) == int: i = self.raw[i]
-				client.open_link(self.parent,i,mode)
+				if isinstance(i, int):
+					i = self.raw[i]
+				linkopen.open_link(self.parent, i, mode)
 				if i not in self.visited_links:
 					self.visited_links.append(i)
 			#don't recolor if the list is empty
 			#need to recolor ALL lines, not just this one
-			if links: self.recolorlines()
-			
-		if len(links) >= self.bot.options["linkwarn"]:
-			self.parent.holdBlurb(
-				"Really open {} links? (y/n)".format(len(links)))
-			client.ConfirmOverlay(self.parent, o).add()
-		else:
-			o()
+			if links:
+				self.recolor_lines()
 
-	def joingroup(self):
+		if len(links) >= self.bot.options["linkwarn"]:
+			msg = "Really open {} links? (y/n)".format(len(links))
+			client.ConfirmOverlay(self.parent, msg, callback).add()
+		else:
+			callback()
+
+	def _open_selected_links(self):
+		message = self.messages.get_selected()
+		try:	#don't bother if it's a system message (or one with no "post")
+			msg = message[1][0].post
+		except (TypeError, IndexError):
+			return
+		all_links = linkopen.LINK_RE.findall(msg)
+		self.open_links(all_links)
+
+	def _click_link(self, x, y):
+		'''Click on a link as you would a hyperlink in a web browser'''
+		msg, pos = self.messages.from_position(x, y)
+		if pos == -1:
+			return 1
+		link = ""
+		smallest = -1
+		#look over all link matches; take the middle and find the smallest delta
+		for i in linkopen.LINK_RE.finditer(str(msg[0])):
+			linkpos = (i.start() + i.end()) // 2
+			distance = abs(linkpos - pos)
+			if distance < smallest or smallest == -1:
+				smallest = distance
+				link = i.group()
+		if link:
+			linkopen.open_link(self.parent, link)
+			self.visited_links.append(link)
+			self.recolor_lines()
+		return 1
+	#PARENT BOT RELATED--------------------------------------------------------
+	def reload_client(self):
+		'''Reload current group'''
+		self.parent.loop.create_task(self.bot.reconnect())
+
+	def join_group(self):
 		'''Join a new group'''
-		inp = client.InputOverlay(self.parent,"Enter group name",
-			self.bot.changeGroup)
+		inp = client.InputOverlay(self.parent, "Enter group name")
+		inp.callback(self.bot.join_group)
 		inp.add()
 
-	def filterMessage(self, post, isreply, ishistory):
+	def filter_message(self, post, isreply, ishistory):
 		user = post.user
-		if user[0] in ("!","#"):
+		if user[0] in "!#":
 			user = post.user[1:]
 		return any((
 				#filtered channels
-				self.bot.filtered_channels[post.channel]
+				  self.bot.filtered_channels[post.channel]
 				#ignored users
-				,user.lower() in self.bot.ignores
+				, user.lower() in self.bot.ignores
 		))
 
-	def colorizeMessage(self, msg, post, isreply, ishistory):
-		rawWhite = client.rawNum(0)
+	def colorize_message(self, msg, post, isreply, ishistory):
+		raw_white = client.raw_num(0)
 		#these names are important
-		nameColor = rawWhite
-		fontColor = rawWhite
-		visitedLink = rawWhite
-		try:
-			visitedLink = self.parent.get256color(245)
-			#use name colors?
-			if not self.bot.options["htmlcolor"] or \
-			(self.bot.options["anoncolor"] and post.user[0] in "#!"):
-				raise Exception
-			nameColor = self.parent.get256color(post.nColor)
-			fontColor = self.parent.get256color(post.fColor)
-		except Exception:
-			nameColor = getColor(post.user)
-			fontColor = getColor(post.user)
-			
+		name_color = self.parent.two56(post.nColor)
+		font_color = self.parent.two56(post.fColor)
+		visited_link = self.parent.two56.grayscale(12)
+
+		#use name colors?
+		if not self.bot.options["htmlcolor"] \
+		or (self.bot.options["anoncolor"] and post.user[0] in "!#"):
+			name_color = get_color(post.user)
+			font_color = get_color(post.user)
+
 		#greentext, font color
-		textColor = lambda x: x[0] == '>' and begin_colors+11 or fontColor
-		msg.colorByRegex(LINE_RE, textColor, group = 3)
+		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
+		msg.color_by_regex(LINE_RE, text_color, group=3)
 
 		#links in white
-		linkColor = lambda x: (x in self.visited_links) and visitedLink or rawWhite
-		msg.colorByRegex(LINK_RE, linkColor, fontColor, 1)
+		link_color = lambda x: visited_link \
+			if x in self.visited_links else raw_white
+		msg.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
 
 		#underline quotes
-		msg.effectByRegex(QUOTE_RE,1)
+		msg.effect_by_regex(QUOTE_RE, 1)
 
 		#make sure we color the name right
-		msg.insertColor(1, nameColor)
+		msg.insert_color(1, name_color)
 		#insurance the @s before a > are colored right
 		#		space/username/:(space)
-		msgStart = 1+len(post.user)+2
-		if not msg.coloredAt(msgStart):
-			msg.insertColor(msgStart,fontColor)
-		if isreply:   msg.addGlobalEffect(0,1)
-		if ishistory: msg.addGlobalEffect(1,1)
+		msg_start = 1+len(post.user)+2
+		if not msg.colored_at(msg_start):
+			msg.insert_color(msg_start, font_color)
+		if isreply:
+			msg.add_global_effect(0, 1)
+		if ishistory:
+			msg.add_global_effect(1, 1)
+
 		#channel
-		msg.insertColor(0,begin_colors + post.channel + 12)
+		msg.insert_color(0, BEGIN_COLORS + post.channel + 12)
 
-LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$",re.MULTILINE)
-REPLY_RE = re.compile(r"@\w+?\b")
-QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
+#COMMANDS-------------------------------------------------------------------
+@client.command("ignore")
+def _(parent, person, *args):
+	'''Ignore person or everyone'''
+	chatbot = get_client()
+	if not chatbot:
+		return
 
-#color by user's name
-def getColor(name,init = 6,split = 109,rot = 6):
-	if name[0] in "#!": name = name[1:]
-	total = init
-	for i in name:
-		n = ord(i)
-		total ^= (n > split) and n or ~n
-	return begin_colors + (total+rot)%11
+	if person[0] == '@':
+		person = person[1:]
+	if person in chatbot.ignores:
+		return
+	chatbot.ignores.add(person)
+	chatbot.overlay.redo_lines()
 
-def tabFile(patharg):
-	'''A file tabbing utility'''
-	findpart = patharg.rfind(path.sep)
-	#offset how much we remove
-	numadded = 0
-	initpath,search = patharg[:findpart+1], patharg[findpart+1:]
-	try:
-		if not patharg or patharg[0] not in "~/": #try to generate full path
-			newpath = path.join(os.getcwd(),initpath)
-			ls = os.listdir(newpath)
-		else:
-			ls = os.listdir(path.expanduser(initpath))
-	except (NotADirectoryError, FileNotFoundError):
-		print("error occurred, aborting tab attempt on ", patharg)
-		return [],0
-		
-	suggestions = []
-	if search: #we need to iterate over what we were given
-		#insert \ for the suggestion parser
-		suggestions = sorted([' ' in i and '"%s"' % (initpath+i).replace('"',r"\"")
-			or (initpath+i).replace('"',r"\"") for i in ls if not i.find(search)])
-	else: #otherwise ignore hidden files
-		suggestions = sorted([' ' in i and '"%s"' % (initpath+i).replace('"','\"')
-			or (initpath+i).replace('"',r"\"") for i in ls if i.find('.')])
+@client.command("unignore")
+def _(parent, person, *args):
+	'''Unignore person or everyone'''
+	chatbot = get_client()
+	if not chatbot:
+		return
 
-	if not suggestions:
-		return [],0
-	return suggestions,numadded - len(patharg)
+	if person[0] == '@':
+		person = person[1:]
+	if person in ("all", "everyone"):
+		chatbot.ignores.clear()
+		chatbot.overlay.redo_lines()
+		return
+	if person not in chatbot.ignores:
+		return
+	chatbot.ignores.remove(person)
+	chatbot.main_overlay.redo_lines()
 
-#stuff to do on startup
-@asyncio.coroutine
-def startClient(loop,creds):
-	global creds_entire, creds_readwrite,begin_colors
-	begin_colors = client.numDefinedColors()
-	ordering = \
-		("blue"
-		,"cyan"
-		,"magenta"
-		,"red"
-		,"yellow")
-	for i in range(10):
-		client.defColor(ordering[i%5],intense=i//5) #0-10: legacy
-	client.defColor("green",intense=True)
-	client.defColor("green")			#11:	>
-	client.defColor("none")				#12:	blank channel
-	client.defColor("red","red")		#13:	red channel
-	client.defColor("blue","blue")		#14:	blue channel
-	client.defColor("magenta","magenta")#15:	both channel
-	client.defColor("white","white")	#16:	blank channel, visible
+@client.command("keys")
+def _(parent, *args):
+	'''Get list of the ChatangoOverlay's keys'''
+	#keys are instanced at runtime
+	chatbot = get_client()
+	if not chatbot:
+		return None
 
-	#COMMANDS-------------------------------------------------------------------
-	@client.command("ignore")
-	def ignore(parent,person,*args):
-		chatbot = getClient()
-		if not chatbot: return
+	return chatbot.overlay.get_help_overlay()
 
-		if '@' == person[0]: person = person[1:]
-		if person in chatbot.ignores: return
-		chatbot.ignores.add(person)
-		chatbot.mainOverlay.redolines()
+@client.command("avatar", client.tab_file)
+def _(parent, *args):
+	'''Upload file as user avatar'''
+	chatbot = get_client()
+	if not chatbot:
+		return
 
-	@client.command("unignore")
-	def unignore(parent,person,*args):
-		chatbot = getClient()
-		if not chatbot: return
+	location = path.expanduser(' '.join(args))
+	location = location.replace("\\ ", ' ')
 
-		if '@' == person[0]: person = person[1:]
-		if person == "all" or person == "everyone":
-			chatbot.ignores.clear()
-			chatbot.mainOverlay.redolines()
-			return
-		if person not in chatbot.ignores: return
-		chatbot.ignores.remove(person)
-		chatbot.mainOverlay.redolines()
+	if not location.find("file://"):
+		location = location[7:]
 
-	@client.command("keys")
-	def listkeys(parent,*args):
-		'''Get list of the ChatangoOverlay's keys'''
-		#keys are instanced at runtime
-		chatbot = getClient()
-		if not chatbot: return
+	success = chatbot.upload_avatar(location)
+	if success:
+		parent.blurb.push("Successfully updated avatar")
+	else:
+		parent.blurb.push("Failed to update avatar")
 
-		return chatbot.mainOverlay.getHelpOverlay()
+async def start_client(loop, creds):
+	create_colors()
 
-	@client.command("avatar",tabFile)
-	def avatar(parent,*args):
-		'''Upload the file as the user avatar'''
-		chatbot = getClient()
-		if not chatbot: return
+	manager = client.Manager(loop=loop)
+	manage_task = manager.start()
+	await manager.prepared.wait()
 
-		location = path.expanduser(' '.join(args))
-		location = location.replace("\ ",' ')
-
-		if not location.find("file://"):
-			location = location[7:]
-		
-		success = chatbot.uploadAvatar(location)
-		if success:
-			parent.newBlurb("Successfully updated avatar")
-		else:
-			parent.newBlurb("Failed to update avatar")
-
-	#done preparing client constants--------------------------------------------
-	main = client.Main(loop=loop)
-	mainTask = main.start()
-	yield from main.prepared.wait()
-		
 	#fill in credential holes
-	for num,i in enumerate(["user","passwd","room"]):
+	for i, j in zip(("user", "passwd", "room")
+	, ("Username", "Password", "Room name")):
 		#skip if supplied
-		if creds.get(i) is not None: continue
-		inp = client.InputOverlay(main,"Enter your " + \
-			 ["username","password","room name"][num], password = num == 1)
-		
+		if creds[i] is not None:
+			continue
+		inp = client.InputOverlay(manager.screen, j
+			, password=(i == "passwd"))
 		inp.add()
+
 		try:
-			creds[i] = yield from inp.result
-		except:
-			#future cancelled
-			main.stop()
+			creds[i] = await inp.result
+		except asyncio.CancelledError:
+			manager.stop()
 			return
 
-	#fill in formatting hole
-	if creds.get("formatting") is None:
-		#letting the program write into the constant would be stupid
-		creds["formatting"] = []
-		for i in DEFAULT_FORMATTING:
-			creds["formatting"].append(i)
-	elif isinstance(creds["formatting"],dict):	#backward compatible
-		new = []
-		for i in ["fc","nc","ff","fz"]:
-			new.append(creds["formatting"][i])
-		creds["formatting"] = new
-
-	#ignores hole
-	if creds.get("ignores") is None:
-		creds["ignores"] = []	#initialize it
-	#filtered streams
-	if creds.get("filtered_channels") is None:
-		creds["filtered_channels"] = [0,0,0,0]
 	#options
-	if creds.get("options") is None:
-		creds["options"] = {}
-	for i in DEFAULT_OPTIONS:
-		if creds["options"].get(i) is None:
-			creds["options"][i] = DEFAULT_OPTIONS[i]
+	if creds["options"]["ignoresave"]:
+		creds.set_write("ignores")
 
-	#options
-	two56colors = DEFAULT_OPTIONS["256color"] #False
-	if creds.get("options"):
-		if creds["options"]["ignoresave"]:
-			creds_readwrite["ignores"] |= 2
-		if creds["options"].get("256color") == True:
-			two56colors = True
+	manager.screen.two56.toggle(creds["options"]["256color"])
+	manager.screen.toggle_mouse(creds["options"]["mouse"])
 
-	main.toggle256(two56colors)
-	main.toggleMouse(creds["options"]["mouse"])
+	global _CLIENT
+	_client = ChatBot(manager.screen, creds)
+	return manage_task, manager.exited #the future to exit the loop
 
-	global _client
-	_client = ChatBot(main,creds)
-	return mainTask,main.exited #the future to exit the loop
-
-#SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
-#custom and credential saving setup
-CREDS_FILENAME = "chatango_creds"
-HOME_DIR = path.expanduser('~')
-CUSTOM_PATH = path.join(HOME_DIR,".cubecli")
-#save
-DEPRECATED_SAVE_PATH = path.join(HOME_DIR,".%s"%CREDS_FILENAME)
-SAVE_PATH = path.join(CUSTOM_PATH,CREDS_FILENAME)
-#init code to import everything in custom
-CUSTOM_INIT = '''
-#code ripped from stackoverflow questions/1057431
-#ensures the `from custom import *` in chatango.py will import all python files
-#in the directory
-
-from os.path import dirname, basename, isfile
-import glob
-modules = glob.glob(dirname(__file__)+"/*.py")
-__all__ = [basename(f)[:-3] for f in modules \
-			if not f.endswith("__init__.py") and isfile(f)]
-'''
-IMPORT_CUSTOM = True
-
-if __name__ == "__main__":
+def main():
 	#parse arguments and start client
+	import argparse
+	import os
+	import traceback
 	import sys
 
-	newCreds = {}
-	importCustom = True
-	readCredsFlag = True
-	credsArgFlag = 0
-	groupArgFlag = 0
-	
-	for arg in sys.argv:
-		#if it's an argument
-		if arg[0] in '-':
-			#stop creds parsing
-			if credsArgFlag == 1:
-				newCreds["user"] = ""
-			if credsArgFlag in (1,2):
-				newCreds["passwd"] = ""
-			if groupArgFlag:
-				raise Exception("Improper argument formatting: -g without argument")
-			credsArgFlag = 0
-			groupArgFlag = 0
-			#creds inline
-			if arg == "-c":
-				creds_readwrite["user"] = 0		#no readwrite to user and pass
-				creds_readwrite["passwd"] = 0
-				credsArgFlag = 1
-				continue	#next argument
-			#group inline
-			elif arg == "-g":
-				creds_readwrite["room"] = 2		#write only to room
-				groupArgFlag = 1
-				continue
-			#flags without arguments
-			elif arg == "-r":		#relog
-				creds_readwrite["user"] = 2		#only write to creds
-				creds_readwrite["passwd"] = 2
-				creds_readwrite["room"] = 2
-			elif arg == "-nc":		#no custom
-				importCustom = False
-			elif arg == "--help":	#help
-				print(__doc__)
-				sys.exit()
-		#parse -c
-		if credsArgFlag:
-			newCreds[ ["user","passwd"][credsArgFlag-1] ] = arg
-			credsArgFlag = (credsArgFlag + 1) % 3
-		#parse -g
-		if groupArgFlag:
-			newCreds["room"] = arg
-			groupArgFlag = 0
-	#anon and improper arguments
-	if credsArgFlag == 1:	#null password means temporary name
-		newCreds["user"] = ""
-	if credsArgFlag >= 1:	#null name means anon
-		newCreds["passwd"] = ""
-	if groupArgFlag:
-		raise Exception("Improper argument formatting: -g without argument")
-
-	#DEPRECATED, updating to current paradigm
-	if path.exists(DEPRECATED_SAVE_PATH) or not path.exists(CUSTOM_PATH):
-		import shutil
+	if not path.exists(HOME_PATH):
+		os.mkdir(HOME_PATH)
 		os.mkdir(CUSTOM_PATH)
-		customDir = path.join(CUSTOM_PATH,"custom")
-		os.mkdir(customDir)
-		with open(path.join(CUSTOM_PATH,"__init__.py"),"w") as a:
-			a.write(CUSTOM_INIT)
-	if path.exists(DEPRECATED_SAVE_PATH):
-		shutil.move(DEPRECATED_SAVE_PATH,SAVE_PATH)
+		_write_init()
 
-	try:
-		jsonInput = open(SAVE_PATH)
-		jsonData = json.loads(jsonInput.read())
-		jsonInput.close()
-		for i,bit in creds_readwrite.items():
-			if bit&1:
-				newCreds[i] = jsonData.get(i)
-			#read into safe credentials regardless
-			creds_entire[i] = jsonData.get(i)
-	except (FileNotFoundError, ValueError):
-		pass
-	except Exception as exc:
-		raise IOError("Fatal error reading creds! Aborting...") from exc
+	parser = argparse.ArgumentParser(description="Start the chatango client")
+	parser.add_argument("-c", dest="login", help="Set username and password. "+\
+		"If both are absent, you log in as an anon. If only password is "+\
+		"absent, you set your name without having an account."
+		, nargs='*', metavar=("username", "password"), default=None)
+	parser.add_argument("-g", dest="group", help="Set group name"
+		, nargs=1, metavar="groupname", default=None)
+	parser.add_argument("-r", help="Re-input credentials"
+		, dest="getcreds", action="store_true")
+	parser.add_argument("-nc", help="Skip custom folder imports"
+		, dest="custom", action="store_false")
 
-	#finally import custom
-	if IMPORT_CUSTOM:
-		sys.path.append(CUSTOM_PATH)
-		from custom import *
+	args = parser.parse_args()
+	creds = make_creds()
+
+	if args.login is not None:
+		#no readwrite to user and pass
+		creds.no_rw("user")
+		creds.no_rw("passwd")
+		# only username
+		if len(args.login) == 1:
+			creds["user"] = args.login[0]
+		# username and pasword
+		elif len(args.login) == 2:
+			creds["user"], creds["passwd"] = \
+				args.login
+
+	if args.group is not None:
+		creds.clear_write("room")	#write only to room
+		creds["room"] = args.group
+
+	if args.getcreds:
+		creds.clear_write("user")	#write only to creds
+		creds.clear_write("passwd")	#write only to room
+		creds.clear_write("room")	#write only to room
+
+		creds["user"] = ""
+		creds["passwd"] = ""
+		creds["room"] = ""
+
+	creds.read_json(SAVE_PATH)
+
+	#exec files in custom directory
+	if args.custom:
+		sys.path.append(HOME_PATH)
+		import custom
+		if custom.__doc__ != CUSTOM_DOC:
+			_write_init()
+			print("Aborted due to custom docstring mismatch. Please rerun.")
+			return
 
 	#start
 	loop = asyncio.get_event_loop()
-	mainTask = None
+	main_task = None
 	try:
-		start = startClient(loop,newCreds)
-		mainTask,endFuture = loop.run_until_complete(start)
-		if endFuture:
-			loop.run_until_complete(endFuture.wait())
+		start = loop.run_until_complete(start_client(loop, creds))
+		if start is None:
+			return
+		main_task, end_future = start
+		if end_future:
+			loop.run_until_complete(end_future.wait())
 	except Exception:
-		import traceback
 		print("\x1b[31mFatal error occurred\x1b[m")
-		traceback.print_exc(file=sys.stderr)
+		traceback.print_exc()
 	finally:
-		if mainTask != None and not mainTask.done():
-			mainTask.cancel()
+		if main_task is not None and not main_task.done():
+			main_task.cancel()
 		loop.run_until_complete(loop.shutdown_asyncgens())
 		#close all loop IO
 		loop.close()
-		if _client and _client.bot:
-			#this is a set and not a list reference, so we update the list now
-			newCreds["ignores"] = list(_client.bot.ignores)
-		#save
-		try:
-			jsonData = {}
-			for i,bit in creds_readwrite.items():
-				if bit&2 or i not in creds_entire:
-					jsonData[i] = newCreds[i]
-				else:	#"safe" credentials from last write
-					jsonData[i] = creds_entire[i]
-			encoder = json.JSONEncoder(ensure_ascii=False)
-			with open(SAVE_PATH,'w') as out:
-				out.write(encoder.encode(jsonData)) 
-		except KeyError:
-			pass
-		except Exception as exc:
-			raise IOError("Fatal error writing creds!") from exc
+
+		creds.write_json(SAVE_PATH)
+
+if __name__ == "__main__":
+	main()
