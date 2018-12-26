@@ -1069,13 +1069,13 @@ def main():
 				args.login
 
 	if args.group is not None:
-		creds.clear_write("room")	#write only to room
-		creds["room"] = args.group
+		creds.clear_read("room")	#write only to room
+		creds["room"] = args.group[0]
 
 	if args.getcreds:
-		creds.clear_write("user")	#write only to creds
-		creds.clear_write("passwd")	#write only to room
-		creds.clear_write("room")	#write only to room
+		creds.clear_read("user")	#write only to creds
+		creds.clear_read("passwd")
+		creds.clear_read("room")
 
 		creds["user"] = ""
 		creds["passwd"] = ""

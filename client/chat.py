@@ -469,7 +469,7 @@ class Messages:
 		msgno = self.start_height+1
 		height = self._all_messages[-msgno][2]-self.inner_height
 
-		while height <= self.parent.parent.y-1:
+		while height <= self.parent.height-1:
 			if test(self._all_messages[-msgno], result):
 				del self._all_messages[-msgno]
 				self.redo_lines()
@@ -675,16 +675,16 @@ class Messages:
 class ChatOverlay(TextOverlay):
 	'''
 	Overlay that can push and select messages, and has an input box.
-	Optionally pushes time messages every 10 minutes and refreshes
-	blurbs every few seconds
+	Optionally pushes time messages every `push_times` seconds. 0 to disable.
 	'''
 	replace = True
 	_monitors = {}
-	def __init__(self, parent, push_times=True):
+	def __init__(self, parent, push_times=600):
 		super().__init__(parent)
 		self._sentinel = ord(CHAR_COMMAND)
 		self._push_times = push_times
 		self._push_task = None
+		self._last_time = -1
 
 		self.messages = Messages(self)
 		self.history = History()
@@ -715,7 +715,7 @@ class ChatOverlay(TextOverlay):
 	async def _time_loop(self):
 		'''Prints the current time every 10 minutes'''
 		while self._push_times:
-			await asyncio.sleep(600)
+			await asyncio.sleep(self._push_times)
 			self.msg_time()
 
 	#method overloading---------------------------------------------------------
@@ -737,7 +737,7 @@ class ChatOverlay(TextOverlay):
 	def add(self):
 		'''Start timeloop and add overlay'''
 		super().add()
-		if self._push_times:
+		if self._push_times > 0:
 			self._push_task = self.parent.loop.create_task(self._time_loop())
 
 	def remove(self):
@@ -747,7 +747,7 @@ class ChatOverlay(TextOverlay):
 		'''
 		if self._push_times:
 			#finish running the task
-			self._push_times = False
+			self._push_times = 0
 			self._push_task.cancel()
 		self.parent.stop()
 		super().remove()
@@ -847,32 +847,35 @@ class ChatOverlay(TextOverlay):
 		'''System message'''
 		base = Coloring(base)
 		base.insert_color(0, raw_num(1))
-		self.messages.append(base, None)
 		self.parent.schedule_display()
+		return self.messages.append(base, None)
 
 	def msg_time(self, numtime=None, predicate=""):
 		'''Push a system message of the time'''
 		dtime = time.strftime("%H:%M:%S"
 			, time.localtime(numtime or time.time()))
-		self.msg_system(predicate+dtime)
+		ret = self.msg_system(predicate+dtime)
+		if not predicate:
+			if self._last_time == ret-1:
+				self.messages.delete(self._last_time)
+			self._last_time = ret
+		return ret
 
 	def msg_append(self, post, *args):
 		'''Parse a message, apply colorize_message, and append'''
 		post = Coloring(post)
 		self.colorize_message(post, *args)
-		ret = self.messages.append(post, list(args))
 		for i in self._examine:
 			i(self, post, *args)
 		self.parent.schedule_display()
-		return ret
+		return self.messages.append(post, list(args))
 
 	def msg_prepend(self, post, *args):
 		'''Parse a message, apply colorize_message, and prepend'''
 		post = Coloring(post)
 		self.colorize_message(post, *args)
-		ret = self.messages.prepend(post, list(args))
 		self.parent.schedule_display()
-		return ret
+		return self.messages.prepend(post, list(args))
 
 class _MessageScrollOverlay(DisplayOverlay):
 	'''
@@ -918,7 +921,7 @@ def add_message_scroller(overlay, callback, empty, early, late):
 	'''
 	Add a message scroller for a particular callback.
 	This wraps Messages.iterate_with with a LazyIterList, spawns an instance of
-	_MessageScrollOverlay, and adds it to the same parent as chatOverlay.
+	_MessageScrollOverlay, and adds it to the same parent as overlay.
 	Error blurbs are printed to overlay's parent: `empty` for an exhausted
 	iterator, `early` for when no earlier messages matching the callback are
 	found, and `late` for the same situation with later messages.

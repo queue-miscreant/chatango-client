@@ -211,11 +211,11 @@ class OverlayBase:
 		self.index = None			#index in the stack
 		self._keys = {
 			  3:	staticize(self.parent.stop, doc="Exit client")	#^c
-			, 12:	self.parent.redraw_all							#^l
+			, 12:	parent.redraw_all								#^l
 			, 27:	self._callalt
 			#no post on resize
-			, curses.KEY_RESIZE:	lambda x: parent.resize() or 1
-			, curses.KEY_MOUSE:	self._callmouse
+			, curses.KEY_RESIZE:	parent.schedule_resize
+			, curses.KEY_MOUSE:		self._callmouse
 		}
 		self._altkeys =	{-1: quitlambda}
 		self._mouse = {}
@@ -760,8 +760,31 @@ class Screen:
 		return curses.mousemask(state and _MOUSE_MASK)
 
 	#Display Methods------------------------------------------------------------
+	async def resize(self):
+		'''Fire all added overlay's resize methods'''
+		newy, newx = self._screen.getmaxyx()
+		#some terminals don't like drawing the last column
+		if os.getenv("TERM") == "xterm":
+			newx -= 1
+		#magic number, but who cares; lines for text, blurbs, and reverse info
+		newy -= self._RESERVE_LINES
+		try:
+			for i in self._ins:
+				i.resize(newx, newy)
+				await asyncio.sleep(self._INTERLEAVE_DELAY)
+		except SizeException:
+			self.width, self.height = newx, newy
+			self._candisplay = 0
+			return
+		self.width, self.height = newx, newy
+		self._candisplay = 1
+		self.update_input()
+		self.blurb.status()
+		await self.display()
+
 	async def display(self):
-		'''Draws the highest overlays (with stack indices greater than
+		'''
+		Draws the highest overlays (with stack indices greater than
 		_last_replace)
 		'''
 		if not (self.active and self._candisplay):
@@ -785,6 +808,9 @@ class Screen:
 	def schedule_display(self):
 		self.loop.create_task(self.display())
 
+	def schedule_resize(self):
+		self.loop.create_task(self.resize())
+
 	def update_input(self):
 		'''Input display backend'''
 		if not (self.active and self._candisplay):
@@ -800,28 +826,6 @@ class Screen:
 			return
 		self._displaybuffer.write(self._SINGLE_LINE %
 			(self.height+height, string))
-
-	async def resize(self):
-		'''Fire all added overlay's resize methods'''
-		newy, newx = self._screen.getmaxyx()
-		#some terminals don't like drawing the last column
-		if os.getenv("TERM") == "xterm":
-			newx -= 1
-		#magic number, but who cares; lines for text, blurbs, and reverse info
-		newy -= self._RESERVE_LINES
-		try:
-			for i in self._ins:
-				i.resize(newx, newy)
-				await asyncio.sleep(self._INTERLEAVE_DELAY)
-		except SizeException:
-			self.width, self.height = newx, newy
-			self._candisplay = 0
-			return
-		self.width, self.height = newx, newy
-		self._candisplay = 1
-		self.update_input()
-		self.blurb.status()
-		await self.display()
 
 	def redraw_all(self):
 		'''Force redraw'''
