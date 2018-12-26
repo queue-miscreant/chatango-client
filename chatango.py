@@ -1026,7 +1026,7 @@ async def start_client(loop, creds):
 	manager.screen.toggle_mouse(creds["options"]["mouse"])
 
 	global _CLIENT
-	_client = ChatBot(manager.screen, creds)
+	_CLIENT = ChatBot(manager.screen, creds)
 	return manage_task, manager.exited #the future to exit the loop
 
 def main():
