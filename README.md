@@ -1,16 +1,17 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.2831853
+Version 6.283185307
 --------------------------
-A terminal application written in python with curses input and ANSI escape-colored output.   
+A terminal application written in Python with curses input and ANSI escape-colored output.   
 Used to implement a client for chatango, an online chatroom.
 Run `python chatango.py` or `./chatango.py` in the directory you extracted it to.  
 I recommend making a symlink in /usr/local/bin/ so you don't have to navigate to the folder,
-or especially have a million files in ~/
+or especially have a million files in `~/`
 
-This client is based on [chlib.py](https://github.com/cellsheet/chlib), and uses [python wcwidth](https://github.com/jquast/wcwidth).
+This client is (used to be) based on [chlib.py](https://github.com/cellsheet/chlib),
+and uses [python wcwidth](https://github.com/jquast/wcwidth).
 
-My custom script: https://puu.sh/zEtkO/8a752442b4.py
+My custom script: https://puu.sh/Cndh1/4fc0f77f65.py
 
 Requires livestreamer, youtube-dl, and xclip, but if you don't already have
 these, seriously consider installing them.
@@ -39,7 +40,7 @@ Features:
 Dependencies:
 --------------------------
 * Python 3
-* Python ncurses (included on most distros, python cygwin)
+* Python ncurses (included on most distros, Python cygwin)
 
 Optional: (see below for changing)
 * Feh image viewer
@@ -52,10 +53,18 @@ If you want to use some other program like ImageMagick to open images,
 you'll have to do the following in a custom file
 ```
 from lib import client.linkopen
-client.linkopen.IMG_ARGS = ["animate",...]
+client.linkopen.IMG_ARGS = ["animate", ...]
 ```
 Where ... represents more command line arguments. Similarly can be done 
 to replace mpv (using `MPV_ARGS`).
+
+
+Adding custom modules:
+--------------------------
+On startup, the path `~/.cubecli` is created to contain persistent data such as
+username, room name, and options. The directory `~/.cubecli/custom` is also added
+to contain modules. Unless the `-nc` option is specified, all modules in the
+folder are imported. This is where the above-mentioned script comes in.
 
 
 Windows (Cygwin):
@@ -66,7 +75,7 @@ The following terminals are NOT supported or have restricted features:
 * Console2
 	* Partially; 256 color mode works incorrectly
 * cmd.exe
-	* Unsupported; thought it now has ANSI escapes, the keys that the program recognizes may differ
+	* Unsupported; though it has ANSI escapes, ncurses recognizes different keys
 * Powershell
 	* Unsupported; see cmd.exe
 
@@ -96,6 +105,23 @@ videos, change `client.linkopen.MPV_ARGS` (as shown above) to `[]`.
 
 Changelog
 =========================
+## v6.283185307 *2018/12/25*
+* Refactored a lot of code
+	* Using Python naming conventions
+	* Split `client/overlay` into `base`, `overlay`, and `chat`
+	* Split `overlay.Main` into `base.Blurb`, `base.Screen`, `base.Manager`
+		* Use `Screen.blurb.push` instead of `printBlurb`
+	* Canonical way to add keys as partialmethods is with `BaseOverlay.key_handler(key_name)`
+		* Can also override return value with second parameter
+		* Can be stacked over multiple lines
+		* By default, `add_keys` lacks binding self, to make `__init__`s easier
+	* Names from `linkopen` are not exposed on `import client`
+		* Use `from client import linkopen` instead
+	* Overlays now have shortcut properties to their parent's height and width
+* Made code entry a lot cleaner
+	* Generalized and standardized save files with `_Persistent`
+	* Updated to use `argparse` instead of horrendous loop over `sys.argv`
+
 ## v6.28318530 *2018/2/26*
 * Reworked Messages storage object
 	* Scrolling is no longer limited to selecting the highest message
@@ -262,7 +288,7 @@ Changelog
 * Upon selecting a message, enter will open all links, and tab will format the message for quoting
 * Added wcwidth character width
 	* This allows correct width on CJK characters that take two columns to draw
-* Redefined link_openers with multiple function arguments, because that's what I was doing before
+* Redefined `link_openers` with multiple function arguments, because that's what I was doing before
 * Moved onenter to chatango.py so that a "send" function does not have to be passed to client.py
 * Reformatted README.md :\^)
 
@@ -271,7 +297,7 @@ Changelog
 * Changed F2 menu to pull number from string. This confirms the wanted link is selected
 * Altered the way the client starts up. client.start expects the object that retreives messages to start,
 * 	That object's main method
-* link_openers have two types now:
+* `link_openers` have two types now:
 	* 	ext|(extension name):	Open extension with 'extension name'
 	* 	site|(pattern):		Open link with pattern 'pattern'
 	* 	default:		Default

@@ -1089,7 +1089,8 @@ def main():
 		import custom
 		if custom.__doc__ != CUSTOM_DOC:
 			_write_init()
-			print("Aborted due to custom docstring mismatch. Please rerun.")
+			print("\x1b[31mAborted due to custom docstring mismatch. "\
+				"Please rerun.\x1b[m")
 			return
 
 	#start
@@ -1109,8 +1110,6 @@ def main():
 		if main_task is not None and not main_task.done():
 			main_task.cancel()
 		loop.run_until_complete(loop.shutdown_asyncgens())
-		#close all loop IO
-		loop.close()
 
 		creds.write_json(SAVE_PATH)
 

@@ -659,7 +659,7 @@ class InputMux:
 		@overlay.key_handler(' ', True)
 		def select_sub(me):
 			"Change value"
-			self.indices[self.ordering[me.it]].select()
+			return self.indices[self.ordering[me.it]].select()
 
 		overlay.add_keys({
 			'q':	staticize(self.try_warn, parent, overlay
@@ -775,8 +775,7 @@ class InputMux:
 					not self.get(self.parent.context))	#toggle
 
 			elif self._type == "button":
-				self._set(self.parent.context)
-				return
+				return self._set(self.parent.context)
 
 			self.parent.warn_exit = self.parent.has_button
 			if further_input:

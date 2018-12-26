@@ -66,8 +66,8 @@ class CommandOverlay(TextOverlay):
 			self.parent.blurb.push("command \"{}\" not found".format(args[0]))
 			return -1
 		self.parent.loop.create_task(self.run_command(
-			  self.commands[args[0]]
-			, self.parent, args[1:]))
+			  self.commands[args[0]] 
+			, self.parent, args[1:], name=args[0]))
 		return -1
 
 	@staticmethod
@@ -106,16 +106,17 @@ class CommandOverlay(TextOverlay):
 		return args
 
 	@staticmethod
-	async def run_command(command, param, args):
+	async def run_command(command, param, args, name=""):
 		try:
-			result = command(param, *args)
-			if asyncio.iscoroutine(result):
-				result = await result
+			if asyncio.iscoroutinefunction(command):
+				result = await command(param, *args)
+			else:
+				result = command(param, *args)
 			if isinstance(result, OverlayBase):
 				result.add()
 		except:
-			param.blurb.push(
-				'an error occurred while running command {}'.format(args[0]))
+			param.blurb.push("an error occurred while running command %s" % \
+				name)
 			print(traceback.format_exc(), "\n")
 
 	#decorators for containers

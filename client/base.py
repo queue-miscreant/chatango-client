@@ -336,10 +336,8 @@ class OverlayBase:
 		self.remove()
 		new.add()
 
-	def _add_key(self, key_name, handler, make_method=False):
-		'''
-		Backend for add_key
-		'''
+	def _add_key(self, key_name, handler, make_method):
+		'''Backend for add_key'''
 		if not inspect.ismethod(handler) and make_method:
 			handler = staticize(handler, self)
 
@@ -352,24 +350,23 @@ class OverlayBase:
 			try:
 				true_name = _VALID_KEYNAMES[key_name[2:]]
 				self._altkeys[true_name] = handler
-				return
 			except KeyError:
 				raise ValueError("key '%s' invalid" % key_name)
+			return
 		#mouse buttons
-		elif key_name.lower().startswith("mouse-"):
+		if key_name.lower().startswith("mouse-"):
 			try:
 				true_name = MOUSE_BUTTONS[key_name[6:]]
 				self._mouse[true_name] = handler
-				return
 			except KeyError:
 				raise ValueError("key '%s' invalid" % key_name)
+			return
 		#everything else
-		else:
-			try:
-				true_name = _VALID_KEYNAMES[key_name]
-				self._keys[true_name] = handler
-			except:
-				raise ValueError("key '%s invalid" % key_name)
+		try:
+			true_name = _VALID_KEYNAMES[key_name]
+			self._keys[true_name] = handler
+		except:
+			raise ValueError("key '%s invalid" % key_name)
 
 	def add_keys(self, new_functions, make_method=False):
 		'''
