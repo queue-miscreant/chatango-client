@@ -270,7 +270,7 @@ class OverlayBase:
 		chars = [i for i in chars if i != curses.KEY_MOUSE]
 		if chars[0] != -1:
 			#control not returned to loop until later
-			self.parent.loop.create_task(self.run_key(chars))
+			self.parent.loop.call_soon(self.run_key, chars)
 		try:
 			_, x, y, _, state = curses.getmouse()
 			if state in self._mouse:
@@ -325,11 +325,15 @@ class OverlayBase:
 	#frontend methods----------------------------
 	def add(self):
 		'''Finalize setup and add overlay'''
-		self.parent.add_overlay(self)
+		#insensitive to being added again
+		if self.index is None:
+			self.parent.add_overlay(self)
 
 	def remove(self):
 		'''Finalize overlay and pop'''
-		self.parent.pop_overlay(self)
+		#insensitive to being removed again
+		if self.index is not None:
+			self.parent.pop_overlay(self)
 
 	def swap(self, new):
 		'''Pop overlay and add new one in succession.'''
@@ -678,9 +682,10 @@ class Screen:
 	_SINGLE_LINE = "\x1b[%d;f" + CLEAR_FORMATTING +"%s\x1b[K" + _RETURN_CURSOR
 	_RESERVE_LINES = 3
 
-	def __init__(self, refresh_blurbs=True, loop=None):
+	def __init__(self, manager, refresh_blurbs=True, loop=None):
 		if not (sys.stdin.isatty() and sys.stdout.isatty()):
 			raise ImportError("interactive stdin/stdout required for Screen")
+		self.manager = manager
 
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		self.two56 = ColorManager()
@@ -850,17 +855,18 @@ class Screen:
 		'''Pop overlay backend. Use overlay.remove() instead.'''
 		del self._ins[overlay.index]
 		#look for the last replace and replace indices
+		was_replace = overlay.index == self._last_replace
+		was_text = overlay.index == self._last_text
 		for i, j in enumerate(self._ins):
-			if j.replace \
-			and overlay.index == self._last_replace:
+			if j.replace and was_replace:
 				self._last_replace = i
-			if isinstance(j, TextOverlay) \
-			and overlay.index == self._last_text:
+			if isinstance(j, TextOverlay) and was_text:
 				self._last_text = i
 				self.update_input()
 			j.index = i
 		if self._last_text == overlay.index:
 			self._last_text = -1
+		overlay.index = None
 		self.schedule_display()
 
 	#Overlay Frontends----------------------------------------------------------
@@ -905,6 +911,11 @@ class Screen:
 			nextch = self._screen.getch()
 			await asyncio.sleep(self._INPUT_DELAY)
 
+		#capture ctrl-c
+		if nextch == 3:
+			self.active = False
+			return
+
 		#we need this here so that _input doesn't lock up the rest of the loop
 		#and we return to the event loop at least once with `await sleep`;
 		if not self._ins:
@@ -931,9 +942,10 @@ class Manager:
 	last = 0
 	_on_exit = []
 	def __init__(self, loop=None):
-		self.loop = asyncio.get_event_loop() if loop is None else loop
+		loop = asyncio.get_event_loop() if loop is None else loop
 		if not hasattr(loop, "create_future"):
-			setattr(loop, "create_future", lambda: asyncio.Future(loop=loop))
+			setattr(loop, "create_future", lambda: asyncio.Future(loop=self.loop))
+		self.loop = loop
 		#general state
 		self.prepared = asyncio.Event(loop=loop)
 		self.exited = asyncio.Event(loop=loop)
@@ -943,7 +955,8 @@ class Manager:
 	async def run(self, refresh_blurbs=True):
 		'''Main client loop'''
 		try:
-			with Screen(refresh_blurbs=refresh_blurbs, loop=self.loop) as screen:
+			with Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop) \
+			as screen:
 				self.screen = screen
 				await screen.resize()
 				self.prepared.set()

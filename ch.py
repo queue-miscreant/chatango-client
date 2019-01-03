@@ -117,13 +117,13 @@ class Post:
 		tag = POST_TAG_RE.search(raw[9])
 		if tag:
 			self.nColor = tag.group(2) or ''
-			sizeAndColor = tag.group(4)
-			if sizeAndColor:
-				if len(sizeAndColor) % 3 == 2:	#color only
-					self.fSize = int(sizeAndColor[:2])
-					self.fColor = sizeAndColor[2:]
+			size_color = tag.group(4)
+			if size_color:
+				if len(size_color) % 3 == 2:	#color only
+					self.fSize = int(size_color[:2])
+					self.fColor = size_color[2:]
 				else:
-					self.fColor = sizeAndColor
+					self.fColor = size_color
 					self.fSize = 12
 			else:
 				self.fColor = ''
@@ -165,8 +165,15 @@ class _Generate:
 			int(n)	#insurance that n is int-able
 		except ValueError:
 			n = "3452"
-		return "".join(map(lambda i, v: str(int(i) + int(v))[-1]
-			, n, str(uid)[4:8]))
+		return "".join(map(lambda i, v: str((int(i) + int(v)) % 10)
+			, n, uid[4:8]))
+
+	@staticmethod
+	def reverse_aid(goal, uid):
+		'''Reverse-generate anon ID'''
+		print(goal, uid)
+		return "".join(map(lambda g, v: str((int(g) - int(v)) % 10)
+			, goal, uid[4:8]))
 
 	@staticmethod
 	def server_num(group):
@@ -283,7 +290,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		if self._ping_task:
 			self._loop.call_soon(self._ping_task.cancel)
 		if self.connected: #connection lost if the transport closes abruptly
-			self.call_event("on_connection_error", exc)
+			self._call_event("on_connection_error", exc)
 	#########################################
 
 	def send_command(self, *args, firstcmd=False):
@@ -293,7 +300,7 @@ class ChatangoProtocol(asyncio.Protocol):
 		else:
 			self._transport.write(bytes(':'.join(args)+'\r\n\x00', "utf-8"))
 
-	def call_event(self, event, *args, **kw):
+	def _call_event(self, event, *args, **kw):
 		'''Attempt to call manager's method'''
 		try:
 			event = getattr(self._manager, event)
@@ -341,15 +348,21 @@ class GroupProtocol(ChatangoProtocol):
 		'''Acknowledgement from server that login succeeded'''
 		if args[2] == 'C' and (not self._manager.password) \
 		and (not self._manager.username):
-			self._storage._nColor = "CCC"
-			self._storage._anon = "!anon" + \
-				_Generate.aid(self._storage._nColor, args[1])
+			aid = self._storage._aid
+			if aid is not None:
+				ncolor = _Generate.reverse_aid(aid, args[1])
+			else:
+				ncolor = str(random.randrange(0, 10000)).zfill(4)[:4]
+			self._storage._aid = _Generate.aid(ncolor, args[1])
+			self._storage._nColor = ncolor
 		elif args[2] == 'C' and (not self._manager.password):
 			self.send_command("blogin", self._manager.username)
 		elif args[2] != 'M': #unsuccesful login
-			self.call_event("on_login_fail")
+			self._call_event("on_login_fail")
 			await self.disconnect()
 			return
+		else:
+			self._storage._aid = None
 		#shouldn't be necessary, but if the room assigns us a new id
 		self._uid = args[1]
 		self._storage._owner = args[0]
@@ -360,7 +373,7 @@ class GroupProtocol(ChatangoProtocol):
 
 	async def _recv_denied(self, _):
 		'''Acknowledgement that login was denied'''
-		self.call_event("on_denied")
+		self._call_event("on_denied")
 		await self.disconnect()
 
 	async def _recv_inited(self, _):
@@ -370,9 +383,13 @@ class GroupProtocol(ChatangoProtocol):
 		self.send_command("getpremium", '1')	#try to turn on premium features
 		self.send_command("getbannedwords")	#what it says on the tin
 		self.send_command("getratelimit")	#i dunno
-		self.call_event("on_connect")
-		self.call_event("on_history_done", self._history.copy()) #clone history
+		self._call_event("on_connect")
+		self._call_event("on_history_done", self._history.copy()) #clone history
 		self._history.clear()
+
+	async def _recv_badalias(self, _):
+		'''NACK to blogin. Has corresponding ACK, but does nothing'''
+		self._call_event("on_bad_alias")
 
 	async def _recv_gparticipants(self, args):
 		'''Command that contains information of current room members'''
@@ -384,7 +401,7 @@ class GroupProtocol(ChatangoProtocol):
 				person = person.split(':')
 				if person[3] != "None" and person[4] == "None":
 					self._storage._users.append(person[3].lower())
-		self.call_event("on_participants")
+		self._call_event("on_participants")
 
 	async def _recv_participant(self, args):
 		'''New member joined or left'''
@@ -393,19 +410,19 @@ class GroupProtocol(ChatangoProtocol):
 			user = args[3].lower()
 			if args[3] != "None" and user in self._storage._users:
 				self._storage._users.remove(user)
-				self.call_event("on_member_leave", user)
+				self._call_event("on_member_leave", user)
 			else:
-				self.call_event("on_member_leave", "anon")
+				self._call_event("on_member_leave", "anon")
 		elif bit == '1':	#joined
 			user = args[3].lower()
 			if args[3] != "None":
 				self._storage._users.append(user)
-				self.call_event("on_member_join", user)
+				self._call_event("on_member_join", user)
 			else:
-				self.call_event("on_member_join", "anon")
+				self._call_event("on_member_join", "anon")
 		elif bit == '2':	#tempname blogins
 			user = args[4].lower()
-			self.call_event("on_member_join", user)
+			self._call_event("on_member_join", user)
 
 	async def _recv_bw(self, args):
 		'''Banned words'''
@@ -414,7 +431,7 @@ class GroupProtocol(ChatangoProtocol):
 	async def _recv_n(self, args):
 		'''Number of users, in base 16'''
 		self._storage._usercount = int(args[0], 16)
-		self.call_event("on_usercount")
+		self._call_event("on_usercount")
 
 	async def _recv_b(self, args):
 		'''Message received'''
@@ -429,9 +446,10 @@ class GroupProtocol(ChatangoProtocol):
 		if post:
 			del self._messages[args[0]]
 			post.msgid = args[1]
-			self.call_event("on_message", post)
+			self._call_event("on_message", post)
 		else:
-			self.call_event("on_dropped_message", args)
+			print("FIXME: Detected message drop!", args)
+			self._call_event("on_dropped_message", args)
 
 	async def _recv_i(self, args):
 		'''Historical message'''
@@ -442,21 +460,21 @@ class GroupProtocol(ChatangoProtocol):
 
 	async def _recv_gotmore(self, _):
 		'''Received all historical messages'''
-		self.call_event("on_history_done", list(self._history))
+		self._call_event("on_history_done", list(self._history))
 		self._history.clear()
-		self._storage._timesGot += 1
+		self._storage._history_count += 1
 
 	async def _recv_show_fw(self, _):
 		'''Flood warning'''
-		self.call_event("on_flood_warning")
+		self._call_event("on_flood_warning")
 
 	async def _recv_show_tb(self, args):
 		'''Flood ban'''
-		self.call_event("on_flood_ban", int(args[0]))
+		self._call_event("on_flood_ban", int(args[0]))
 
 	async def _recv_tb(self, args):
 		'''Flood ban reminder'''
-		self.call_event("on_flood_ban_repeat", int(args[0]))
+		self._call_event("on_flood_ban_repeat", int(args[0]))
 
 	async def _recv_blocklist(self, args):
 		'''Received list of banned users'''
@@ -475,7 +493,7 @@ class GroupProtocol(ChatangoProtocol):
 				, float(params[3]) #time
 				, params[4]	#src
 			))
-		self.call_event("on_banlist_update")
+		self._call_event("on_banlist_update")
 
 	async def _recv_blocked(self, args):
 		'''User banned'''
@@ -490,7 +508,7 @@ class GroupProtocol(ChatangoProtocol):
 			, float(args[3]) #time
 			, user
 		))
-		self.call_event("on_ban", user, target)
+		self._call_event("on_ban", user, target)
 		self.request_banlist()
 
 	async def _recv_unblocked(self, args):
@@ -499,7 +517,7 @@ class GroupProtocol(ChatangoProtocol):
 			return
 		target = args[2]
 		user = args[3]
-		self.call_event("on_unban", user, target)
+		self._call_event("on_unban", user, target)
 		self.request_banlist()
 
 	async def _recv_mods(self, args):
@@ -508,20 +526,20 @@ class GroupProtocol(ChatangoProtocol):
 		premods = self._storage._mods
 		for user in mods - premods: #modded
 			self._storage._mods.add(user)
-			self.call_event("on_mod_add", user)
+			self._call_event("on_mod_add", user)
 		for user in premods - mods: #demodded
 			self._storage._mods.remove(user)
-			self.call_event("on_mod_remove", user)
-		self.call_event("on_mod_change")
+			self._call_event("on_mod_remove", user)
+		self._call_event("on_mod_change")
 
 	async def _recv_delete(self, args):
 		'''Message deleted'''
-		self.call_event("on_message_delete", args[0])
+		self._call_event("on_message_delete", args[0])
 
 	async def _recv_deleteall(self, args):
 		'''Message delete (multiple)'''
 		for msgid in args:
-			self.call_event("on_message_delete", msgid)
+			self._call_event("on_message_delete", msgid)
 	#--------------------------------------------------------------------------
 	def request_banlist(self):
 		'''Request updated banlist (Mod)'''
@@ -547,18 +565,18 @@ class PMProtocol(ChatangoProtocol):
 		pass
 
 	async def _recv_OK(self, args):
-		self.call_event("on_pm_connect")
+		self._call_event("on_pm_connect")
 		self.send_command("settings")
 		self.send_send_cnd("wl")	#friends list
 		self._ping_task = self._loop.create_task(self.ping())
 
 	async def _recv_msg(self, args):
 		post = Post(args, 2)
-		self.call_event("on_pm", post, False)
+		self._call_event("on_pm", post, False)
 
 	async def _recv_msgoff(self, args):
 		post = Post(args, 2)
-		self.call_event("on_pm", post, True)
+		self._call_event("on_pm", post, True)
 
 	async def _recv_wl(self, args):
 		'''Received friends list (watch list)'''
@@ -573,7 +591,7 @@ class PMProtocol(ChatangoProtocol):
 				next(it)						#lagging 0
 		except StopIteration:
 			pass
-		self.call_event("on_watchlist")
+		self._call_event("on_watchlist")
 
 	async def _recv_track(self, args):
 		'''Received tracked user'''
@@ -582,7 +600,7 @@ class PMProtocol(ChatangoProtocol):
 		#2: online/offline/app
 		track = self._storage._trackList
 		track[args[0]] = (float(args[1]), args[2])
-		self.call_event("on_track")
+		self._call_event("on_track")
 
 	async def _recv_connect(self, args):
 		'''Received check online'''
@@ -599,7 +617,7 @@ class PMProtocol(ChatangoProtocol):
 		self._storage._watchList[args[0]] = (
 			  float(args[2])
 			, args[1])
-		self.call_event("on_watchlist_update")
+		self._call_event("on_watchlist_update")
 
 	async def _recv_wldelete(self,args):
 		'''Received deletion from watch list'''
@@ -608,7 +626,7 @@ class PMProtocol(ChatangoProtocol):
 		#2:	0
 		if self._storage._watchList.get(args[0]):
 			del self._storage._watchList[args[0]]
-		self.call_event("on_watchlist_update")
+		self._call_event("on_watchlist_update")
 
 	async def _recv_status(self, args):
 		'''Received status update'''
@@ -620,13 +638,13 @@ class PMProtocol(ChatangoProtocol):
 			self._storage._watchList[args[0]] = (
 				  float(args[1])
 				, args[2])
-			self.call_event("on_watchlist_update")
+			self._call_event("on_watchlist_update")
 		#update track
 		if self._storage._trackList.get(args[0]):
 			self._storage._trackList[args[0]] = (
 				  float(args[1])
 				, args[2])
-			self.call_event("on_track")
+			self._call_event("on_track")
 
 class Connection:
 	'''Virtual class for storing responses from protocols'''
@@ -634,7 +652,7 @@ class Connection:
 		self._protocol = protocol
 
 		#account information
-		self._anon = None
+		self._aid = None
 		self._premium = False
 		self._messageBackground = False
 		self._messageRecord = False
@@ -656,7 +674,7 @@ class Connection:
 
 	@nColor.setter
 	def nColor(self, arg):
-		if not self._anon:
+		if self._aid is None:
 			self._nColor = arg
 
 	@fColor.setter
@@ -665,7 +683,7 @@ class Connection:
 
 	@fSize.setter
 	def fSize(self, arg):
-		self._fSize = min(22, max(9, arg))
+		self._fSize = min(22, max(9, int(arg)))
 
 	@fFace.setter
 	def fFace(self, arg):
@@ -673,7 +691,7 @@ class Connection:
 
 class Group(Connection):
 	'''Class for high-level group communication and storing group information'''
-	_maxLength = 2000
+	_max_length = 2000
 	_too_big_message = BIGMESSAGE_MULTIPLE
 	def __init__(self, protocol, room):
 		super().__init__(protocol)
@@ -687,13 +705,20 @@ class Group(Connection):
 		self._userSessions = {}
 		self._usercount = 0
 
-		self._timesGot = 0
+		self._history_count = 0
 
 		#########################################
 		#	Properties
 		#########################################
 
-	username = property(lambda self: self._anon or self._protocol._manager.username)
+	@property
+	def username(self):
+		if self._aid is not None:
+			return "!anon" + str(self._aid)
+		ret = self._protocol._manager.username
+		if not self._protocol._manager.password:
+			ret = '#' + ret
+		return ret
 	name = property(lambda self: self._name)
 	owner = property(lambda self: self._owner)
 	modlist = property(lambda self: set(self._mods))		#cloned set
@@ -704,19 +729,21 @@ class Group(Connection):
 
 	def send_post(self, post, channel=0, html=False):
 		'''Send a post to the group'''
+		if not post:
+			return
 		channel = (((channel&2)<<2 | (channel&1))<<8)
 		if not html:
 			#replace HTML equivalents
 			for i, j in reversed(_HTML_CODES):
 				post = post.replace(j, i)
 			post = post.replace('\n', "<br/>")
-		if len(post) > self._maxLength:
+		if len(post) > self._max_length:
 			if self._too_big_message == BIGMESSAGE_CUT:
-				self.send_post(post[:self._maxLength], channel=channel, html=True)
+				self.send_post(post[:self._max_length], channel=channel, html=True)
 			elif self._too_big_message == BIGMESSAGE_MULTIPLE:
 				while post:
-					sect = post[:self._maxLength]
-					post = post[self._maxLength:]
+					sect = post[:self._max_length]
+					post = post[self._max_length:]
 					self.send_post(sect, channel, html=True)
 			return
 		self._protocol.send_command("bm", "meme", str(channel)
@@ -725,7 +752,7 @@ class Group(Connection):
 
 	def get_more(self, amt=20):
 		'''Get more historical messages'''
-		self._protocol.send_command("get_more", str(amt), str(self._timesGot))
+		self._protocol.send_command("get_more", str(amt), str(self._history_count))
 
 	def flag(self, message):
 		'''
@@ -796,6 +823,10 @@ class Group(Connection):
 			return 1
 		return 0
 
+	def set_anon(self, id_number):
+		'''Set anon ID to 4 digit number `id_number`'''
+		self._aid = str(int(id_number) % 10000).zfill(4)
+
 class Privates(Connection):
 	'''
 	Class representing high-level private message communication and storage
@@ -864,7 +895,7 @@ class Manager:
 		#the event ancestor (a coroutine generator)
 		setattr(cls, eventname, partial(func, ancestor=ancestor))
 
-	async def join_group(self, group_name, port=443):
+	async def join_group(self, group_name, aid=None, port=443):
 		'''Join group `group_name`'''
 		group_name = group_name.lower()
 
@@ -876,6 +907,8 @@ class Manager:
 		if group_name != self.username and group_name not in self._groups:
 			try:
 				ret = GroupProtocol(group_name, self)
+				if aid is not None:
+					ret._storage.set_anon(aid)
 				await self.loop.create_connection(lambda: ret,
 					"s{}.chatango.com".format(server), port)
 				self._groups.append(ret._storage)
@@ -884,9 +917,9 @@ class Manager:
 				raise ConnectionError("could not connect to group server") \
 				from exc
 		elif group_name == self.username:
-			return self.join_pm()
+			return await self.join_pm()
 		else:
-			raise ValueError("Attempted to join group multiple times")
+			raise ValueError("attempted to join group multiple times")
 
 	async def leave_group(self, group_name):
 		'''Leave group `group_name`'''

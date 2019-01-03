@@ -1008,8 +1008,7 @@ async def start_client(loop, creds):
 		#skip if supplied
 		if creds[i] is not None:
 			continue
-		inp = client.InputOverlay(manager.screen, j
-			, password=(i == "passwd"))
+		inp = client.InputOverlay(manager.screen, j, password=(i == "passwd"))
 		inp.add()
 
 		try:
@@ -1038,6 +1037,7 @@ def main():
 
 	if not path.exists(HOME_PATH):
 		os.mkdir(HOME_PATH)
+	if not path.exists(CUSTOM_PATH):
 		os.mkdir(CUSTOM_PATH)
 		_write_init()
 
@@ -1062,11 +1062,15 @@ def main():
 		creds.no_rw("passwd")
 		# only username
 		if len(args.login) == 1:
-			creds["user"] = args.login[0]
+			creds["user"], creds["passwd"] = \
+				args.login[0], ""
 		# username and pasword
 		elif len(args.login) == 2:
 			creds["user"], creds["passwd"] = \
 				args.login
+		else:
+			creds["user"], creds["passwd"] = \
+				"", ""
 
 	if args.group is not None:
 		creds.clear_read("room")	#write only to room

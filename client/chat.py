@@ -562,6 +562,8 @@ class Messages:
 		Redo lines, if current lines does not represent the unfiltered messages
 		or if the width has changed
 		'''
+		if not self._all_messages:
+			return
 		#search for a fitting message to set as selector
 		start = self.selector or 1
 		i = self._all_messages[-start]
@@ -738,6 +740,7 @@ class ChatOverlay(TextOverlay):
 	def add(self):
 		'''Start timeloop and add overlay'''
 		super().add()
+		self.messages.redo_lines()
 		if self._push_times > 0:
 			self._push_task = self.parent.loop.create_task(self._time_loop())
 
@@ -750,7 +753,8 @@ class ChatOverlay(TextOverlay):
 			#finish running the task
 			self._push_times = 0
 			self._push_task.cancel()
-		self.parent.stop()
+		if self.index == 0:
+			self.parent.stop()
 		super().remove()
 
 	def resize(self, newx, newy):
