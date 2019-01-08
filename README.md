@@ -1,6 +1,6 @@
 Ultra-Meme Chatango CLIent
 ==========================
-Version 6.283185307
+Version 6.2831853071
 --------------------------
 A terminal application written in Python with curses input and ANSI escape-colored output.   
 Used to implement a client for chatango, an online chatroom.
@@ -52,8 +52,8 @@ Changing default openers:
 If you want to use some other program like ImageMagick to open images,
 you'll have to do the following in a custom file
 ```
-from lib import client.linkopen
-client.linkopen.IMG_ARGS = ["animate", ...]
+from client import linkopen
+linkopen.IMG_ARGS = ["animate", ...]
 ```
 Where ... represents more command line arguments. Similarly can be done 
 to replace mpv (using `MPV_ARGS`).
@@ -98,13 +98,17 @@ To preserve the value of BROWSER, write a line in ~/.bashrc like `export BROWSER
 There are few good image viewers in windows that support command line arguments,
 and fewer if any that attempt to resolve paths with HTTP. By default, the program will
 viewer will use the browser through `cygstart`. If you'd prefer to do the same with
-videos, change `client.linkopen.MPV_ARGS` (as shown above) to `[]`.
+videos, change `linkopen.MPV_ARGS` (as shown above) to `[]`.
 
 [This fork](https://gitgud.io/JJXB/chatango-client/tree/master) has more information
 
 
 Changelog
 =========================
+## v6.2831853071 *2019/1/8*
+* Continued refactoring so hard that I split the project in two
+	* Python interface to Chatango can now be found [here](https://gitgud.io/cubebert/pytango)
+
 ## v6.283185307 *2018/12/25*
 * Refactored a lot of code
 	* Using Python naming conventions

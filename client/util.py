@@ -50,14 +50,17 @@ class PromoteSet(list):
 		return "PromoteSet({})".format(super().__repr__())
 
 	def append(self, new):
-		'''Add an item to the list'''
-		if new in self:
-			return
-		super().append(new)
+		'''Add an item to the list, or already exists, promote'''
+		try:
+			self.promote(new)
+		except ValueError:
+			super().append(new)
+
 	def extend(self, iterable):
 		'''Append each element in iterable'''
 		super().extend(filter(lambda x: x not in self, iterable))
-	def promote(self, index):
+
+	def promote(self, value):
 		'''Promote value in list to the front (index 0)'''
 		if len(self) < 2:
 			return
@@ -65,12 +68,12 @@ class PromoteSet(list):
 		found = False
 		#look for the value
 		while i <= len(self):
-			if self[-i] == index:
+			if self[-i] == value:
 				found = True
 				break
 			i += 1
 		if not found:
-			raise KeyError(index)
+			raise ValueError("{} not in list".format(value))
 		if i == len(self):
 			return
 		#swap successive values

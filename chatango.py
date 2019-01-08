@@ -9,7 +9,7 @@ from os import path
 import asyncio
 import re
 
-import ch
+import pytango
 import client
 from client import linkopen
 
@@ -208,11 +208,13 @@ def get_client():
 	return None
 
 def parse_post(post, me, ishistory, alts=None):
-	'''Helper for parsing post.Post objects received from ch.py'''
+	'''Helper for parsing pytango.Post objects'''
 	#and is short-circuited
 	isreply = me is not None and ('@'+me.lower() in post.post.lower())
 	if alts is not None:
 		for alt in alts:
+			if not alt:
+				continue
 			isreply = isreply or ('@'+alt.lower() in post.post.lower())
 
 	#remove egregiously large amounts of newlines (more than 2)
@@ -247,11 +249,11 @@ def parse_post(post, me, ishistory, alts=None):
 	if rtl:
 		cooked += rtlbuffer
 	#format as ' user: message'; the space is for the channel
-	msg = " {}: {}".format(post.user, cooked)
+	msg = " {}: {}".format(str(post.user), cooked)
 	#extra arguments. use in colorizers
 	return (msg, post, isreply, ishistory)
 
-class ChatBot(ch.Manager):
+class ChatBot(pytango.Manager):
 	'''Bot for interacting with the chat'''
 	members = client.PromoteSet()
 	def __init__(self, parent, creds):
@@ -313,10 +315,10 @@ class ChatBot(ch.Manager):
 	def set_formatting(self):
 		group = self.joined_group
 
-		group.fColor = self.creds["formatting"][0]
-		group.nColor = self.creds["formatting"][1]
-		group.fFace = self.creds["formatting"][2]
-		group.fSize = self.creds["formatting"][3]
+		group.f_color = self.creds["formatting"][0]
+		group.n_color = self.creds["formatting"][1]
+		group.f_face = self.creds["formatting"][2]
+		group.f_size = self.creds["formatting"][3]
 
 	def send_post(self, text):
 		if self.joined_group is None:
@@ -327,7 +329,7 @@ class ChatBot(ch.Manager):
 		if self.PMs is None:
 			return
 		self.pm.send_post(user, text)
-		dummy = ch.Post((self.me, 0, 0, 0, 0, text), 2)
+		dummy = pytango.Post((self.me, 0, 0, 0, 0, text), 2)
 		self.loop.create_task(self.on_pm(None, dummy, False))
 
 	async def on_connect(self, group):
@@ -339,23 +341,22 @@ class ChatBot(ch.Manager):
 		self.overlay.parent.blurb.status(left="{}@{}".format(self.me, group.name))
 		#show last message time
 		self.overlay.msg_system("Connected to "+group.name)
-		self.overlay.msg_time(group.last, "Last message at ")
+		self.overlay.msg_time(group.last_message, "Last message at ")
 		self.overlay.msg_time()
 
 	async def on_pm_connect(self, _):
 		self.overlay.msg_system("Connected to PMs")
 
 	async def on_pm(self, _, post, historical):
-		msg = " {}: {}".format(post.user, post.post)
+		msg = " {}: {}".format(str(post.user), post.post)
 		self.overlay.msg_append(msg, post, True, historical)
 
 	async def on_message(self, _, post):
 		#double check for anons
-		user = post.user
-		if user[0] in '!#':
-			user = user[1:]
-		if user not in self.members:
-			self.members.append(user.lower())
+		username = str(post.user)
+		if username[0] in '!#':
+			username = username[1:]
+		self.members.append(username.lower())
 		self.overlay.parse_links(post.post)
 		msg = parse_post(post, self.me, False, alts=self.alts)
 		#						  isreply		ishistory
@@ -363,16 +364,14 @@ class ChatBot(ch.Manager):
 		not self.overlay.filter_message(*(msg[1:])):
 			self.overlay.parent.sound_bell()
 
-		self.members.promote(user.lower())
 		self.overlay.msg_append(*msg)
 
 	async def on_history_done(self, _, history):
 		for post in history:
-			user = post.user
-			if user[0] in '!#':
-				user = user[1:]
-			if user not in self.members:
-				self.members.append(user.lower())
+			username = str(post.user)
+			if username[0] in '!#':
+				username = username[1:]
+			self.members.append(username.lower())
 			self.overlay.parse_links(post.post, True)
 			msg = parse_post(post, self.me, True)
 			self.overlay.msg_prepend(*msg)
@@ -389,7 +388,7 @@ class ChatBot(ch.Manager):
 
 	async def on_participants(self, group):
 		'''On received joined members.'''
-		self.members.extend(group.userlist)
+		self.members.extend(map(lambda x: x.name.lower(), group.users))
 		self.overlay.recolor_lines()
 
 	async def on_usercount(self, group):
@@ -398,7 +397,7 @@ class ChatBot(ch.Manager):
 
 	async def on_member_join(self, _, user):
 		if user != "anon":
-			self.members.append(user)
+			self.members.append(str(user).lower())
 		#notifications
 		self.overlay.parent.blurb.push("%s has joined" % user)
 
@@ -412,6 +411,9 @@ class ChatBot(ch.Manager):
 		else:
 			self.overlay.msg_system(
 				"Connection error occurred. Try joining another room with ^T")
+
+	async def on_login_fail(self, _):
+		self.overlay.msg_system("Login as `%s` failed. Try again with ^p" % self.username)
 
 #List Overlay Extensions-------------------------------------------------------
 class LinkOverlay(client.VisualListOverlay):
@@ -493,7 +495,7 @@ def _(context, value):
 @Formatting.listel("enum")
 def fontface(context):
 	"Font Face"
-	tab = ch.FONT_FACES
+	tab = pytango.FONT_FACES
 	index = context.bot.creds["formatting"][2]
 	return tab, int(index)
 @fontface.setter
@@ -504,12 +506,12 @@ def _(context, value):
 @Formatting.listel("enum")
 def fontsize(context):
 	"Font Size"
-	tab = ch.FONT_SIZES
+	tab = pytango.FONT_SIZES
 	index = context.bot.creds["formatting"][3]
 	return list(map(str, tab)), tab.index(index)
 @fontsize.setter
 def _(context, value):
-	context.bot.creds["formatting"][3] = ch.FONT_SIZES[value]
+	context.bot.creds["formatting"][3] = pytango.FONT_SIZES[value]
 	context.bot.set_formatting()
 
 #Options InputMux---------------------------------------------------------------
@@ -622,8 +624,10 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "^f":			self._search_scroller
 			, "^n":			self._add_ignore
 			, "^t":			self.join_group
+			, "^p":			self.userpass
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
+			, "^d":			lambda: self.bot.joined_group.delete(self.messages.get_selected()[1][0]) if self.messages.get_selected() else None
 			, "mouse-left":		self._click_link
 			, "mouse-middle":	client.override(self._open_selected_links, 1)
 		})
@@ -686,12 +690,8 @@ class ChatangoOverlay(client.ChatOverlay):
 		'''List members of current group'''
 		if self.bot.joined_group is None:
 			return
-		users = self.bot.joined_group.userlist
-		disp_list = {i:users.count(i) for i in users}
-		disp_list = sorted([i.lower()+(j-1 and " (%d)"%j or "") \
-			for i, j in disp_list.items()])
-
-		box = client.ListOverlay(self.parent, disp_list)
+		box = client.ListOverlay(self.parent
+			, [format(user) for user in self.bot.joined_group.users])
 
 		@box.key_handler("enter")
 		def select(me):
@@ -727,7 +727,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _show_channels(self):
 		'''List channels'''
-		box = client.ListOverlay(self.parent, ch.CHANNEL_NAMES)
+		box = client.ListOverlay(self.parent, pytango.CHANNEL_NAMES)
 		box.it = self.bot.channel
 
 		@box.key_handler("enter")
@@ -882,29 +882,49 @@ class ChatangoOverlay(client.ChatOverlay):
 		inp.callback(self.bot.join_group)
 		inp.add()
 
+	def userpass(self):
+		'''Re-log in'''
+		async def callback():
+			data = [None, None]
+			for i, j in enumerate(("Username", "Password")):
+				over = client.InputOverlay(self.parent, j, i==1)
+				over.add()
+
+				try:
+					data[i] = await over.result
+				except asyncio.CancelledError:
+					self.blurb.push("Login aborted")
+					return
+			self.bot.username, self.bot.password = data
+			self.bot.creds["user"], self.bot.creds["passwd"] = data
+			await self.bot.reconnect()
+
+		self.parent.loop.create_task(callback())
+
 	def filter_message(self, post, isreply, ishistory):
-		user = post.user
-		if user[0] in "!#":
-			user = post.user[1:]
+		username = str(post.user)
+		if username[0] in "!#":
+			user = username[1:]
 		return any((
 				#filtered channels
 				  self.bot.filtered_channels[post.channel]
 				#ignored users
-				, user.lower() in self.bot.ignores
+				, username.lower() in self.bot.ignores
 		))
 
 	def colorize_message(self, msg, post, isreply, ishistory):
 		raw_white = client.raw_num(0)
 		#these names are important
-		name_color = self.parent.two56(post.nColor)
-		font_color = self.parent.two56(post.fColor)
+		name_color = self.parent.two56(post.n_color)
+		font_color = self.parent.two56(post.f_color)
 		visited_link = self.parent.two56.grayscale(12)
 
 		#use name colors?
+		username = str(post.user)
 		if not self.bot.options["htmlcolor"] \
-		or (self.bot.options["anoncolor"] and post.user[0] in "!#"):
-			name_color = get_color(post.user)
-			font_color = get_color(post.user)
+		or (self.bot.options["anoncolor"] and username[0] in "!#"):
+			name_color = get_color(username)
+			font_color = get_color(username)
 
 		#greentext, font color
 		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
@@ -922,7 +942,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		msg.insert_color(1, name_color)
 		#insurance the @s before a > are colored right
 		#		space/username/:(space)
-		msg_start = 1+len(post.user)+2
+		msg_start = 1+len(username)+2
 		if not msg.colored_at(msg_start):
 			msg.insert_color(msg_start, font_color)
 		if isreply:
@@ -1015,7 +1035,7 @@ async def start_client(loop, creds):
 			creds[i] = await inp.result
 		except asyncio.CancelledError:
 			manager.stop()
-			return
+			return manage_task, manager.exited
 
 	#options
 	if creds["options"]["ignoresave"]:
@@ -1077,13 +1097,9 @@ def main():
 		creds["room"] = args.group[0]
 
 	if args.getcreds:
-		creds.clear_read("user")	#write only to creds
-		creds.clear_read("passwd")
-		creds.clear_read("room")
-
-		creds["user"] = ""
-		creds["passwd"] = ""
-		creds["room"] = ""
+		creds.no_rw("user")	#write only to creds
+		creds.no_rw("passwd")
+		creds.no_rw("room")
 
 	creds.read_json(SAVE_PATH)
 
@@ -1101,10 +1117,8 @@ def main():
 	loop = asyncio.get_event_loop()
 	main_task = None
 	try:
-		start = loop.run_until_complete(start_client(loop, creds))
-		if start is None:
-			return
-		main_task, end_future = start
+		main_task, end_future = \
+			loop.run_until_complete(start_client(loop, creds))
 		if end_future:
 			loop.run_until_complete(end_future.wait())
 	except Exception:

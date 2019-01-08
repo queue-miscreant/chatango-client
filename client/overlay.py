@@ -775,7 +775,9 @@ class InputMux:
 					not self.get(self.parent.context))	#toggle
 
 			elif self._type == "button":
-				return self._set(self.parent.context)
+				ret = self._set(self.parent.context)
+				self.parent.warn_exit = False
+				return ret
 
 			self.parent.warn_exit = self.parent.has_button
 			if further_input:
