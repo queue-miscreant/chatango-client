@@ -210,12 +210,12 @@ def get_client():
 def parse_post(post, me, ishistory, alts=None):
 	'''Helper for parsing pytango.Post objects'''
 	#and is short-circuited
-	isreply = me is not None and ('@'+me.lower() in post.post.lower())
+	isreply = me is not None and (me in post.mentions)
 	if alts is not None:
 		for alt in alts:
 			if not alt:
 				continue
-			isreply = isreply or ('@'+alt.lower() in post.post.lower())
+			isreply = isreply or (alt in post.mentions)
 
 	#remove egregiously large amounts of newlines (more than 2)
 	#also edit sections with right to left override
