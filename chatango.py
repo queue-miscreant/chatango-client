@@ -700,7 +700,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		if self.bot.joined_group is None:
 			return
 		#a current version of the users. will be 1:1 with the listoverlay
-		users = list(self.bot.joined_group.users)
+		users = list(sorted(self.bot.joined_group.users, key=lambda x: x.name.lower()))
 		box = client.ListOverlay(self.parent, [format(user) for user in users])
 
 		@box.key_handler("enter")

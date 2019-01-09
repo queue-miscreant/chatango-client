@@ -220,6 +220,7 @@ class ListOverlay(OverlayBase, Box):
 		search.text.setnonscroll('/')
 		def callback(value):
 			self.search = str(value)
+			self.scroll_search(1)
 		search.callback(callback)
 		search.add()
 
@@ -227,7 +228,7 @@ class ListOverlay(OverlayBase, Box):
 		'''Scroll through search index'''
 		def goto(index):
 			value = self.list[index]
-			if isinstance(value, str):
+			if isinstance(value, str) and self.search is not None:
 				return value.lower().find(self.search.lower()) != -1
 			return False
 		self._goto_lambda(goto, direction, True)
