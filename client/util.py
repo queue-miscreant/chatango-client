@@ -51,6 +51,9 @@ class PromoteSet(list):
 
 	def append(self, new):
 		'''Add an item to the list, or already exists, promote'''
+		if len(self) < 2:
+			super().append(new)
+			return
 		try:
 			self.promote(new)
 		except ValueError:

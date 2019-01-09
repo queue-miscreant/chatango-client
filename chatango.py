@@ -363,10 +363,10 @@ class ChatBot(pytango.Manager):
 
 	async def on_message(self, _, post):
 		#double check for anons
-		username = str(post.user)
+		username = str(post.user).lower()
 		if username[0] in '!#':
 			username = username[1:]
-		self.members.append(username.lower())
+		self.members.append(username)
 		self.overlay.parse_links(post.post)
 		msg = parse_post(post, self.me, False, alts=self.alts)
 		#						  isreply		ishistory
@@ -378,10 +378,10 @@ class ChatBot(pytango.Manager):
 
 	async def on_history_done(self, _, history):
 		for post in history:
-			username = str(post.user)
+			username = str(post.user).lower()
 			if username[0] in '!#':
 				username = username[1:]
-			self.members.append(username.lower())
+			self.members.append(username)
 			self.overlay.parse_links(post.post, True)
 			msg = parse_post(post, self.me, True)
 			self.overlay.msg_prepend(*msg)
