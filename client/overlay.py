@@ -345,7 +345,7 @@ class ColorOverlay(ListOverlay, Box):
 		'''Open the sliders or run the callback with the selected color'''
 		if self.it == 12:
 			return self.open_sliders()
-		return self._callback(self.get_color())
+		return self._callback(self.color)
 
 	def callback(self, callback):
 		'''
