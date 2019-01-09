@@ -257,12 +257,16 @@ class ChatBot(pytango.Manager):
 	'''Bot for interacting with the chat'''
 	members = client.PromoteSet()
 	def __init__(self, parent, creds):
-		super().__init__(creds["user"], creds["passwd"]
+		username = creds["user"]
+		self._force_aid = None
+		if username.find("anon") == 0 and username[4:].isdigit() and len(username) == 8:
+			self._force_aid = int(username[4:])
+			username = ""
+		super().__init__(username, creds["passwd"]
 			, loop=parent.loop)
 
 		self.creds = creds
 		#default to the given user name
-		self.me = creds["user"]
 		self.alts = []
 		#list references
 		self.ignores = set(creds["ignores"])
@@ -283,6 +287,15 @@ class ChatBot(pytango.Manager):
 		client.Tokenize('@', self.members)
 		self.loop.create_task(self.connect())
 
+	@property
+	def me(self):
+		if self.joined_group is not None:
+			uname = self.joined_group.username
+			if uname[0] in "#!":
+				uname = uname[1:]
+			return uname
+		return None
+
 	async def connect(self):
 		if self.connecting:
 			return
@@ -302,7 +315,7 @@ class ChatBot(pytango.Manager):
 		self.creds["room"] = group_name
 		self.overlay.clear()
 		try:
-			await super().join_group(group_name)
+			await super().join_group(group_name, aid=self._force_aid)
 		except (ConnectionError, ValueError):
 			self.overlay.msg_system("Failed to connect to room '%s'" %
 				self.creds["room"])
@@ -335,9 +348,6 @@ class ChatBot(pytango.Manager):
 	async def on_connect(self, group):
 		self.joined_group = group
 		self.set_formatting()
-		self.me = group.username
-		if self.me[0] in "!#":
-			self.me = self.me[1:]
 		self.overlay.parent.blurb.status(left="{}@{}".format(self.me, group.name))
 		#show last message time
 		self.overlay.msg_system("Connected to "+group.name)
@@ -627,7 +637,6 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "^p":			self.userpass
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
-			, "^d":			lambda: self.bot.joined_group.delete(self.messages.get_selected()[1][0]) if self.messages.get_selected() else None
 			, "mouse-left":		self._click_link
 			, "mouse-middle":	client.override(self._open_selected_links, 1)
 		})
@@ -690,34 +699,39 @@ class ChatangoOverlay(client.ChatOverlay):
 		'''List members of current group'''
 		if self.bot.joined_group is None:
 			return
-		box = client.ListOverlay(self.parent
-			, [format(user) for user in self.bot.joined_group.users])
+		#a current version of the users. will be 1:1 with the listoverlay
+		users = list(self.bot.joined_group.users)
+		box = client.ListOverlay(self.parent, [format(user) for user in users])
 
 		@box.key_handler("enter")
 		def select(me):
 			'''Reply to user'''
-			current = me.list[me.it]
-			current = current.split(' ')[0]
+			current = users[me.it].name
 			if current[0] in "!#":
 				current = current[1:]
 			#reply
 			self.text.append("@%s " % current)
 			return -1
 
+		@box.key_handler("a")
+		def get_avatar(me):
+			'''Get avatar'''
+			current = users[me.it]
+			self.parent.loop.create_task(
+				linkopen.images(self.parent, current.avatar, "avatar"))
+
 		@box.key_handler("tab")
 		def tab(me):
 			'''Ignore/unignore user'''
-			current = me.list[me.it]
-			current = current.split(' ')[0]
+			current = users[me.it].name.lower()
 			self.bot.ignores.symmetric_difference_update((current,))
 			self.redo_lines()
 
 		@box.line_drawer
 		def draw_ignored(me, string, i):
-			selected = me.list[i]
-			if selected.split(' ')[0] not in self.bot.ignores:
-				return
-			string.add_indicator('i', 3)
+			selected = users[i].name.lower()
+			if selected in self.bot.ignores:
+				string.add_indicator('i', 3)
 
 		box.add()
 

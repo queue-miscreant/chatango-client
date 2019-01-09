@@ -33,6 +33,7 @@ class ListOverlay(OverlayBase, Box):
 			self.list = out_list
 		self._draw_other = None
 		self._modes = [""] if modes is None else modes
+		self._search = None
 
 		up =	staticize(self.increment, -1,
 			doc="Up one list item")
@@ -73,6 +74,10 @@ class ListOverlay(OverlayBase, Box):
 			, 'H':		self.open_help
 			, 'g':		staticize(self.goto_edge, 0, doc="Go to list beginning")
 			, 'G':		staticize(self.goto_edge, 1, doc="Go to list end")
+			, '/':		self.open_search
+			, "^f":		self.open_search
+			, "n":		staticize(self.scroll_search, 1)
+			, "N":		staticize(self.scroll_search, 0)
 			, 'q':		quitlambda
 			, "down":	down
 			, "up":		up
@@ -85,13 +90,28 @@ class ListOverlay(OverlayBase, Box):
 			, "mouse-wheel-down":	down
 		})
 
-	@property
-	def it(self):
-		'''Currently selected list index'''
-		return self._it
+	it = property(lambda self: self._it
+		, doc="Currently selected list index")
 	@it.setter
 	def it(self, dest):
 		self._do_move(dest)
+
+	search = property(lambda self: self._search
+		, doc="Current string to search with nN")
+	@search.setter
+	def search(self, new):
+		print("setting blurb")
+		self.parent.blurb.release()
+		if not new:
+			new = None
+		else:
+			self.parent.blurb.hold("Searching '{}'".format(new))
+		self._search = new
+
+	def remove(self):
+		super().remove()
+		if self._search is not None:
+			self.parent.blurb.release()
 
 	def __call__(self, lines):
 		'''
@@ -163,17 +183,25 @@ class ListOverlay(OverlayBase, Box):
 		'''Move to the beginning or end of the list'''
 		self.it = int(is_end and (len(self.list)-1))
 
-	def _goto_lambda(self, func, direction):
+	def _goto_lambda(self, func, direction, loop=False):
 		'''
 		Backend for goto_lambda.
 		`direction` = 0 for closer to the top, 1 for closer to the bottom.
 		'''
-		for i in range(len(self.list)-self.it-1 if direction else self.it):
-			j = (self.it+i+1) if direction else (self.it-i-1)
-			if func(j):
-				self.it = j
+		start = self.it
+		for i in range(len(self.list)-start-1 if direction else start):
+			i = (start+i+1) if direction else (start-i-1)
+			if func(i):
+				self.it = i
 				return
-		self.it = int(direction and (len(self.list)-1))
+		if loop:
+			for i in range(start if direction else len(self.list)-start-1):
+				i = i if direction else len(self.list)-i-1
+				if func(i):
+					self.it = i
+					return
+		else:
+			self.it = int(direction and (len(self.list)-1))
 
 	def goto_lambda(self, func):
 		'''
@@ -182,10 +210,28 @@ class ListOverlay(OverlayBase, Box):
 		'''
 		return tuple(staticize(self._goto_lambda, func, i) for i in range(2))
 
-	def regen_list(self, _):
+	def regen_list(self):
 		'''Regenerate list based on raw list reference'''
 		if self.raw:
 			self.list = self._builder(self.raw)
+
+	def open_search(self):
+		'''Open a search window'''
+		search = InputOverlay(self.parent)
+		search.text.setnonscroll('/')
+		def callback(value):
+			self.search = str(value)
+		search.callback(callback)
+		search.add()
+
+	def scroll_search(self, direction):
+		'''Scroll through search index'''
+		def goto(index):
+			value = self.list[index]
+			if isinstance(value, str):
+				return value.lower().find(self.search.lower()) != -1
+			return False
+		self._goto_lambda(goto, direction, True)
 
 class VisualListOverlay(ListOverlay, Box):
 	'''ListOverlay with visual mode like in vim: can select multiple rows'''
@@ -465,7 +511,7 @@ class InputOverlay(TextOverlay, Box):
 	Can either use `await this.result` or set a callback with callback
 	'''
 	replace = False
-	def __init__(self, parent, prompt, password=False, default=""):
+	def __init__(self, parent, prompt=None, password=False, default=""):
 		super().__init__(parent)
 		self._future = parent.loop.create_future()
 		self._callback = None

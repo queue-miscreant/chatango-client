@@ -622,7 +622,8 @@ class Blurb:
 	def push(self, blurb=""):
 		'''Pushes blurb to the queue and timestamps the transaction.'''
 		ret = self._push(blurb, self.parent.loop.time())
-		self.parent.write_status(ret, 2)
+		if ret is not None:
+			self.parent.write_status(ret, 2)
 
 	def hold(self, blurb):
 		'''Holds blurb, preempting all `push`s until `release`'''
