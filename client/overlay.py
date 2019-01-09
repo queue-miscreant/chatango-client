@@ -100,7 +100,6 @@ class ListOverlay(OverlayBase, Box):
 		, doc="Current string to search with nN")
 	@search.setter
 	def search(self, new):
-		print("setting blurb")
 		self.parent.blurb.release()
 		if not new:
 			new = None
