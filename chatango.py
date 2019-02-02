@@ -8,6 +8,7 @@ import json
 from os import path
 import asyncio
 import re
+from collections import deque
 
 import pytango
 import client
@@ -253,17 +254,56 @@ def parse_post(post, me, ishistory, alts=None):
 	#extra arguments. use in colorizers
 	return (msg, post, isreply, ishistory)
 
+class DequeSet(deque):
+	'''Set, but whose elements can be moved to the front or end like a deque'''
+	def __init__(self, iterable=None):
+		if iterable is not None:
+			super().__init__(iterable)
+		else:
+			super().__init__()
+
+	def __repr__(self):
+		return "DequeSet({})".format(super().__repr__())
+
+	def appendleft(self, new):
+		'''Add an item to the left of the deque'''
+		if new not in self:
+			super().appendleft(new)
+
+	def appendleft_promote(self, new):
+		'''Add an item to the deque, or already exists, pop and appendleft'''
+		try:
+			self.remove(new)
+		except ValueError:
+			pass
+		super().appendleft(new)
+
+	def append(self, new):
+		'''Add an item to the deque'''
+		if new not in self:
+			super().append(new)
+
+	def append_promote(self, new):
+		'''Add an item to the deque, or already exists, pop and append'''
+		try:
+			self.remove(new)
+		except ValueError:
+			pass
+		super().append(new)
+
+	def extend(self, iterable):
+		'''Append each element in iterable'''
+		super().extend(filter(lambda x: x not in self, iterable))
+
+	def extendleft(self, iterable):
+		'''Append each element in iterable'''
+		super().extendleft(filter(lambda x: x not in self, iterable))
+
 class ChatBot(pytango.Manager):
 	'''Bot for interacting with the chat'''
-	members = client.PromoteSet()
+	members = DequeSet()
 	def __init__(self, parent, creds):
-		username = creds["user"]
-		self._force_aid = None
-		if username.find("anon") == 0 and username[4:].isdigit() and len(username) == 8:
-			self._force_aid = int(username[4:])
-			username = ""
-		super().__init__(username, creds["passwd"]
-			, loop=parent.loop)
+		super().__init__(creds["user"], creds["passwd"], loop=parent.loop)
 
 		self.creds = creds
 		#default to the given user name
@@ -315,10 +355,10 @@ class ChatBot(pytango.Manager):
 		self.creds["room"] = group_name
 		self.overlay.clear()
 		try:
-			await super().join_group(group_name, aid=self._force_aid)
+			await super().join_group(group_name)
 		except (ConnectionError, ValueError):
-			self.overlay.msg_system("Failed to connect to room '%s'" %
-				self.creds["room"])
+			self.overlay.msg_system("Failed to connect to room '{}'".format(
+				self.creds["room"]))
 
 	async def graceful_exit(self):
 		#this is a set and not a list reference, so we update the list now
@@ -339,16 +379,16 @@ class ChatBot(pytango.Manager):
 		self.joined_group.send_post(text, self.channel)
 
 	def send_pm(self, user, text):
-		if self.PMs is None:
+		if self.privates is None:
 			return
 		self.pm.send_post(user, text)
-		dummy = pytango.Post((self.me, 0, 0, 0, 0, text), 2)
+		dummy = pytango.Post.private(self.privates, (self.me, 0, 0, 0, 0, text))
 		self.loop.create_task(self.on_pm(None, dummy, False))
 
 	async def on_connect(self, group):
 		self.joined_group = group
 		self.set_formatting()
-		self.overlay.parent.blurb.status(left="{}@{}".format(self.me, group.name))
+		self.overlay.left = "{}@{}".format(group.username, group.name)
 		#show last message time
 		self.overlay.msg_system("Connected to "+group.name)
 		self.overlay.msg_time(group.last_message, "Last message at ")
@@ -366,7 +406,7 @@ class ChatBot(pytango.Manager):
 		username = str(post.user).lower()
 		if username[0] in '!#':
 			username = username[1:]
-		self.members.append(username)
+		self.members.appendleft_promote(username)
 		self.overlay.parse_links(post.post)
 		msg = parse_post(post, self.me, False, alts=self.alts)
 		#						  isreply		ishistory
@@ -394,7 +434,7 @@ class ChatBot(pytango.Manager):
 		await self.on_flood_ban_repeat(group, secs)
 
 	async def on_flood_ban_repeat(self, _, secs):
-		self.overlay.msg_system("You are banned for %d seconds" % secs)
+		self.overlay.msg_system("You are banned for {} seconds".format(secs))
 
 	async def on_participants(self, group):
 		'''On received joined members.'''
@@ -403,16 +443,16 @@ class ChatBot(pytango.Manager):
 
 	async def on_usercount(self, group):
 		'''On user count changed.'''
-		self.overlay.parent.blurb.status(right=str(group.usercount))
+		self.overlay.right = str(group.usercount)
 
 	async def on_member_join(self, _, user):
 		if user != "anon":
-			self.members.append(str(user).lower())
+			self.members.appendleft_promote(str(user).lower())
 		#notifications
-		self.overlay.parent.blurb.push("%s has joined" % user)
+		self.overlay.parent.blurb.push("{} has joined".format(str(user)))
 
 	async def on_member_leave(self, _, user):
-		self.overlay.parent.blurb.push("%s has left" % user)
+		self.overlay.parent.blurb.push("{} has left".format(str(user)))
 
 	async def on_connection_error(self, _, error):
 		if isinstance(error, (ConnectionResetError, type(None))):
@@ -423,7 +463,8 @@ class ChatBot(pytango.Manager):
 				"Connection error occurred. Try joining another room with ^T")
 
 	async def on_login_fail(self, _):
-		self.overlay.msg_system("Login as `%s` failed. Try again with ^p" % self.username)
+		self.overlay.msg_system("Login as '{}' failed. "\
+			"Try again with ^p".format(self.username))
 
 #List Overlay Extensions-------------------------------------------------------
 class LinkOverlay(client.VisualListOverlay):
@@ -637,6 +678,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "^p":			self.userpass
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
+			, "^e":			lambda: print(self.bot.joined_group.banned_words)
 			, "mouse-left":		self._click_link
 			, "mouse-middle":	client.override(self._open_selected_links, 1)
 		})
@@ -717,8 +759,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		def get_avatar(me):
 			'''Get avatar'''
 			current = users[me.it]
-			self.parent.loop.create_task(
-				linkopen.images(self.parent, current.avatar, "avatar"))
+			linkopen.open_link(self.parent, current.avatar)
 
 		@box.key_handler("tab")
 		def tab(me):
@@ -781,7 +822,7 @@ class ChatangoOverlay(client.ChatOverlay):
 	def _search_scroller(self):
 		'''Find message with some text'''
 		#minimalism
-		box = client.InputOverlay(self.parent, None)
+		box = client.InputOverlay(self.parent)
 		box.text.setnonscroll("^f: ")
 
 		@box.callback

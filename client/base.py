@@ -67,9 +67,9 @@ for printing_char in range(32, 127):
 #getch tends to hang on nodelay if PRESSED buttons are part of the mask,
 #but RELEASED aren't; wheel up/down doesn't count
 MOUSE_BUTTONS = {
-	  "left":		curses.BUTTON1_CLICKED
-	, "middle":		curses.BUTTON2_CLICKED
-	, "right":		curses.BUTTON3_CLICKED
+	  "left":		curses.BUTTON1_RELEASED
+	, "middle":		curses.BUTTON2_RELEASED
+	, "right":		curses.BUTTON3_RELEASED
 	, "wheel-up":	curses.BUTTON4_PRESSED
 	, "wheel-down":	2**21
 }
@@ -209,6 +209,8 @@ class OverlayBase:
 		self.parent = parent		#parent
 
 		self.index = None			#index in the stack
+		self._left = None			#text to draw in reverse video
+		self._right = None			#same but on the right side of the screen
 		self._keys = {
 			  3:	staticize(self.parent.stop, doc="Exit client")	#^c
 			, 12:	parent.redraw_all								#^l
@@ -224,6 +226,18 @@ class OverlayBase:
 
 	width = property(lambda self: self.parent.width)
 	height = property(lambda self: self.parent.height)
+	left = property(lambda self: self._left)
+	right = property(lambda self: self._right)
+
+	@left.setter
+	def left(self, new):
+		self._left = new
+		self.parent.update_status()
+
+	@right.setter
+	def right(self, new):
+		self._right = new
+		self.parent.update_status()
 
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
@@ -634,21 +648,6 @@ class Blurb:
 		self.last = self.parent.loop.time()
 		self.parent.write_status(self._push("", self.last), 2)
 
-	def status(self, left=None, right=None):
-		'''Update screen bottom'''
-		temp_left = str(left or self.left)
-		temp_right = str(right or self.right)
-		room = self.parent.width - collen(temp_left) - collen(temp_right)
-		#in the case of an update not invoked by internals
-		if room < 1 and (right or left):
-			raise SizeException("updateinfo failed: right and left overlap")
-
-		self.left = temp_left
-		self.right = temp_right
-
-		self.parent.write_status("\x1b[7m" + temp_left + (" "*room) + \
-			temp_right + "\x1b[m", 3)
-
 	async def _refresh(self, time):
 		'''Helper coroutine to start_refresh'''
 		while self._erase:
@@ -775,22 +774,23 @@ class Screen:
 			for i in self._ins:
 				i.resize(newx, newy)
 				await asyncio.sleep(self._INTERLEAVE_DELAY)
+			self.width, self.height = newx, newy
+			self._candisplay = 1
+			self.update_input()
+			self.update_status()
+			await self.display()
 		except SizeException:
 			self.width, self.height = newx, newy
 			self._candisplay = 0
-			return
-		self.width, self.height = newx, newy
-		self._candisplay = 1
-		self.update_input()
-		self.blurb.status()
-		await self.display()
 
 	async def display(self):
 		'''
 		Draws the highest overlays (with stack indices greater than
 		_last_replace)
 		'''
-		if not (self.active and self._candisplay):
+		if not (self.active and self._candisplay and self.height > 0):
+			if self.active:
+				self._displaybuffer.write("RESIZE TERMINAL")
 			return
 		#justify number of lines
 		lines = ["" for i in range(self.height)]
@@ -824,6 +824,22 @@ class Screen:
 		self._displaybuffer.write(self._SINGLE_LINE %
 			(self.height+1, string))
 
+	def update_status(self):
+		'''Look for the highest blurb for which status has been set'''
+		room = self.width
+		left = ""
+		right = ""
+		for i in reversed(self._ins):
+			if i.left is not None or i.right is not None:
+				left = i.left or left
+				right = i.right or right
+				room -= collen(left) + collen(right)
+				if room < 1:
+					raise SizeException()
+				break
+		self.write_status("\x1b[7m{}{}{}\x1b[m".format(left,
+			' '*room, right), 3)
+
 	def write_status(self, string, height):
 		if not (self.active and self._candisplay):
 			return
@@ -833,9 +849,9 @@ class Screen:
 	def redraw_all(self):
 		'''Force redraw'''
 		self.schedule_display()
-		self.blurb.status()
 		self.blurb.push()
 		self.update_input()
+		self.update_status()
 
 	#Overlay Backends-----------------------------------------------------------
 	def add_overlay(self, new):
@@ -851,6 +867,7 @@ class Screen:
 			self.update_input()
 		#display is not strictly called beforehand, so better safe than sorry
 		self.schedule_display()
+		self.update_status()
 
 	def pop_overlay(self, overlay):
 		'''Pop overlay backend. Use overlay.remove() instead.'''
@@ -869,6 +886,7 @@ class Screen:
 			self._last_text = -1
 		overlay.index = None
 		self.schedule_display()
+		self.update_status()
 
 	#Overlay Frontends----------------------------------------------------------
 	def get_overlay(self, index):

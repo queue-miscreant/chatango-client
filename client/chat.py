@@ -230,11 +230,11 @@ class Messages:
 		[0]: the message (in a coloring object); [1] an argument tuple, which
 		is None for system messages; [2] the number of lines it occupies;
 		[3]: its messageID
-		returns False on not selecting
+		returns None on not selecting
 		'''
 		if self.selector:
 			return self._all_messages[-self.selector]
-		return False
+		return None
 
 	def display(self, lines):
 		if self.msg_id == 0:
@@ -518,6 +518,8 @@ class Messages:
 		Directly set selector and start_height, then redo_lines.
 		Redraw necessary afterward.
 		'''
+		if not self._all_messages:
+			return
 		start = index
 		i = self._all_messages[-start]
 		while start < len(self._all_messages) and not i[2]:
