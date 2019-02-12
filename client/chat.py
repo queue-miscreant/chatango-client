@@ -596,7 +596,7 @@ class Messages:
 		self.inner_height = max(0, i[2] - height)
 		#distance only if we're still selecting
 		self.distance = min(height, self.selector and i[2])
-		self._linesup = self.inner_height
+		self.linesup = self.inner_height
 
 		msgno, lineno = start+1, self.distance
 
