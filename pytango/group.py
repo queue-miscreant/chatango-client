@@ -864,7 +864,7 @@ class ModFlags(base.Flags):
 		, "Add and remove mods"			#2
 		, None							#4
 		, "Set banned content"			#8
-		, "Set chat	restrictions"		#16
+		, "Set chat restrictions"		#16
 		, "Edit group (title, MOTD, delete all)"
 		, "Delete messages"				#64
 		, "Ban/unban users"				#128

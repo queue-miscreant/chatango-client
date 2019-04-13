@@ -620,7 +620,7 @@ class DisplayOverlay(OverlayBase, Box):
 	def resize(self, newx, newy):
 		'''Resize message'''
 		self._formatted = [j for i in self._rawlist
-			for j in i.breaklines(self.width-2, outdent=self._outdent)]
+			for j in i.breaklines(newx-2, outdent=self._outdent)]
 		# if bigger than the box holding it, stop drawing the overlay behind it
 		self.replace = len(self._formatted) > self.height-2
 

@@ -572,6 +572,9 @@ class Scrollable:
 
 	def __format__(self, *args):
 		'''Display text contained with cursor'''
+                #sometimes our self._disp gets off
+		if self._disp > len(self._str):
+		    self._disp = len(self._str)
 		#iteration variables
 		start, end, width = self._disp, self._disp, self._nonscroll_width
 		#handle the first test already, +1 for truth values
