@@ -2,7 +2,7 @@
 #util.py
 '''
 Module for miscellaneous classes that are not inherently overlay or
-display oriented. Contains classes like LazyIterList and PromoteSet
+display oriented. Contains classes like LazyIterList and Tokenize
 '''
 
 import os
@@ -39,53 +39,6 @@ def tab_file(patharg):
 	return suggestions, numadded-len(patharg)
 
 #LISTLIKE CLASSES---------------------------------------------------------------
-class PromoteSet(list):
-	'''Set with ordering like a list, whose elements can be promoted to the front'''
-	def __init__(self, iterable=None):
-		super().__init__()
-		if iterable is not None:
-			for i in iterable:
-				self.append(i)
-	def __repr__(self):
-		return "PromoteSet({})".format(super().__repr__())
-
-	def append(self, new):
-		'''Add an item to the list, or already exists, promote'''
-		if len(self) < 2:
-			super().append(new)
-			return
-		try:
-			self.promote(new)
-		except ValueError:
-			super().append(new)
-
-	def extend(self, iterable):
-		'''Append each element in iterable'''
-		super().extend(filter(lambda x: x not in self, iterable))
-
-	def promote(self, value):
-		'''Promote value in list to the front (index 0)'''
-		if len(self) < 2:
-			return
-		i = 1
-		found = False
-		#look for the value
-		while i <= len(self):
-			if self[-i] == value:
-				found = True
-				break
-			i += 1
-		if not found:
-			raise ValueError("{} not in list".format(value))
-		if i == len(self):
-			return
-		#swap successive values
-		while i < len(self):
-			temp = self[-i-1]
-			self[-i-1] = self[-i]
-			self[-i] = temp
-			i += 1
-
 class LazyIterList(list):
 	'''
 	List-like class that builds itself on top of an iterator and has memory
@@ -143,7 +96,7 @@ class History:
 		self.bottom = None
 
 	def __repr__(self):
-		return "History(%s)" % repr(self.history)
+		return "History({})".format(repr(self.history))
 
 	def nexthist(self, replace=""):
 		'''Next historical entry (less recent)'''
@@ -194,7 +147,7 @@ class Tokenize:
 			self.complete = lambda x: Tokenize.complete(x, self)
 			return
 		if new_prefix is None or new_suggest is None:
-			raise TypeError("Invalid number of arguments for Tokenize. "+\
+			raise TypeError("Invalid number of arguments for Tokenize. "\
 				"Must be 0 args for instance, or 2 args for global class")
 		self.prefixes.append(new_prefix)
 		self.suggestions.append(new_suggest)

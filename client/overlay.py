@@ -18,7 +18,7 @@ __all__ = [
 
 #DISPLAY CLASSES----------------------------------------------------------
 class ListOverlay(OverlayBase, Box):
-	'''Display a list of objects, optionally drawing something additional'''
+	'''Display a list of strings, optionally drawing something additional'''
 	replace = True
 	def __init__(self, parent, out_list, modes=None):
 		super().__init__(parent)
@@ -79,6 +79,7 @@ class ListOverlay(OverlayBase, Box):
 			, "n":		staticize(self.scroll_search, 1)
 			, "N":		staticize(self.scroll_search, 0)
 			, 'q':		quitlambda
+			, "backspace":	self.clear_search
 			, "down":	down
 			, "up":		up
 			, "right":	right
@@ -100,17 +101,17 @@ class ListOverlay(OverlayBase, Box):
 		, doc="Current string to search with nN")
 	@search.setter
 	def search(self, new):
-		self.parent.blurb.release()
-		if not new:
-			new = None
+		status = ""
+		if new:
+			status = '/' + new
 		else:
-			self.parent.blurb.hold("Searching '{}'".format(new))
+			new = None
+		self.parent.write_status(status, 1)
 		self._search = new
 
 	def remove(self):
 		super().remove()
-		if self._search is not None:
-			self.parent.blurb.release()
+		self.parent.update_input()
 
 	def __call__(self, lines):
 		'''
@@ -223,6 +224,10 @@ class ListOverlay(OverlayBase, Box):
 			self.scroll_search(1)
 		search.callback(callback)
 		search.add()
+
+	def clear_search(self):
+		'''Clear search'''
+		self.search = ""
 
 	def scroll_search(self, direction):
 		'''Scroll through search index'''
@@ -375,6 +380,8 @@ class ColorOverlay(ListOverlay, Box):
 	def color(self):
 		'''Retrieve color as RGB 3-tuple'''
 		which = self._spectrum[self.mode][self.it]
+		if self.mode == 3:
+			return (255 * which/ 12 for i in range(3))
 		return tuple(int(i*255/5) for i in which)
 
 	def open_sliders(self):
@@ -503,7 +510,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 	@staticmethod
 	def to_hex(color):
 		'''Get color in hex form'''
-		return ''.join("%02X" % i for i in color)
+		return ''.join("{:02X}".format(int(i)) for i in color)
 
 class InputOverlay(TextOverlay, Box):
 	'''
@@ -540,6 +547,8 @@ class InputOverlay(TextOverlay, Box):
 			return
 		start = self.height//2 - len(self._prompts)//2
 		end = self.height//2 + len(self._prompts)
+		if start+len(self._prompts) > self.height:
+			lines[start] = self._prompts[0][:-1] + '…'
 		lines[start] = self.box_top()
 		for i, j in enumerate(self._prompts):
 			lines[start+i+1] = self.box_part(j)
@@ -736,8 +745,8 @@ class InputMux:
 		def __init__(self, parent, data_type, func):
 			self.name = func.__name__
 			if parent.indices.get(self.name):
-				raise TypeError("Cannot implement element '%s' more " + \
-					"than once" % self.name)
+				raise TypeError("Cannot implement element {} more " \
+					"than once".format(repr(self.name)))
 			#bind parent names
 			self.parent = parent
 			self.parent.indices[self.name] = self
@@ -761,7 +770,7 @@ class InputMux:
 					self.parent.has_button = True
 				return
 			else:	#invalid type
-				raise TypeError("input type '%s' not recognized" % self._type)
+				raise TypeError("input type {} not recognized".format(repr(data_type)))
 
 			self.get = func
 			self._set = None

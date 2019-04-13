@@ -11,22 +11,7 @@ POST_TAG_RE = re.compile("(<n([a-fA-F0-9]{1,6})\\/>)?" \
 	"(<f x([0-9a-fA-F]{2,8})=\"([0-9a-zA-Z]*)\">)?")
 XML_TAG_RE = re.compile("(</?(.*?)/?>)")
 THUMBNAIL_FIX_RE = re.compile(r"(https?://ust\.chatango\.com/.+?/)t(_\d+.\w+)")
-
-#enumerable constants
-FONT_FACES = [
-	  "Arial"
-	, "Comic Sans"
-	, "Georgia"
-	, "Handwriting"
-	, "Impact"
-	, "Palatino"
-	, "Papyrus"
-	, "Times New Roman"
-	, "Typewriter"
-]
-#limited sizes available for non-premium accounts
-FONT_SIZES = [9, 10, 11, 12, 13, 14]
-CHANNEL_NAMES = ["None", "Red", "Blue", "Both"]
+REPLY_RE = re.compile(r"@(\w+?)\b")
 
 HTML_CODES = [
 	  ("&#39;", "'")
@@ -38,7 +23,8 @@ HTML_CODES = [
 ]
 
 def parse_formatting(raw):
-	n_color, f_color, f_size, f_face = '', '', 11, 0
+	'''Parse the strange proprietary HTML formatting tags that chatango has'''
+	n_color, f_color, f_size, f_face = '', '', 11, base.FONT_FACES[0]
 	tag = POST_TAG_RE.search(raw)
 	if tag:
 		n_color = tag.group(2) or ''
@@ -47,13 +33,15 @@ def parse_formatting(raw):
 			if len(size_color) % 3 == 2:	#color and font size
 				f_size = int(size_color[:2])
 				f_color = size_color[2:]
-			else:
+			else:							#no font size
 				f_color = size_color
-				f_size = 11
-		else:
-			f_color = ''
-			f_size = 11
-		f_face = int(tag.group(5) or 0)
+		f_face = tag.group(5)
+		try:
+			f_face = base.FONT_FACES[int(f_face)]
+		except (TypeError, IndexError): #f_face is None or invalid index
+			f_face = base.FONT_FACES[0]
+		except ValueError: #conversion failed, literal font name
+			pass
 	return n_color, f_color, f_size, f_face
 
 def format_raw(raw):
@@ -95,10 +83,19 @@ class Post:
 		self.group = group
 		self.__dict__.update(kwargs)
 
+	def __eq__(self, other):
+		if not hasattr(self, "unid"):
+			return False
+		if isinstance(other, type(self)):
+			return self.unid == other.unid
+		return self.unid == other
+
 	@classmethod
 	def _base(cls, group: base.Connection, raw):
 		n_color, f_color, f_size, f_face = \
 			parse_formatting(raw[9])
+
+		message = ':'.join(raw[9:])
 
 		user = raw[1]
 		uid = int(raw[3]) #user session id
@@ -114,6 +111,15 @@ class Post:
 				if uid in group_user.sessions:
 					user = user
 					break
+
+		mentions = set()
+		for mention in REPLY_RE.findall(message):
+			for group_user in group._users:
+				if group_user == mention:
+					mention = group_user
+					break
+			mentions.add(mention)
+
 		channels_and_badge = int(raw[7])
 		#magic that turns no badge into 0, mod badge into 1, and staff badge into 2
 		badge = (channels_and_badge >> 5) & 3
@@ -121,9 +127,9 @@ class Post:
 		channel = (channels_and_badge >> 8) & 31
 		channel = channel&1|((channel&8)>>2)|((channel&16)>>3)
 
-		return cls(float(raw[0]), ':'.join(raw[9:]), group, user=user
+		return cls(float(raw[0]), message, group, user=user
 			, mod_id=raw[4], unid=None, pnum=None, ip=raw[6]
-			, channel=channel, badge=badge
+			, mentions=mentions, channel=channel, badge=badge
 			, n_color=n_color, f_color=f_color, f_size=f_size, f_face=f_face)
 
 	@classmethod

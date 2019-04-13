@@ -19,21 +19,31 @@ def _connection_lost_handler(loop, context):
 	else:
 		loop.default_exception_handler(context)
 
+def get_anon(name):
+	if name.find("anon") == 0 and len(name) == 8 and name[4:].isdigit():
+		return int(name[4:])
+	return None
+
 class Manager:
 	'''
 	Creates and manages connections to Chatango.
 	Also propagates events from joined groups
 	'''
-	def __init__(self, username, password, pm=False, loop=None):
+	def __init__(self, username: str, password: str, pm=False, loop=None):
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 		self._groups = []
 		self.privates = None
 		if pm:
 			self.loop.create_task(self.join_pm())
-		self.username = username
-		self.password = password
+		self._aid = get_anon(username)
+		if self._aid is not None:
+			self.username = ""
+			self.password = ""
+		else:
+			self.username = username
+			self.password = password
 
-		loop.set_exception_handler(_connection_lost_handler)
+		self.loop.set_exception_handler(_connection_lost_handler)
 
 	def __del__(self):
 		if self.loop.is_closed():
@@ -62,20 +72,19 @@ class Manager:
 		#the event ancestor (a coroutine generator)
 		setattr(cls, eventname, partial(func, ancestor=ancestor))
 
-	async def join_group(self, group_name, aid=None, port=443):
-		'''Join group `group_name`'''
+	async def join_group(self, group_name: str, port=443):
+		'''(Coro) Join group `group_name`'''
 		group_name = group_name.lower()
-
 		server = generate.server_num(group_name)
 		if server is None:
-			raise ValueError("malformed room token " + group_name)
+			raise ValueError("malformed room token " + repr(group_name))
 
 		#already joined group
 		if group_name != self.username and group_name not in self._groups:
 			try:
 				ret = group.GroupProtocol(group_name, self)
-				if aid is not None:
-					ret._storage.set_anon(aid)
+				if self._aid is not None:
+					ret._storage.set_anon(self._aid)
 				await self.loop.create_connection(lambda: ret,
 					"s{}.chatango.com".format(server), port)
 				self._groups.append(ret._storage)
@@ -83,13 +92,13 @@ class Manager:
 			except gaierror as exc:
 				raise ConnectionError("could not connect to group server") \
 				from exc
-		elif group_name == self.username:
+		elif self.username and group_name == self.username:
 			return await self.join_pm()
 		else:
 			raise ValueError("attempted to join group multiple times")
 
 	async def leave_group(self, group_name):
-		'''Leave group `group_name`'''
+		'''(Coro) Leave group `group_name`'''
 		if isinstance(group_name, group.Group):
 			group_name = group_name.name
 		for index, gro in enumerate(self._groups):
@@ -98,7 +107,7 @@ class Manager:
 				self._groups.pop(index)
 
 	async def join_pm(self, port=5222):
-		'''Log into private messages and return Connection'''
+		'''(Coro) Log into private messages and return Connection'''
 		if self.privates is None:
 			try:
 				authkey = private.pm_auth(self.username, self.password)
@@ -111,13 +120,13 @@ class Manager:
 		return self.pm
 
 	async def leave_pm(self):
-		'''If logged into private messages, log out'''
+		'''(Coro) If logged into private messages, log out'''
 		if self.privates is not None:
 			await self.privates._protocol.disconnect()
 			self.privates = None
 
 	async def leave_all(self):
-		'''Disconnect from all groups and PMs'''
+		'''(Coro) Disconnect from all groups and PMs'''
 		for gro in self._groups:
 			await gro._protocol.disconnect()
 		self._groups.clear()
@@ -148,7 +157,7 @@ class _Multipart(request.Request):
 	'''Simplified version of requests.post for multipart/form-data'''
 	#code adapted from http://code.activestate.com/recipes/146306/
 	_MULTI_BOUNDARY = '---------------iM-in-Ur-pr07oc01'
-	_DISPOSITION = "Content-Disposition: form-data; name=\"%s\""
+	_DISPOSITION = "Content-Disposition: form-data; name=\"{}\""
 
 	def __init__(self, url, data, headers=None):
 		multiform = []
@@ -164,24 +173,24 @@ class _Multipart(request.Request):
 					#try to read the file first
 					data = j[1].read()
 					#then set the filename to filename
-					multiform.append((self._DISPOSITION % i) + \
-						"; filename=\"%s\"" % basename(j[1].name))
-					multiform.append("Content-Type: %s" % j[0])
+					multiform.append((self._DISPOSITION + \
+					"; filename=\"{}\"").format(i, basename(j[1].name)))
+					multiform.append("Content-Type: {}".format(j[0]))
 				except AttributeError as exc:
 					raise ValueError("expected file-like object") from exc
 			else:
 				#no mime type supplied
-				multiform.append(self._DISPOSITION % j)
+				multiform.append(self._DISPOSITION.format(i))
 			multiform.append("")
 			multiform.append(data)
 		multiform.append("--" + self._MULTI_BOUNDARY + "--")
 		#encode multiform
-		request_body = (b"\r\n").join([isinstance(i, bytes) and i or i.encode() \
-			for i in multiform])
+		request_body = (b"\r\n").join([i if isinstance(i, bytes) \
+			else i.encode() for i in multiform])
 
 		headers.update({
 			  "content-length":	str(len(request_body))
-			, "content-type":	"multipart/form-data; boundary=%s"%\
-				self._MULTI_BOUNDARY
+			, "content-type":	"multipart/form-data; boundary={}".format(
+				self._MULTI_BOUNDARY)
 		})
 		super().__init__(url, data=request_body, headers=headers)
