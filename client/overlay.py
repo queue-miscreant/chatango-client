@@ -657,6 +657,48 @@ class DisplayOverlay(OverlayBase, Box):
 			return
 		self.begin = min(max(0, self.begin+amount), maxlines-len(self._formatted))
 
+class TabOverlay(OverlayBase):
+	'''
+	Overlay for 'tabbing' through things.
+	Displays options on lines nearest to the input scrollable
+	'''
+	def __init__(self, parent, lis, callback=None, rows=5):
+		super().__init__(parent)
+		self.list = lis
+		self.it = 0
+		self._rows = min(len(self.list), rows, self.height)
+		self.replace = self._rows == self.height
+		self.callback = callback
+
+		self.add_keys({
+			 -1:		self.remove
+			, "tab":	staticize(self.move_it, 1)
+			, "btab":	staticize(self.move_it, -1)
+		})
+
+	def __call__(self, lines):
+		'''Display message'''
+		for i, entry in zip(range(self._rows), (self.list + self.list)[self.it:]):
+			entry = Coloring(entry)
+			#entry.insert_color(0, raw_num(7))
+			if i == 0:
+				entry.add_global_effect(0)
+				entry.add_global_effect(1)
+			lines[-i-1] = format(entry)
+
+	def add(self):
+		'''If list is too small, exit early. Run callback on singleton'''
+		if len(self.list) < 2:
+			if self.list:
+				self.callback(self.list[0])
+			return
+		super().add()
+
+	def move_it(self, direction):
+		self.it = (self.it + direction) % len(self.list)
+		if callable(self.callback):
+			self.callback(self.list[self.it])
+
 class ConfirmOverlay(OverlayBase):
 	'''Overlay to confirm selection y/n (no slash)'''
 	replace = False

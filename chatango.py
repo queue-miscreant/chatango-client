@@ -470,19 +470,19 @@ class ChatBot(pytango.Manager):
 class LinkOverlay(client.VisualListOverlay):
 	'''
 	List accumulated links
-	Context is assumed to be a ChatangoOverlay with members `visited_links` and
-	list_links
+	Context is assumed to be a ChatangoOverlay with members `open_links` and
+	`last_links`
 	'''
-	def __init__(self, parent, context):
-		self.context = context
+	def __init__(self, parent, last_links, redraw=None):
+		self._redraw_overlay = redraw
 
 		builder = lambda raw: [i.replace("https://", "").replace("http://", "")
 			for i in reversed(raw)]
-		super().__init__(parent, (builder, context.last_links)
+		super().__init__(parent, (builder, last_links)
 			, modes=["default"] + linkopen.get_defaults())
 
-		find_new = lambda i: (self.raw[len(self.list)-i-1] in context.visited_links)^\
-					   (self.raw[len(self.list)-self.it-1] in context.visited_links)
+		find_new = lambda i: (linkopen.open_link.is_visited(self.raw[len(self.list)-i-1])) ^\
+						(linkopen.open_link.is_visited(self.raw[len(self.list)-self.it-1]))
 		prev_new, next_new = self.goto_lambda(find_new)
 
 		self.add_keys({
@@ -493,6 +493,29 @@ class LinkOverlay(client.VisualListOverlay):
 			, "a-j":	next_new
 		})
 
+	def open_links(self, links, opener=0):
+		'''
+		Open a list of `links` with `opener`.
+		Optionally needs updates colors of chat_overlay
+		'''
+		try:
+			warning_links = get_client().options["linkwarn"]
+		except AttributeError:
+			warning_links = 2
+
+		def callback():
+			for i in links:
+				linkopen.open_link(self.parent, i, opener)
+			#don't recolor if the list is empty
+			if links and isinstance(self._redraw_overlay, client.ChatOverlay):
+				self._redraw_overlay.recolor_lines()
+
+		if len(links) >= warning_links:
+			msg = "Really open {} links? (y/n)".format(len(links))
+			client.ConfirmOverlay(self.parent, msg, callback).add()
+		else:
+			callback()
+
 	#enter key
 	def select(self):
 		'''Open link with selected opener'''
@@ -500,8 +523,7 @@ class LinkOverlay(client.VisualListOverlay):
 			return None
 		#try to get selected links
 		all_links = self.selected_list()
-		#add the iterator; idempotent if already in set
-		self.context.open_links(all_links, self.mode)
+		self.open_links(all_links, self.mode)
 		self.clear()
 		return -1
 
@@ -510,15 +532,15 @@ class LinkOverlay(client.VisualListOverlay):
 		for i, j in enumerate(self.list):
 			actual = self.raw[len(self.list)-i-1]
 			if (linkopen.get_extension(j).lower() in ("png", "jpg", "jpeg")) \
-			and (actual not in self.context.visited_links):
+			and (not linkopen.open_link.is_visited(actual)):
 				links.append(actual)
-		self.context.open_links(links, self.mode)
+		self.open_links(links, self.mode)
 
 	def _draw_line(self, line, number):
 		'''Draw visited links in a slightly grayer color'''
 		super()._draw_line(line, number)
 		current = self.raw[len(self.list)-number-1]
-		if current in self.context.visited_links:
+		if linkopen.open_link.is_visited(current):
 			line.insert_color(0, self.parent.two56.grayscale(12))
 
 #Formatting InputMux------------------------------------------------------------
@@ -655,7 +677,6 @@ def _(mux, value, coloring):
 class ChatangoOverlay(client.ChatOverlay):
 	def __init__(self, parent, bot):
 		self.last_links = []
-		self.visited_links = []
 
 		super().__init__(parent)
 		self.can_select = False
@@ -678,7 +699,6 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "^p":			self.userpass
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
-			, "^e":			lambda: print(self.bot.joined_group.banned_words)
 			, "mouse-left":		self._click_link
 			, "mouse-middle":	client.override(self._open_selected_links, 1)
 		})
@@ -735,7 +755,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _show_links(self):
 		'''List accumulated links'''
-		LinkOverlay(self.parent, self).add()
+		LinkOverlay(self.parent, self.last_links, self).add()
 
 	def _show_members(self):
 		'''List members of current group'''
@@ -875,28 +895,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			return
 		last = links[-1]
 		linkopen.open_link(self.parent, last)
-		if last not in self.visited_links:
-			self.visited_links.append(last)
-			self.recolor_lines()
-
-	def open_links(self, links, mode=0):
-		def callback():
-			for i in links:
-				if isinstance(i, int):
-					i = self.raw[i]
-				linkopen.open_link(self.parent, i, mode)
-				if i not in self.visited_links:
-					self.visited_links.append(i)
-			#don't recolor if the list is empty
-			#need to recolor ALL lines, not just this one
-			if links:
-				self.recolor_lines()
-
-		if len(links) >= self.bot.options["linkwarn"]:
-			msg = "Really open {} links? (y/n)".format(len(links))
-			client.ConfirmOverlay(self.parent, msg, callback).add()
-		else:
-			callback()
+		self.recolor_lines()
 
 	def _open_selected_links(self):
 		message = self.messages.get_selected()
@@ -923,8 +922,6 @@ class ChatangoOverlay(client.ChatOverlay):
 				link = i.group()
 		if link:
 			linkopen.open_link(self.parent, link)
-			self.visited_links.append(link)
-			self.recolor_lines()
 		return 1
 	#PARENT BOT RELATED--------------------------------------------------------
 	def reload_client(self):
@@ -987,7 +984,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		#links in white
 		link_color = lambda x: visited_link \
-			if x in self.visited_links else raw_white
+			if linkopen.open_link.is_visited(x) else raw_white
 		msg.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
 
 		#underline quotes

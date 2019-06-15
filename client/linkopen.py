@@ -14,6 +14,8 @@ import re
 import os	#for stupid stdout/err hack
 import sys	#cygwin
 import asyncio
+from urllib.error import HTTPError
+from urllib.request import urlopen
 from subprocess import DEVNULL
 
 IMG_ARGS = ["feh"]
@@ -36,6 +38,9 @@ __all__ =	["LINK_RE", "get_defaults", "get_extension", "opener", "open_link"
 #extension recognizing regex
 _POST_FORMAT_RE = re.compile(r"\.(\w+)[&/\?]?")
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
+#opengraph regex
+OG_RE = re.compile(b"<meta (?:name|property)=\"og:(\\w+)\" content=\"(.+?)\""
+	, re.MULTILINE)
 
 class LinkException(Exception):
 	'''Exception for errors in client.linkopen'''
@@ -49,9 +54,26 @@ def get_defaults():
 
 def get_extension(link):
 	try:
-		return _POST_FORMAT_RE.findall(link)[-1]
+		return _POST_FORMAT_RE.findall(link)[-1].lower()
 	except NameError:
 		return ""
+
+def urlopen_async(link, loop=None):
+	'''Awaitable urllib.request.urlopen; run in a thread pool executor'''
+	if loop is None:
+		loop = asyncio.get_event_loop()
+	try:
+		return loop.run_in_executor(None, lambda: urlopen(link))
+	except HTTPError:
+		future = loop.create_future()
+		future.set_result("")
+		return future
+
+async def get_opengraph(link, loop=None) -> dict:
+	'''Awaitable opengraph data'''
+	html = await urlopen_async(link, loop=loop)
+	meta = OG_RE.findall(html.read())
+	return {i.decode(): j.decode() for i, j in meta}
 
 #---------------------------------------------------------------
 class open_link:
@@ -61,40 +83,51 @@ class open_link:
 	exts = {}
 	sites = {}
 	lambdas = []
-	lambdalut = []
+	lambda_lut = []
+
+	_visited = []
 
 	def __init__(self, client, link, default=0):
-		ext = get_extension(link)
-		if not default:
-			#check from ext
-			if ext:
-				run = self.exts.get(ext.lower())
-				if run:
-					client.loop.create_task(run(client, link, ext))
-					return
-			#check for patterns
-			for i, j in self.sites.items():
-				found = False
-				#compiled regex
-				if isinstance(i, type(_POST_FORMAT_RE)):
-					found = i.search(link)
-				elif isinstance(i, str):
-					found = 1+link.find(i)
-				if found:
-					client.loop.create_task(j(client, link))
-					return
-			#check for lambdas
-			for i, j in zip(self.lambdas, self.lambdalut):
-				if i(link):
-					client.loop.create_task(j(client, link))
-					return
-			client.loop.create_task(self.defaults[default](client, link))
+		#append to visited links
+		if link not in self._visited:
+			self._visited.append(link)
+
+		#don't need to step through opener types if default is set
+		if default:
+			client.loop.create_task(self.defaults[default-1](client, link))
 			return
-		client.loop.create_task(self.defaults[default-1](client, link))
+
+		ext = get_extension(link)
+		ext_opener = self.exts.get(ext)
+		#check from ext
+		if ext_opener is not None:
+			client.loop.create_task(ext_opener(client, link, ext))
+			return
+		#check for patterns
+		for i, j in self.sites.items():
+			found = False
+			#compiled regex
+			if isinstance(i, re.Pattern):
+				found = i.search(link)
+			elif isinstance(i, str):
+				found = 1+link.find(i)
+			if found:
+				client.loop.create_task(j(client, link))
+				return
+		#check for lambdas
+		for i, j in zip(self.lambdas, self.lambda_lut):
+			if i(link):
+				client.loop.create_task(j(client, link))
+				return
+		client.loop.create_task(self.defaults[default](client, link))
 
 	@classmethod
 	def extension_openers(cls):
 		return cls.exts.keys()
+
+	@classmethod
+	def is_visited(cls, link):
+		return link in cls._visited
 
 class opener:
 	'''
@@ -133,7 +166,7 @@ class opener:
 			open_link.sites[self._argument] = func
 		elif self._type == "lambda":
 			open_link.lambdas.append(self._argument)
-			open_link.lambdalut.append(func)
+			open_link.lambda_lut.append(func)
 		#allow stacking wrappers
 		return func
 
