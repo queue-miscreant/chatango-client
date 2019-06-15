@@ -384,7 +384,7 @@ class OverlayBase:
 			true_name = _VALID_KEYNAMES[key_name]
 			self._keys[true_name] = handler
 		except:
-			raise ValueError("key '%s invalid" % key_name)
+			raise ValueError("key '%s' invalid" % key_name)
 
 	def add_keys(self, new_functions, make_method=False):
 		'''

@@ -4,7 +4,7 @@
 from .base import override, Box, OverlayBase, Manager
 from .overlay import ListOverlay, VisualListOverlay \
 	, ColorOverlay, ColorSliderOverlay, ConfirmOverlay, DisplayOverlay \
-	, InputOverlay, InputMux
+	, TabOverlay, InputOverlay, InputMux
 from .chat import CommandOverlay, ChatOverlay, add_message_scroller
 from .util import Tokenize, tab_file
 from .display import Coloring, raw_num, def_color, num_defined_colors
