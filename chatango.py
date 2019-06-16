@@ -922,6 +922,7 @@ class ChatangoOverlay(client.ChatOverlay):
 				link = i.group()
 		if link:
 			linkopen.open_link(self.parent, link)
+			self.recolor_lines()
 		return 1
 	#PARENT BOT RELATED--------------------------------------------------------
 	def reload_client(self):
