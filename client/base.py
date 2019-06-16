@@ -835,7 +835,8 @@ class Screen:
 				right = i.right or right
 				room -= collen(left) + collen(right)
 				if room < 1:
-					raise SizeException()
+					#don't even bother. update_status is run from places that might not tolerate an exception
+					return
 				break
 		self.write_status("\x1b[7m{}{}{}\x1b[m".format(left,
 			' '*room, right), 3)

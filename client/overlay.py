@@ -662,10 +662,10 @@ class TabOverlay(OverlayBase):
 	Overlay for 'tabbing' through things.
 	Displays options on lines nearest to the input scrollable
 	'''
-	def __init__(self, parent, lis, callback=None, rows=5):
+	def __init__(self, parent, lis, callback=None, start=0, rows=5):
 		super().__init__(parent)
 		self.list = lis
-		self.it = 0
+		self.it = min(start, len(self.list)-1)
 		self._rows = min(len(self.list), rows, self.height)
 		self.replace = self._rows == self.height
 		self.callback = callback
@@ -678,19 +678,23 @@ class TabOverlay(OverlayBase):
 
 	def __call__(self, lines):
 		'''Display message'''
+		line_offset = 1
 		for i, entry in zip(range(self._rows), (self.list + self.list)[self.it:]):
 			entry = Coloring(entry)
 			#entry.insert_color(0, raw_num(7))
+			entry.add_global_effect(1)
 			if i == 0:
 				entry.add_global_effect(0)
-				entry.add_global_effect(1)
-			lines[-i-1] = format(entry)
+			formatted = entry.breaklines(self.width, "  ")
+			for j, line in enumerate(reversed(formatted)):
+				lines[-line_offset-j] = line
+			line_offset += len(formatted)
 
 	def add(self):
-		'''If list is too small, exit early. Run callback on singleton'''
+		'''If list is too small, exit early. Run callback on nonempty list'''
+		if self.list:
+			self.callback(self.list[self.it])
 		if len(self.list) < 2:
-			if self.list:
-				self.callback(self.list[0])
 			return
 		super().add()
 
