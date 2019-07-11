@@ -5,6 +5,7 @@ Objects representing Groups and Group connections in Chatango.
 Implements an asyncio-compatible protocol and provides classes for parsing raw
 group data like users, bans, and moderator actions.
 '''
+#TODO awaitable connection flag
 import json
 import html
 from urllib import parse

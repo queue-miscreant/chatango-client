@@ -122,7 +122,7 @@ class override:
 
 class KeyMethod:
 	'''
-	Decorator for overlays.
+	Decorator for overlay methods.
 	When OverlayBase.run_key is supplied with multiple characters, if a handler
 	for the key is found, then the rest of the characters are passed into the
 	handler as the only argument.
@@ -992,8 +992,28 @@ class Manager:
 			self.screen = None
 			self.exited.set()
 
-	def start(self):
-		return self.loop.create_task(self.run())
+	@classmethod
+	def start(cls, *args, loop=None):
+		'''
+		Create an instance of the Manager() class and return the instance.
+		Further arguments are interpreted as func, arg0, arg1,... and called
+		when the manager is prepared with `func(Manager, arg0, arg1,...)`
+		'''
+		#instantiate
+		this = cls(loop=loop)
+		this.loop.create_task(this.run())
+		this.loop.run_until_complete(this.prepared.wait())
+		try:
+			#just use the first arg as a function
+			if args and callable(args[0]):
+				beginfun = args[0](this, *args[1:])
+				#try it as a coroutine
+				if asyncio.iscoroutine(beginfun):
+					this.loop.run_until_complete(beginfun)
+			#wait for the loop to exit
+			this.loop.run_until_complete(this.exited.wait())
+		finally:
+			this.loop.run_until_complete(this.loop.shutdown_asyncgens())
 
 	def stop(self):
 		if self.screen is not None:

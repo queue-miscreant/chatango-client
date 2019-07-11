@@ -14,7 +14,8 @@ from .util import Tokenize
 __all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "_COLORS"
 			, "SELECT_AND_MOVE", "def_256_colors", "get_color"
 			, "raw_num", "num_defined_colors", "collen", "numdrawing"
-			, "columnslice", "Coloring", "Scrollable", "ScrollSuggest"]
+			, "columnslice", "Coloring", "JustifiedColoring", "Scrollable"
+			, "ScrollSuggest"]
 
 BAD_CHARSETS = [
 	  (119964, 26, ord('A'))	#uppercase math
@@ -93,9 +94,6 @@ SELECT_AND_MOVE = CHAR_CURSOR + SELECT
 CLEAR_FORMATTING = "\x1b[m"
 _TABLEN = 4
 
-#arbitrary number of characters a scrollable can have and not scroll
-MAX_NONSCROLL_WIDTH = 5
-
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
 	'''Exception for handling errors from Coloring or Scrollable manipulation'''
@@ -152,7 +150,6 @@ def num_defined_colors():
 	'''
 	return len(_COLORS) - _NUM_PREDEFINED
 
-
 class Coloring:
 	'''Container for a string and coloring to be done'''
 	def __init__(self, string, remove_fractur=True):
@@ -171,9 +168,18 @@ class Coloring:
 		self._positions.clear()
 		self._formatting.clear()
 
+	def setstr(self, new, clear=True):
+		'''
+		Set contained string to something new. By default, also clears the
+		contained formatting.
+		'''
+		if clear:
+			self.clear()
+		self._str = new
+
 	def __repr__(self):
-		return "<Coloring string = {}, positions = {}, formatting = {}>".format(
-			repr(self._str), self._positions, self._formatting)
+		return "<{} string = {}, positions = {}, formatting = {}>".format(
+			type(self), repr(self._str), self._positions, self._formatting)
 
 	def __str__(self):
 		'''Get the string contained'''
@@ -196,7 +202,7 @@ class Coloring:
 						formatting += effect[0]
 			ret += self._str[tracker:pos] + formatting
 			tracker = pos
-			last_effect = next_effect
+			last_effect ^= next_effect
 		ret += self._str[tracker:]
 		return ret + CLEAR_FORMATTING
 
@@ -225,29 +231,6 @@ class Coloring:
 			self._str = self._str[:start] + sub + self._str[end:]
 			return
 		self._str = self._str[:start] + sub
-
-	def add_indicator(self, sub, color=None):
-		'''
-		Replace some spaces at the end of a string. Optionally inserts a color
-		for the string `sub`. Useful for ListOverlays.
-		'''
-		if sub == "":
-			return
-		pos, columns = 1, collen(sub)
-		while pos <= columns:
-			# keep a space, so pos-1
-			if self._str[-pos-1] != ' ':
-				# fewer columns in `sub` than room in _str
-				if columns < pos-1:
-					raise DisplayException("Not enough room for indicator %s" %\
-						sub)
-				sub = sub[:columnslice(sub, pos-2)] + "…"
-				break
-			pos += 1
-		pos -= 1
-		self._str = self._str[:-pos] + sub
-		if color:
-			self.insert_color(-pos, color)
 
 	def colored_at(self, position):
 		'''return a bool that represents if that position is colored yet'''
@@ -381,6 +364,8 @@ class Coloring:
 		'''
 		Break string (courteous of spaces) into a list of strings spanning
 		up to `length` columns
+		If there are empty lines (i.e. two newlines in a row), `keep_empty`
+		preserves them as such, which is the default behavior
 		'''
 		outdent_len = collen(outdent)
 		TABSPACE = length - outdent_len	#the number of columns sans the outdent
@@ -489,6 +474,134 @@ class Coloring:
 
 		return broken
 
+class JustifiedColoring(Coloring):
+	'''
+	Coloring object that can lazily add indicator lamps at the end of its
+	displayed string.
+	'''
+	_ELLIPSIS = '…'
+	def __init__(self, string, remove_fractur=True):
+		super().__init__(string, remove_fractur)
+		self._indicator = None
+		self._rendered = False
+
+	def add_indicator(self, sub: str, color=None, effect=None):
+		'''
+		Replace some spaces at the end of a string. Optionally inserts a color
+		for the string `sub`. Useful for ListOverlays.
+		'''
+		if sub == "":
+			return
+		formatting = ""
+		try:
+			formatting += _COLORS[color + _NUM_PREDEFINED]
+		except (TypeError, IndexError):
+			pass
+		try:
+			formatting += _EFFECTS[effect][0]
+		except (TypeError, IndexError):
+			pass
+		self._indicator = (sub, formatting)
+
+	def _justify(self, length):
+		'''
+		Backend for justify that does the parsing of `positions` and `formatting`
+		Adds the ellipsis and or leaves the string alone
+		'''
+		if not self._str:
+			return "", length
+
+		max_width = length//2
+		#try slicing the right half of the string short enough
+		right = len(self._str) + 1 - columnslice(reversed(self._str), max_width)
+		places = list(zip(self._positions, self._formatting))
+
+		#test if we have a suitably short string and just put them out of range
+		if right <= len(self._str) // 2 + 1:
+			left = len(self._str) + 1
+			right = left
+		#furthest slice index of the left half of the string
+		#if we don't have an odd split which we can insert the ellipsis into
+		else:
+			#ensure we have room for the ellipsis
+			if not length-max_width:
+				max_width -= 1
+			left = columnslice(self._str, max_width)
+			i, last_form = 0, 0
+			while i < len(self._positions) and self._positions[i] < left:
+				self._formatting = places[i]
+				i += 1
+			places.insert(i, (left, None))
+			while i < len(self._positions) and self._positions[i] < right:
+				last_form = places[i]
+				i += 1
+			places.insert(i+1, (right, last_form))
+
+		#slightly altered format-style loop
+		ret = ""
+		tracker = 0
+		last_effect = 0
+		running_length = 0
+
+		for pos, form in places:
+			if form is None:
+				#signal to begin omitting stuff
+				temp = self._str[tracker:left] + self._ELLIPSIS
+				ret += temp
+				running_length += collen(temp)
+				continue
+			elif left < pos < right:
+				continue
+
+			color = form >> len(_EFFECTS)
+			next_effect = form & _EFFECTS_BITS
+			formatting = _COLORS[color-1] if color > 0 else ""
+			for i, effect in enumerate(_EFFECTS):
+				if (1 << i) & next_effect:
+					if (1 << i) & last_effect:
+						formatting += effect[1]
+					else:
+						formatting += effect[0]
+			#but if we're back out of the woods
+			if tracker < right == pos:
+				ret += formatting
+			else:
+				temp = self._str[tracker:pos]
+				running_length += collen(temp)
+				ret += temp + formatting
+
+			tracker = pos
+			last_effect ^= next_effect
+
+		temp = self._str[tracker:]
+		#the string and the unused length
+		return ret + temp, length - (collen(temp) + running_length)
+
+	def justify(self, length, justchar=' ', ensure_indicator=2):
+		'''
+		Split string in two, joined with an ellipsis character and add indicator
+		'''
+		if self._indicator is None:
+			ensure_indicator = 0
+		display, room = self._justify(length - ensure_indicator)
+		#number of columns allowed to the indicator
+		room += ensure_indicator
+
+		indicator = ""
+		if ensure_indicator:
+			sub, color = self._indicator
+			#backwards trace into base and length of the indicator in columns
+			columns = collen(sub)
+
+			#trim if too many columns
+			if columns > ensure_indicator:
+				sub = sub[columnslice(sub, room-1):] + self._ELLIPSIS
+				columns = collen(sub)
+
+			indicator = color + sub
+			room -= columns
+		return display + (justchar * room) + indicator + CLEAR_FORMATTING
+
 def collen(string):
 	'''Column width of a string'''
 	escape = False
@@ -549,11 +662,14 @@ def columnslice(string, width):
 #SCROLLABLE CLASSES-------------------------------------------------------------
 class Scrollable:
 	'''Scrollable text input'''
+	#arbitrary number of characters a scrollable can have and not scroll
+	_MAX_NONSCROLL_WIDTH = 5
+
 	def __init__(self, width, string=""):
 		if width <= _TABLEN:
 			raise DisplayException("Cannot create Scrollable smaller "+\
 				" or equal to tab width %d"%_TABLEN)
-		self._str = string
+		self._str = string.replace('\x7f', "")
 		self._width = width
 		#position of the cursor and display column of the cursor
 		self._pos = len(string)
@@ -618,16 +734,16 @@ class Scrollable:
 
 	def setstr(self, new):
 		'''Set content of scrollable'''
-		self._str = new
+		self._str = new.replace('\x7f', "")
 		self.end()
 
 	def setnonscroll(self, new):
 		'''Set nonscrolling characters of scrollable'''
 		check = collen(new)
-		if check > MAX_NONSCROLL_WIDTH:
-			new = new[:columnslice(new, MAX_NONSCROLL_WIDTH)]
+		if check > self._MAX_NONSCROLL_WIDTH:
+			new = new[:columnslice(new, self._MAX_NONSCROLL_WIDTH)]
 		self._nonscroll = new
-		self._nonscroll_width = min(check, MAX_NONSCROLL_WIDTH)
+		self._nonscroll_width = min(check, self._MAX_NONSCROLL_WIDTH)
 		self._onchanged()
 
 	def setwidth(self, new):
@@ -687,8 +803,10 @@ class Scrollable:
 	#CHARACTER INSERTION--------------------------------------------------------
 	def append(self, new):
 		'''Append string at cursor'''
-		self._str = self._str[:self._pos] + new + self._str[self._pos:]
+		self._str = self._str[:self._pos] + new.replace('\x7f', "") + \
+			self._str[self._pos:]
 		self.movepos(len(new))
+
 	#CHARACTER DELETION METHODS-------------------------------------------------
 	def backspace(self):
 		'''Backspace one char at cursor'''

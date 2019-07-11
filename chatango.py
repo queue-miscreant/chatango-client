@@ -262,9 +262,6 @@ class DequeSet(deque):
 		else:
 			super().__init__()
 
-	def __repr__(self):
-		return "DequeSet({})".format(super().__repr__())
-
 	def appendleft(self, new):
 		'''Add an item to the left of the deque'''
 		if new not in self:
@@ -476,13 +473,12 @@ class LinkOverlay(client.VisualListOverlay):
 	def __init__(self, parent, last_links, redraw=None):
 		self._redraw_overlay = redraw
 
-		builder = lambda raw: [i.replace("https://", "").replace("http://", "")
-			for i in reversed(raw)]
-		super().__init__(parent, (builder, last_links)
-			, modes=["default"] + linkopen.get_defaults())
+		builder = lambda raw: list(reversed(raw))
+		super().__init__(parent, last_links
+			, modes=["default"] + linkopen.get_defaults(), builder=builder)
 
-		find_new = lambda i: (linkopen.open_link.is_visited(self.raw[len(self.list)-i-1])) ^\
-						(linkopen.open_link.is_visited(self.raw[len(self.list)-self.it-1]))
+		find_new = lambda i: linkopen.open_link.is_visited(self[i]) ^\
+						linkopen.open_link.is_visited(self.current)
 		prev_new, next_new = self.goto_lambda(find_new)
 
 		self.add_keys({
@@ -493,7 +489,19 @@ class LinkOverlay(client.VisualListOverlay):
 			, "a-j":	next_new
 		})
 
-	def open_links(self, links, opener=0):
+	#enter key
+	def select(self):
+		'''Open link with selected opener'''
+		if not self.list:
+			return None
+		#try to get selected links
+		all_links = self.selected
+		self._open_links(all_links, self.mode)
+		self.clear()
+		return -1
+
+	@staticmethod
+	def open_links(parent, links, opener=0, redraw=None):
 		'''
 		Open a list of `links` with `opener`.
 		Optionally needs updates colors of chat_overlay
@@ -505,43 +513,34 @@ class LinkOverlay(client.VisualListOverlay):
 
 		def callback():
 			for i in links:
-				linkopen.open_link(self.parent, i, opener)
+				linkopen.open_link(parent, i, opener)
 			#don't recolor if the list is empty
-			if links and isinstance(self._redraw_overlay, client.ChatOverlay):
-				self._redraw_overlay.recolor_lines()
+			if links and isinstance(redraw, client.ChatOverlay):
+				redraw.recolor_lines()
 
 		if len(links) >= warning_links:
 			msg = "Really open {} links? (y/n)".format(len(links))
-			client.ConfirmOverlay(self.parent, msg, callback).add()
+			client.ConfirmOverlay(parent, msg, callback).add()
 		else:
 			callback()
 
-	#enter key
-	def select(self):
-		'''Open link with selected opener'''
-		if not self.list:
-			return None
-		#try to get selected links
-		all_links = self.selected_list()
-		self.open_links(all_links, self.mode)
-		self.clear()
-		return -1
+	def _open_links(self, links, opener=0):
+		return self.open_links(self.parent, links, opener, self._redraw_overlay)
 
 	def open_images(self):
-		links = []
-		for i, j in enumerate(self.list):
-			actual = self.raw[len(self.list)-i-1]
-			if (linkopen.get_extension(j).lower() in ("png", "jpg", "jpeg")) \
-			and (not linkopen.open_link.is_visited(actual)):
-				links.append(actual)
-		self.open_links(links, self.mode)
+		'''Open all images that have not been visited'''
+		self._open_links([link for link in self.list \
+			if (linkopen.get_extension(link).lower() in ("png", "jpg", "jpeg")) \
+			and (not linkopen.open_link.is_visited(link))], self.mode)
 
 	def _draw_line(self, line, number):
 		'''Draw visited links in a slightly grayer color'''
-		super()._draw_line(line, number)
-		current = self.raw[len(self.list)-number-1]
-		if linkopen.open_link.is_visited(current):
+		#remove the protocol
+		line.setstr(str(line).replace("https://", "").replace("http://", ""))
+		#draw whether this link is visited
+		if linkopen.open_link.is_visited(self[number]):
 			line.insert_color(0, self.parent.two56.grayscale(12))
+		super()._draw_line(line, number)
 
 #Formatting InputMux------------------------------------------------------------
 Formatting = client.InputMux()	#formatting mux
@@ -692,6 +691,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "f5":			self._show_channels
 			, "f6":			self._replies_scroller
 #			, "f7":			self.pmConnect
+			, "^a":			lambda: print(self.bot.joined_group.banned_words)
 			, "f12":		self._show_options
 			, "^f":			self._search_scroller
 			, "^n":			self._add_ignore
@@ -763,7 +763,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			return
 		#a current version of the users. will be 1:1 with the listoverlay
 		users = list(sorted(self.bot.joined_group.users, key=lambda x: x.name.lower()))
-		box = client.ListOverlay(self.parent, [format(user) for user in users])
+		box = client.ListOverlay(self.parent, users)
 
 		@box.key_handler("enter")
 		def select(me):
@@ -790,6 +790,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		@box.line_drawer
 		def draw_ignored(me, string, i):
+			string.setstr(format(users[i]))
 			selected = users[i].name.lower()
 			if selected in self.bot.ignores:
 				string.add_indicator('i', 3)
@@ -823,7 +824,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			if self.bot.filtered_channels[i]:
 				return
 			col = BEGIN_COLORS + (i and i+12 or 16)
-			string.insert_color(-1, col)
+			string.add_indicator(' ', col)
 
 		box.add()
 
@@ -904,7 +905,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		except (TypeError, IndexError):
 			return
 		all_links = linkopen.LINK_RE.findall(msg)
-		self.open_links(all_links)
+		LinkOverlay.open_links(self.parent, all_links, redraw=self)
 
 	def _click_link(self, x, y):
 		'''Click on a link as you would a hyperlink in a web browser'''
@@ -1068,13 +1069,7 @@ def _(parent, *args):
 	else:
 		parent.blurb.push("Failed to update avatar")
 
-async def start_client(loop, creds):
-	create_colors()
-
-	manager = client.Manager(loop=loop)
-	manage_task = manager.start()
-	await manager.prepared.wait()
-
+async def start_client(manager, creds):
 	#fill in credential holes
 	for i, j in zip(("user", "passwd", "room")
 	, ("Username", "Password", "Room name")):
@@ -1088,7 +1083,7 @@ async def start_client(loop, creds):
 			creds[i] = await inp.result
 		except asyncio.CancelledError:
 			manager.stop()
-			return manage_task, manager.exited
+			return
 
 	#options
 	if creds["options"]["ignoresave"]:
@@ -1099,13 +1094,11 @@ async def start_client(loop, creds):
 
 	global _CLIENT
 	_CLIENT = ChatBot(manager.screen, creds)
-	return manage_task, manager.exited #the future to exit the loop
 
 def main():
 	#parse arguments and start client
 	import argparse
 	import os
-	import traceback
 	import sys
 
 	if not path.exists(HOME_PATH):
@@ -1167,21 +1160,10 @@ def main():
 			return
 
 	#start
-	loop = asyncio.get_event_loop()
-	main_task = None
+	create_colors()
 	try:
-		main_task, end_future = \
-			loop.run_until_complete(start_client(loop, creds))
-		if end_future:
-			loop.run_until_complete(end_future.wait())
-	except Exception:
-		print("\x1b[31mFatal error occurred\x1b[m")
-		traceback.print_exc()
+		client.Manager.start(start_client, creds)
 	finally:
-		if main_task is not None and not main_task.done():
-			main_task.cancel()
-		loop.run_until_complete(loop.shutdown_asyncgens())
-
 		creds.write_json(SAVE_PATH)
 
 if __name__ == "__main__":
