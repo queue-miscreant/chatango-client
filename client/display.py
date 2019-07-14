@@ -487,6 +487,17 @@ class JustifiedColoring(Coloring):
 		self._memoargs = None
 		self._rendered = None
 
+	def __hash__(self):
+		'''
+		Base hash on internal parameters only, to make memoization easier
+		'''
+		return hash((self._str, self._indicator
+			, frozenset(self._positions), frozenset(self._formatting)))
+
+	def __eq__(self, other):
+		return isinstance(other, JustifiedColoring) \
+			and (hash(self) == hash(other))
+
 	def add_indicator(self, sub: str, color=None, effect=None):
 		'''
 		Replace some spaces at the end of a string. Optionally inserts a color

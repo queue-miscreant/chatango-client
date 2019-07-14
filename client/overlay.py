@@ -17,6 +17,13 @@ __all__ = [
 	, "ColorSliderOverlay", "ConfirmOverlay", "DisplayOverlay", "InputMux"
 ]
 
+def _search_cache(keys, value):
+	'''Search through an iterable for value that equals `value` and return it'''
+	for i in keys:
+		if i == value:
+			return i
+	return value
+
 #DISPLAY CLASSES----------------------------------------------------------
 class ListOverlay(OverlayBase, Box):
 	'''
@@ -37,6 +44,7 @@ class ListOverlay(OverlayBase, Box):
 		self._draw_other = None
 		self._modes = [""] if modes is None else modes
 		self._search = None
+		self._draw_cache = set()
 
 		up =	staticize(self.increment, -1,
 			doc="Up one list item")
@@ -155,8 +163,11 @@ class ListOverlay(OverlayBase, Box):
 			#alter the string to be drawn
 			if i+partition < len(self.list):
 				self._draw_line(row, i+partition)
+			row = _search_cache(self._draw_cache, row)
 			#draw the justified string
 			lines[i+1] = self.box_noform(row.justify(maxx))
+			#and cache it
+			self._draw_cache.add(row)
 
 		lines[-1] = self.box_bottom(self._modes[self.mode])
 		return lines
