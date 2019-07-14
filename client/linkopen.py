@@ -14,6 +14,7 @@ import re
 import os	#for stupid stdout/err hack
 import sys	#cygwin
 import asyncio
+from http.client import HTTPException	#for catching IncompleteRead
 from urllib.error import HTTPError
 from urllib.request import urlopen
 from subprocess import DEVNULL
@@ -36,7 +37,8 @@ __all__ =	["LINK_RE", "get_defaults", "get_extension", "opener", "open_link"
 	, "images", "videos", "browser"]
 
 #extension recognizing regex
-_POST_FORMAT_RE = re.compile(r"\.(\w+)[&/\?]?")
+_NO_QUERY_FRAGMENT_RE =	re.compile(r"[^?#]+(?=.*)")
+_EXTENSION_RE = re.compile(r"\.(\w+)[&/\?]?")
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
 #opengraph regex
 OG_RE = re.compile(b"<meta (?:name|property)=\"og:(\\w+)\" content=\"(.+?)\""
@@ -47,15 +49,17 @@ class LinkException(Exception):
 
 def get_defaults():
 	'''
-	Get the names of the default functions.
-	These are hopefully descriptive enough
+	Get the names of the default functions. These are hopefully
+	descriptive enough
 	'''
 	return [i.__name__ for i in open_link.defaults]
 
 def get_extension(link):
+	'''Get the extension (png, jpg) that a particular link ends with'''
 	try:
-		return _POST_FORMAT_RE.findall(link)[-1].lower()
-	except NameError:
+		link = _NO_QUERY_FRAGMENT_RE.match(link)[0]
+		return _EXTENSION_RE.findall(link)[-1].lower()
+	except (IndexError, NameError):
 		return ""
 
 def urlopen_async(link, loop=None):
@@ -64,7 +68,7 @@ def urlopen_async(link, loop=None):
 		loop = asyncio.get_event_loop()
 	try:
 		return loop.run_in_executor(None, lambda: urlopen(link))
-	except HTTPError:
+	except (HTTPError, HTTPException):
 		future = loop.create_future()
 		future.set_result("")
 		return future

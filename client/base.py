@@ -495,18 +495,11 @@ class TextOverlay(OverlayBase):
 			chars[0] == self._sentinel:
 			return self._on_sentinel()
 		#allow unicode input with the bytes().decode()
-		#take out characters that can't be decoded
-		buffer = []
-		control_flag = False
-		for i in chars:
-			if i == 194 or control_flag:
-				control_flag ^= 1
-				continue
-			buffer.append(i)
+		#take out characters that can't be decoded (i.e., those used by curses)
+		buffer = bytes(filter(lambda x: x < 256, chars))
 		if not buffer:
 			return None
-		uni = bytes(buffer).decode()
-		return self.text.append(self._transform_paste(uni))
+		return self.text.append(self._transform_paste(buffer.decode()))
 
 	def _on_sentinel(self):
 		'''Callback run when self._sentinel is typed and self.text is empty'''
