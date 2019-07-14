@@ -73,16 +73,15 @@ def get_extension(link):
 		pass
 	return ""
 
-def urlopen_async(link, loop=None):
+async def urlopen_async(link, loop=None):
 	'''Awaitable urllib.request.urlopen; run in a thread pool executor'''
 	if loop is None:
 		loop = asyncio.get_event_loop()
 	try:
-		return loop.run_in_executor(None, lambda: urlopen(link))
+		ret = await loop.run_in_executor(None, lambda: urlopen(link))
+		return ret
 	except (HTTPError, HTTPException):
-		future = loop.create_future()
-		future.set_result("")
-		return future
+		return ""
 
 async def get_opengraph(link, loop=None) -> dict:
 	'''Awaitable opengraph data'''
