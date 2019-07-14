@@ -55,12 +55,23 @@ def get_defaults():
 	return [i.__name__ for i in open_link.defaults]
 
 def get_extension(link):
-	'''Get the extension (png, jpg) that a particular link ends with'''
+	'''
+	Get the extension (png, jpg) that a particular link ends with
+	Extension must be recognized by open_link.
+	'''
 	try:
+		#try at first with the GET variable
+		extensions = _EXTENSION_RE.findall(link)
+		if extensions and extensions[-1].lower() in open_link.exts:
+			return extensions[-1].lower()
+		#now trim it off
 		link = _NO_QUERY_FRAGMENT_RE.match(link)[0]
-		return _EXTENSION_RE.findall(link)[-1].lower()
+		extensions = _EXTENSION_RE.findall(link)
+		if extensions and extensions[-1].lower() in open_link.exts:
+			return extensions[-1].lower()
 	except (IndexError, NameError):
-		return ""
+		pass
+	return ""
 
 def urlopen_async(link, loop=None):
 	'''Awaitable urllib.request.urlopen; run in a thread pool executor'''

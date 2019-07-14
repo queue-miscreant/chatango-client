@@ -4,8 +4,6 @@
 Overlays that allow multiple input formats. Also includes InputMux, which
 provides a nice interface for modifying variables within a context.
 '''
-#TODO ListOverlay JustifiedColoring caching
-
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, raw_num, get_color \
 	, Coloring, JustifiedColoring, DisplayException
