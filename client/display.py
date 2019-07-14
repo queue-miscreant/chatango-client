@@ -483,7 +483,9 @@ class JustifiedColoring(Coloring):
 	def __init__(self, string, remove_fractur=True):
 		super().__init__(string, remove_fractur)
 		self._indicator = None
-		self._rendered = False
+
+		self._memoargs = None
+		self._rendered = None
 
 	def add_indicator(self, sub: str, color=None, effect=None):
 		'''
@@ -581,26 +583,39 @@ class JustifiedColoring(Coloring):
 		'''
 		Split string in two, joined with an ellipsis character and add indicator
 		'''
+		#quick memoization
+		if self._memoargs == (length, justchar, ensure_indicator):
+			return self._rendered
+
+		sub, color, columns = None, None, 0
 		if self._indicator is None:
 			ensure_indicator = 0
+		else:
+			sub, color = self._indicator
+			columns = collen(sub)
+			ensure_indicator = min(ensure_indicator, columns)
 		display, room = self._justify(length - ensure_indicator)
 		#number of columns allowed to the indicator
 		room += ensure_indicator
 
 		indicator = ""
 		if ensure_indicator:
-			sub, color = self._indicator
-			#backwards trace into base and length of the indicator in columns
-			columns = collen(sub)
-
 			#trim if too many columns
 			if columns > ensure_indicator:
-				sub = sub[columnslice(sub, room-1):] + self._ELLIPSIS
+				final_column = columnslice(sub, room-1)
+				if final_column < len(sub):
+					sub = sub[:final_column] + self._ELLIPSIS
+				else:
+					sub = sub[:final_column]
 				columns = collen(sub)
 
 			indicator = color + sub
+			#room indicates how many spaces to add; so this should be accurate
 			room -= columns
-		return display + (justchar * room) + indicator + CLEAR_FORMATTING
+
+		self._memoargs = (length, justchar, ensure_indicator)
+		self._rendered = display + (justchar * room) + indicator + CLEAR_FORMATTING
+		return self._rendered
 
 def collen(string):
 	'''Column width of a string'''
