@@ -20,14 +20,13 @@ import inspect
 from functools import partial
 from signal import SIGTSTP, SIGINT #redirect ctrl-z and ctrl-c
 
-from .display import CLEAR_FORMATTING, num_defined_colors, raw_num \
-	, def_256_colors, collen, ScrollSuggest, Coloring
+from .display import CLEAR_FORMATTING, collen, ScrollSuggest, Coloring
 
 __all__ = [
 	  "MOUSE_BUTTONS", "quitlambda", "Box", "OverlayBase", "TextOverlay", "Manager"
 ]
 
-REDIRECTED_OUTPUT = "/tmp/client.log"
+_REDIRECTED_OUTPUT = "/tmp/client.log"
 
 #KEYBOARD KEYS------------------------------------------------------------------
 _VALID_KEYNAMES = {
@@ -527,76 +526,9 @@ class TextOverlay(OverlayBase):
 		})
 
 #OVERLAY MANAGER----------------------------------------------------------------
-class ColorManager:
-	'''
-	Abstraction for printing 256 color terminal output. When inited or
-	.toggle'd to True, calling will return a color number for use with
-	Coloring. Otherwise, returns the `uncolored` color
-	'''
-	def __init__(self, two56_colors=False):
-		self._two56 = False
-		self._two56_start = None
-		if two56_colors:
-			self._two56 = True
-			self._two56_start = num_defined_colors()
-
-	def __call__(self, color, green=None, blue=None):
-		'''
-		Convert a hex string to 256 color variant or get
-		color as a pre-caluclated number from `color`
-		Returns raw_num(0) if not running in 256 color mode
-		'''
-		if not self._two56:
-			return raw_num(0)
-
-		if isinstance(color, int):
-			return self._two56_start + color
-		if isinstance(color, float):
-			raise TypeError("cannot interpret float as color number")
-
-		if color is not None and green is not None and blue is not None:
-			color = (color, green, blue)
-		elif not color:			#empty string
-			return raw_num(0)
-
-		try:
-			if isinstance(color, str):
-				parts_len = len(color)//3
-				in216 = [int(int(color[i*parts_len:(i+1)*parts_len], 16)*5/\
-					(16**parts_len)) for i in range(3)]
-			else:
-				in216 = [int(color[i]*5/255) for i in range(3)]
-
-			#too white or too black
-			if sum(in216) < 2 or sum(in216) > 34:
-				return raw_num(0)
-			return self._two56_start + 16 + \
-				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
-		except (AttributeError, TypeError):
-			return raw_num(0)
-
-	def __bool__(self):
-		return self._two56
-
-	def grayscale(self, color):
-		'''
-		Gets a grayscale color.
-		`color` can be from 0 (black) to 24 (white)
-		'''
-		color = min(max(color, 0), 24)
-		return self(color + 232)
-
-	def toggle(self, state):
-		'''Turn 256 colors on (and if undefined, define colors) or off'''
-		self._two56 = state
-		if state and self._two56_start is None: #not defined on startup
-			self._two56_start = num_defined_colors()
-			def_256_colors()
-
 class Blurb:
 	'''
 	Helper class to Screen that manipulates the last two lines of the window.
-	
 	'''
 	def __init__(self, parent):
 		self.parent = parent
@@ -681,7 +613,6 @@ class Screen:
 		self.manager = manager
 
 		self.loop = asyncio.get_event_loop() if loop is None else loop
-		self.two56 = ColorManager()
 
 		self.active = False
 		self._candisplay = False
@@ -706,7 +637,7 @@ class Screen:
 		self.active = True
 		# redirect stdout
 		self._displaybuffer = sys.stdout
-		sys.stdout = open(REDIRECTED_OUTPUT, "a+", buffering=1)
+		sys.stdout = open(_REDIRECTED_OUTPUT, "a+", buffering=1)
 		if sys.stderr.isatty():
 			sys.stderr = sys.stdout
 

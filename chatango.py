@@ -208,51 +208,109 @@ def get_client():
 		return _CLIENT
 	return None
 
-def parse_post(post, me, ishistory, alts=None):
-	'''Helper for parsing pytango.Post objects'''
-	#and is short-circuited
-	isreply = me is not None and (me in post.mentions)
-	if alts is not None:
-		for alt in alts:
-			if not alt:
-				continue
-			isreply = isreply or (alt in post.mentions)
+class ChatangoMessage(client.Message):
+	'''Message subclass for chatango posts'''
+	def __init__(self, post, bot, me, ishistory, alts=None):
+		#and is short-circuited
+		isreply = me is not None and (me in post.mentions)
+		if alts is not None:
+			for alt in alts:
+				if not alt:
+					continue
+				isreply = isreply or (alt in post.mentions)
 
-	#remove egregiously large amounts of newlines (more than 2)
-	#also edit sections with right to left override
-	cooked = ""
-	newline_count = 0
-	rtlbuffer, rtl = "", False
-	for i in post.post:
-		if i == '\n':
-			#right-to-left sequences end on newlines
-			if rtl:
-				cooked += rtlbuffer + (newline_count < 2 and i or "")
-				rtl = False
+		#remove egregiously large amounts of newlines (more than 2)
+		#also edit sections with right to left override
+		cooked = ""
+		newline_count = 0
+		rtlbuffer, rtl = "", False
+		for i in post.post:
+			if i == '\n':
+				#right-to-left sequences end on newlines
+				if rtl:
+					cooked += rtlbuffer + (newline_count < 2 and i or "")
+					rtl = False
+					rtlbuffer = ""
+				if newline_count < 2:
+					cooked += i
+				newline_count += 1
+			#technically not right, since RTL marks should match marks, and
+			#overrides overrides
+			elif ord(i) in (8206, 8237):
+				cooked += rtlbuffer
 				rtlbuffer = ""
-			if newline_count < 2:
-				cooked += i
-			newline_count += 1
-		#technically not right, since RTL marks should match marks, and
-		#overrides overrides
-		elif ord(i) in (8206, 8237):
-			cooked += rtlbuffer
-			rtlbuffer = ""
-			rtl = False
-		elif ord(i) in (8207, 8238):
-			rtl = True
-		else:
-			newline_count = 0
-			if rtl:
-				rtlbuffer = i + rtlbuffer
+				rtl = False
+			elif ord(i) in (8207, 8238):
+				rtl = True
 			else:
-				cooked += i
-	if rtl:
-		cooked += rtlbuffer
-	#format as ' user: message'; the space is for the channel
-	msg = " {}: {}".format(str(post.user), cooked)
-	#extra arguments. use in colorizers
-	return (msg, post, isreply, ishistory)
+				newline_count = 0
+				if rtl:
+					rtlbuffer = i + rtlbuffer
+				else:
+					cooked += i
+		if rtl:
+			cooked += rtlbuffer
+		#format as ' user: message'; the space is for the channel
+		msg = " {}: {}".format(str(post.user), cooked)
+
+		#extra arguments. use in colorizers
+		super().__init__(msg, bot, post, isreply, ishistory)
+
+		if bot.options["bell"] and isreply and not ishistory and \
+		not self.filtered:
+			self.overlay.parent.sound_bell()
+
+	def colorize(self, msg, bot, post, isreply, ishistory):
+		raw_white = client.raw_num(0)
+		#these names are important
+		name_color = client.two56(post.n_color)
+		font_color = client.two56(post.f_color)
+		visited_link = client.two56.grayscale(12)
+
+		#use name colors?
+		username = str(post.user)
+		if not bot.options["htmlcolor"] \
+		or (bot.options["anoncolor"] and username[0] in "!#"):
+			name_color = get_color(username)
+			font_color = get_color(username)
+
+		#greentext, font color
+		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
+		msg.color_by_regex(LINE_RE, text_color, group=3)
+
+		#links in white
+		link_color = lambda x: visited_link \
+			if linkopen.open_link.is_visited(x) else raw_white
+		msg.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
+
+		#underline quotes
+		msg.effect_by_regex(QUOTE_RE, 1)
+
+		#make sure we color the name right
+		msg.insert_color(1, name_color)
+		#insurance the @s before a > are colored right
+		#		space/username/:(space)
+		msg_start = 1+len(username)+2
+		if not msg.colored_at(msg_start):
+			msg.insert_color(msg_start, font_color)
+		if isreply:
+			msg.add_global_effect(0, 1)
+		if ishistory:
+			msg.add_global_effect(1, 1)
+
+		#channel
+		msg.insert_color(0, BEGIN_COLORS + post.channel + 12)
+
+	def do_filter(self, bot, post, isreply, ishistory):
+		username = str(post.user)
+		if username[0] in "!#":
+			user = username[1:]
+		return any((
+			#filtered channels
+			  bot.filtered_channels[post.channel]
+			#ignored users
+			, username.lower() in bot.ignores
+		))
 
 class DequeSet(deque):
 	'''Set, but whose elements can be moved to the front or end like a deque'''
@@ -394,9 +452,11 @@ class ChatBot(pytango.Manager):
 	async def on_pm_connect(self, _):
 		self.overlay.msg_system("Connected to PMs")
 
+	'''
 	async def on_pm(self, _, post, historical):
 		msg = " {}: {}".format(str(post.user), post.post)
 		self.overlay.msg_append(msg, post, True, historical)
+	'''
 
 	async def on_message(self, _, post):
 		#double check for anons
@@ -405,13 +465,8 @@ class ChatBot(pytango.Manager):
 			username = username[1:]
 		self.members.appendleft_promote(username)
 		self.overlay.parse_links(post.post)
-		msg = parse_post(post, self.me, False, alts=self.alts)
-		#						  isreply		ishistory
-		if self.options["bell"] and msg[2] and not msg[3] and \
-		not self.overlay.filter_message(*(msg[1:])):
-			self.overlay.parent.sound_bell()
-
-		self.overlay.msg_append(*msg)
+		self.overlay.msg_append(ChatangoMessage(post, self, self.me, False
+			, alts=self.alts))
 
 	async def on_history_done(self, _, history):
 		for post in history:
@@ -420,8 +475,8 @@ class ChatBot(pytango.Manager):
 				username = username[1:]
 			self.members.append(username)
 			self.overlay.parse_links(post.post, True)
-			msg = parse_post(post, self.me, True)
-			self.overlay.msg_prepend(*msg)
+			self.overlay.msg_prepend(ChatangoMessage(post, self, self.me, True
+				, alts=self.alts))
 		self.overlay.can_select = True
 
 	async def on_flood_warning(self, _):
@@ -539,7 +594,7 @@ class LinkOverlay(client.VisualListOverlay):
 		line.setstr(str(line).replace("https://", "").replace("http://", ""))
 		#draw whether this link is visited
 		if linkopen.open_link.is_visited(self[number]):
-			line.insert_color(0, self.parent.two56.grayscale(12))
+			line.insert_color(0, client.two56.grayscale(12))
 		super()._draw_line(line, number)
 
 #Formatting InputMux------------------------------------------------------------
@@ -637,7 +692,7 @@ def two56(context):
 @two56.setter
 def _(context, value):
 	context.bot.options["256color"] = value
-	context.parent.two56.toggle(value)
+	client.two56.toggle(value)
 	context.recolor_lines()
 
 @Options.listel("bool")
@@ -654,7 +709,7 @@ def _(mux, value, coloring):
 	htmlcolor.draw_bool(mux, value, coloring)
 	if not two56.get(mux.context):
 		coloring.clear()
-		coloring.insert_color(0, mux.parent.two56.grayscale(12))
+		coloring.insert_color(0, client.two56.grayscale(12))
 
 @Options.listel("bool")
 def anoncolor(context):
@@ -670,7 +725,7 @@ def _(mux, value, coloring):
 	anoncolor.draw_bool(mux, value, coloring)
 	if not (two56.get(mux.context) and htmlcolor.get(mux.context)):
 		coloring.clear()
-		coloring.insert_color(0, mux.parent.two56.grayscale(12))
+		coloring.insert_color(0, client.two56.grayscale(12))
 
 #Extended overlay---------------------------------------------------------------
 class ChatangoOverlay(client.ChatOverlay):
@@ -742,7 +797,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		if message:
 			try:
 				#allmessages contain the colored message and arguments
-				msg, name = message[1][0].post, message[1][0].user
+				msg, name = message.args[1].post, message.args[1].user
 				if name[0] in "!#":
 					name = name[1:]
 				if self.bot.me:
@@ -862,7 +917,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		if message:
 			try:
 				#allmessages contain the colored message and arguments
-				name = message[1][0].user
+				name = message.args[1].user
 				if name[0] in "!#":
 					name = name[1:]
 				if name in self.bot.ignores:
@@ -901,7 +956,7 @@ class ChatangoOverlay(client.ChatOverlay):
 	def _open_selected_links(self):
 		message = self.messages.get_selected()
 		try:	#don't bother if it's a system message (or one with no "post")
-			msg = message[1][0].post
+			msg = message.args[1].post
 		except (TypeError, IndexError):
 			return
 		all_links = linkopen.LINK_RE.findall(msg)
@@ -915,7 +970,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		link = ""
 		smallest = -1
 		#look over all link matches; take the middle and find the smallest delta
-		for i in linkopen.LINK_RE.finditer(str(msg[0])):
+		for i in linkopen.LINK_RE.finditer(str(msg)):
 			linkpos = (i.start() + i.end()) // 2
 			distance = abs(linkpos - pos)
 			if distance < smallest or smallest == -1:
@@ -965,47 +1020,6 @@ class ChatangoOverlay(client.ChatOverlay):
 				#ignored users
 				, username.lower() in self.bot.ignores
 		))
-
-	def colorize_message(self, msg, post, isreply, ishistory):
-		raw_white = client.raw_num(0)
-		#these names are important
-		name_color = self.parent.two56(post.n_color)
-		font_color = self.parent.two56(post.f_color)
-		visited_link = self.parent.two56.grayscale(12)
-
-		#use name colors?
-		username = str(post.user)
-		if not self.bot.options["htmlcolor"] \
-		or (self.bot.options["anoncolor"] and username[0] in "!#"):
-			name_color = get_color(username)
-			font_color = get_color(username)
-
-		#greentext, font color
-		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
-		msg.color_by_regex(LINE_RE, text_color, group=3)
-
-		#links in white
-		link_color = lambda x: visited_link \
-			if linkopen.open_link.is_visited(x) else raw_white
-		msg.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
-
-		#underline quotes
-		msg.effect_by_regex(QUOTE_RE, 1)
-
-		#make sure we color the name right
-		msg.insert_color(1, name_color)
-		#insurance the @s before a > are colored right
-		#		space/username/:(space)
-		msg_start = 1+len(username)+2
-		if not msg.colored_at(msg_start):
-			msg.insert_color(msg_start, font_color)
-		if isreply:
-			msg.add_global_effect(0, 1)
-		if ishistory:
-			msg.add_global_effect(1, 1)
-
-		#channel
-		msg.insert_color(0, BEGIN_COLORS + post.channel + 12)
 
 #COMMANDS-------------------------------------------------------------------
 @client.command("ignore")
@@ -1089,7 +1103,7 @@ async def start_client(manager, creds):
 	if creds["options"]["ignoresave"]:
 		creds.set_write("ignores")
 
-	manager.screen.two56.toggle(creds["options"]["256color"])
+	client.two56.toggle(creds["options"]["256color"])
 	manager.screen.toggle_mouse(creds["options"]["mouse"])
 
 	global _CLIENT

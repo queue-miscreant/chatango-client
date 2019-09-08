@@ -12,10 +12,9 @@ from .util import Tokenize
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "_COLORS"
-			, "SELECT_AND_MOVE", "def_256_colors", "get_color"
-			, "raw_num", "num_defined_colors", "collen", "numdrawing"
-			, "columnslice", "Coloring", "JustifiedColoring", "Scrollable"
-			, "ScrollSuggest"]
+			, "SELECT_AND_MOVE", "two56", "get_color", "raw_num"
+			, "num_defined_colors", "collen", "numdrawing", "columnslice"
+			, "Coloring", "JustifiedColoring", "Scrollable", "ScrollSuggest"]
 
 BAD_CHARSETS = [
 	  (119964, 26, ord('A'))	#uppercase math
@@ -28,7 +27,7 @@ BAD_CHARSETS = [
 	, (120094, 26, ord('a'))	#lowercase math fractur
 ]
 
-def parse_fractur(raw):
+def _parse_fractur(raw):
 	cooked = ""
 	for i in raw:
 		#look for fractur and double-width fonts that don't comply with wcwidth
@@ -122,9 +121,70 @@ def def_effect(on, off):
 	_EFFECTS.append((on, off))
 	_EFFECTS_BITS = (_EFFECTS_BITS << 1) | 1
 
-def def_256_colors():
-	for i in range(256):
-		def_color(i)
+class ColorManager:
+	'''
+	Abstraction for printing 256 color terminal output. When inited or
+	.toggle'd to True, calling will return a color number for use with
+	Coloring. Otherwise, returns the `uncolored` color
+	'''
+	def __init__(self):
+		self._two56 = False
+		self._two56_start = None
+
+	def __call__(self, color, green=None, blue=None):
+		'''
+		Convert a hex string to 256 color variant or get
+		color as a pre-caluclated number from `color`
+		Returns raw_num(0) if not running in 256 color mode
+		'''
+		if not self._two56:
+			return raw_num(0)
+
+		if isinstance(color, int):
+			return self._two56_start + color
+		if isinstance(color, float):
+			raise TypeError("cannot interpret float as color number")
+
+		if color is not None and green is not None and blue is not None:
+			color = (color, green, blue)
+		elif not color:			#empty string
+			return raw_num(0)
+
+		try:
+			if isinstance(color, str):
+				parts_len = len(color)//3
+				in216 = [int(int(color[i*parts_len:(i+1)*parts_len], 16)*5/\
+					(16**parts_len)) for i in range(3)]
+			else:
+				in216 = [int(color[i]*5/255) for i in range(3)]
+
+			#too white or too black
+			if sum(in216) < 2 or sum(in216) > 34:
+				return raw_num(0)
+			return self._two56_start + 16 + \
+				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
+		except (AttributeError, TypeError):
+			return raw_num(0)
+
+	def __bool__(self):
+		return self._two56
+
+	def grayscale(self, color):
+		'''
+		Gets a grayscale color.
+		`color` can be from 0 (black) to 24 (white)
+		'''
+		color = min(max(color, 0), 24)
+		return self(color + 232)
+
+	def toggle(self, state):
+		'''Turn 256 colors on (and if undefined, define colors) or off'''
+		self._two56 = state
+		if state and self._two56_start is None: #not defined on startup
+			self._two56_start = num_defined_colors()
+			for i in range(256):
+				def_color(i)
+two56 = ColorManager()
 
 def get_color(color):
 	'''insertColor without position or coloring object'''
@@ -156,7 +216,7 @@ class Coloring:
 		global _CAN_DEFINE_EFFECTS
 		_CAN_DEFINE_EFFECTS = False
 		if remove_fractur:
-			string = parse_fractur(string)
+			string = _parse_fractur(string)
 		self._str = string
 		self._positions = []
 		self._formatting = []

@@ -11,6 +11,7 @@ All openers are made into coroutines so that create_subprocess_exec can be
 yielded from. open_link creates a task in the Screen instance's loop
 '''
 import re
+from time import time
 import os	#for stupid stdout/err hack
 import sys	#cygwin
 import asyncio
