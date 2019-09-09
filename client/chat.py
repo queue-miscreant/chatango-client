@@ -249,7 +249,7 @@ class Message:
 	def key_handler(cls, key_name, override_val=None):
 		'''
 		Decorator for adding a key handler. Key handlers for Messages objects
-		expect signature (calling overlay, message)
+		expect signature (message, calling overlay)
 		See OverlayBase.add_keys documentation for valid values of `key_name`
 		'''
 		if not hasattr(cls, "keys"):
@@ -268,7 +268,7 @@ class Message:
 		if no such key exists, otherwise encapsulates return in a tuple.
 		'''
 		if hasattr(self, "keys") and chars in self.keys:
-			return tuple(self.keys(chars, overlay, self))
+			return (self.keys(chars, self, overlay),)
 		return None
 
 class SystemMessage(Message):

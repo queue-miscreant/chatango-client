@@ -6,7 +6,7 @@ provides a nice interface for modifying variables within a context.
 '''
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, raw_num, get_color \
-	, Coloring, JustifiedColoring, DisplayException
+	, two56, Coloring, JustifiedColoring, DisplayException
 from .base import staticize, override, quitlambda \
 	, Box, OverlayBase, TextOverlay, SizeException
 
@@ -391,13 +391,13 @@ class ColorOverlay(ListOverlay, Box):
 		'''Add color samples to the end of lines'''
 		super()._draw_line(string, i)
 		#reserved for color sliders
-		if i == len(self._COLOR_LIST)-1 or not self.parent.two56:
+		if i == len(self._COLOR_LIST)-1 or not two56:
 			return
 		which = self._spectrum[self.mode][i]
 		if self.mode == 3: #grayscale
-			color = self.parent.two56.grayscale(i * 2)
+			color = two56.grayscale(i * 2)
 		else:
-			color = self.parent.two56([i*255/5 for i in which])
+			color = two56([i*255/5 for i in which])
 		try:
 			string.add_indicator(' ', color, 0)
 		except DisplayException:
@@ -532,7 +532,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 
 	def _update_text(self):
 		self._colored_text = Coloring(self.to_hex(self.color))
-		self._colored_text.insert_color(0, self.parent.two56(self.color))
+		self._colored_text.insert_color(0, two56(self.color))
 
 	@staticmethod
 	def to_hex(color):
@@ -914,7 +914,7 @@ class InputMux:
 		@staticmethod
 		def draw_color(mux, value, coloring):
 			'''Default color drawer'''
-			coloring.add_indicator(' ', mux.parent.two56(value), 0)
+			coloring.add_indicator(' ', two56(value), 0)
 
 		@staticmethod
 		def draw_string(_, value, coloring):

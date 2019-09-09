@@ -66,8 +66,8 @@ class KeyMethod:
 	def __init__(self, func):
 		self.func = func
 		self.__doc__ = func.__doc__
-	def __call__(self, keys):
-		return self.func(keys)
+	def __call__(self, keys, *args):
+		return self.func(keys, *args)
 
 class KeyContainer:
 	'''Object for parsing key sequences and passing them onto handlers'''
@@ -655,7 +655,7 @@ class Screen:
 		self._displaybuffer = None
 		self._screen = None
 
-	def __enter__(self):
+	def startup(self):
 		'''Begin the curses screen, add signal handlers, and redirect stdout'''
 		self.active = True
 		# redirect stdout
@@ -677,7 +677,7 @@ class Screen:
 		self._screen.getch() #the first getch clears the screen
 		return self
 
-	def __exit__(self, typ, value, trace):
+	def shutdown(self):
 		'''Remove all overlays and undo everything in enter'''
 		self.blurb.end_refresh()
 		#let overlays do cleanup
@@ -912,28 +912,28 @@ class Manager:
 			setattr(loop, "create_future", lambda: asyncio.Future(loop=self.loop))
 		self.loop = loop
 		#general state
-		self.prepared = asyncio.Event(loop=loop)
 		self.exited = asyncio.Event(loop=loop)
 
 		self.screen = None
 
-	async def run(self, refresh_blurbs=True):
+	async def run(self, prepared_coroutine=None, refresh_blurbs=True):
 		'''Main client loop'''
 		try:
-			with Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop) \
-			as screen:
-				self.screen = screen
-				await screen.resize()
-				self.prepared.set()
+			self.screen = Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop)
+			self.screen.startup()
+			await self.screen.resize()
+			if prepared_coroutine is not None:
+				await prepared_coroutine
 
-				#done for now; call coroutines waiting for preparation
-				while screen.active:
-					await screen.input()
+			#done for now; call coroutines waiting for preparation
+			while self.screen.active:
+				await self.screen.input()
 		except asyncio.CancelledError:
 			pass	#catch cancellations
 		finally:
 			for i in self._on_exit:
 				await i
+			self.screen.shutdown()
 			self.screen = None
 			self.exited.set()
 
@@ -945,19 +945,21 @@ class Manager:
 		when the manager is prepared with `func(Manager, arg0, arg1,...)`
 		'''
 		#instantiate
-		this = cls(loop=loop)
-		this.loop.create_task(this.run())
-		this.loop.run_until_complete(this.prepared.wait())
+		this, prepared_coroutine = cls(loop=loop), None
 		try:
 			#just use the first arg as a function
 			if args and callable(args[0]):
-				beginfun = args[0](this, *args[1:])
-				#try it as a coroutine
-				if asyncio.iscoroutine(beginfun):
-					this.loop.run_until_complete(beginfun)
+				if not asyncio.iscoroutinefunction(args[0]):
+					raise TypeError("Expected coroutine as first argument "+\
+						"to Manager.start")
+				prepared_coroutine = args[0](this, *args[1:])
+
+			this.loop.create_task(this.run(prepared_coroutine))
 			#wait for the loop to exit
 			this.loop.run_until_complete(this.exited.wait())
 		finally:
+			if this.screen is not None:
+				this.screen.shutdown()
 			this.loop.run_until_complete(this.loop.shutdown_asyncgens())
 
 	def stop(self):

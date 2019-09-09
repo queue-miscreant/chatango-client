@@ -208,6 +208,48 @@ def get_client():
 		return _CLIENT
 	return None
 
+class DequeSet(deque):
+	'''Set, but whose elements can be moved to the front or end like a deque'''
+	def __init__(self, iterable=None):
+		if iterable is not None:
+			super().__init__(iterable)
+		else:
+			super().__init__()
+
+	def appendleft(self, new):
+		'''Add an item to the left of the deque'''
+		if new not in self:
+			super().appendleft(new)
+
+	def appendleft_promote(self, new):
+		'''Add an item to the deque, or already exists, pop and appendleft'''
+		try:
+			self.remove(new)
+		except ValueError:
+			pass
+		super().appendleft(new)
+
+	def append(self, new):
+		'''Add an item to the deque'''
+		if new not in self:
+			super().append(new)
+
+	def append_promote(self, new):
+		'''Add an item to the deque, or already exists, pop and append'''
+		try:
+			self.remove(new)
+		except ValueError:
+			pass
+		super().append(new)
+
+	def extend(self, iterable):
+		'''Append each element in iterable'''
+		super().extend(filter(lambda x: x not in self, iterable))
+
+	def extendleft(self, iterable):
+		'''Append each element in iterable'''
+		super().extendleft(filter(lambda x: x not in self, iterable))
+
 class ChatangoMessage(client.Message):
 	'''Message subclass for chatango posts'''
 	def __init__(self, post, bot, me, ishistory, alts=None):
@@ -311,48 +353,6 @@ class ChatangoMessage(client.Message):
 			#ignored users
 			, username.lower() in bot.ignores
 		))
-
-class DequeSet(deque):
-	'''Set, but whose elements can be moved to the front or end like a deque'''
-	def __init__(self, iterable=None):
-		if iterable is not None:
-			super().__init__(iterable)
-		else:
-			super().__init__()
-
-	def appendleft(self, new):
-		'''Add an item to the left of the deque'''
-		if new not in self:
-			super().appendleft(new)
-
-	def appendleft_promote(self, new):
-		'''Add an item to the deque, or already exists, pop and appendleft'''
-		try:
-			self.remove(new)
-		except ValueError:
-			pass
-		super().appendleft(new)
-
-	def append(self, new):
-		'''Add an item to the deque'''
-		if new not in self:
-			super().append(new)
-
-	def append_promote(self, new):
-		'''Add an item to the deque, or already exists, pop and append'''
-		try:
-			self.remove(new)
-		except ValueError:
-			pass
-		super().append(new)
-
-	def extend(self, iterable):
-		'''Append each element in iterable'''
-		super().extend(filter(lambda x: x not in self, iterable))
-
-	def extendleft(self, iterable):
-		'''Append each element in iterable'''
-		super().extendleft(filter(lambda x: x not in self, iterable))
 
 class ChatBot(pytango.Manager):
 	'''Bot for interacting with the chat'''
@@ -728,6 +728,39 @@ def _(mux, value, coloring):
 		coloring.insert_color(0, client.two56.grayscale(12))
 
 #Extended overlay---------------------------------------------------------------
+@ChatangoMessage.key_handler("a-enter", 1)
+@ChatangoMessage.key_handler("enter")
+def open_selected_links(message, overlay):
+	'''Open links in selected message'''
+	msg = message.args[1].post
+	all_links = linkopen.LINK_RE.findall(msg)
+	LinkOverlay.open_links(overlay.parent, all_links, redraw=overlay)
+
+@ChatangoMessage.key_handler("tab")
+def	reply_to_message(message, overlay):
+	'''Reply to selected message'''
+	msg, name = message.args[1].post, message.args[1].user
+	if name[0] in "!#":
+		name = name[1:]
+	if message.args[0].me:
+		msg = msg.replace("@"+message.args[0].me, "")
+	overlay.text.append("@{}: `{}`".format(name, msg.replace('`', "")))
+
+@ChatangoMessage.key_handler("^n")
+def add_ignore(message, overlay):
+	'''Add ignore from selected message'''
+	try:
+		#allmessages contain the colored message and arguments
+		name = message.args[1].user
+		if name[0] in "!#":
+			name = name[1:]
+		if name in message.args[0].ignores:
+			return
+		message.args[0].ignores.add(name)
+		overlay.redo_lines()
+	except IndexError:
+		pass
+
 class ChatangoOverlay(client.ChatOverlay):
 	def __init__(self, parent, bot):
 		self.last_links = []
@@ -737,8 +770,6 @@ class ChatangoOverlay(client.ChatOverlay):
 		self.bot = bot
 		self.add_keys({
 			  "enter":		self._enter
-			, "a-enter":	self._alt_enter
-			, "tab":		self._tab
 			, "a-g":		self.select_top
 			, "f2":			self._show_links
 			, "f3":			self._show_members
@@ -746,16 +777,13 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "f5":			self._show_channels
 			, "f6":			self._replies_scroller
 #			, "f7":			self.pmConnect
-			, "^a":			lambda: print(self.bot.joined_group.banned_words)
 			, "f12":		self._show_options
 			, "^f":			self._search_scroller
-			, "^n":			self._add_ignore
 			, "^t":			self.join_group
 			, "^p":			self.userpass
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
 			, "mouse-left":		self._click_link
-			, "mouse-middle":	client.override(self._open_selected_links, 1)
 		})
 
 	def _max_select(self):
@@ -774,9 +802,6 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _enter(self):
 		'''Open selected message's links or send message'''
-		if self.messages.get_selected():
-			self._open_selected_links()
-			return
 		text = str(self.text)
 		#if it's not just spaces
 		if not text.isspace():
@@ -785,28 +810,6 @@ class ChatangoOverlay(client.ChatOverlay):
 			self.history.append(text)
 			#call the send
 			self.bot.send_post(text)
-
-	def _alt_enter(self):
-		'''Open link and don't stop selecting'''
-		self._open_selected_links()
-		return 1
-
-	def _tab(self):
-		'''Reply to selected message or complete'''
-		message = self.messages.get_selected()
-		if message:
-			try:
-				#allmessages contain the colored message and arguments
-				msg, name = message.args[1].post, message.args[1].user
-				if name[0] in "!#":
-					name = name[1:]
-				if self.bot.me:
-					msg = msg.replace("@"+self.bot.me, "")
-				self.text.append("@{}: `{}`".format(name, msg.replace('`', "")))
-			except IndexError:
-				pass
-			return
-		self.text.complete()
 
 	def _show_links(self):
 		'''List accumulated links'''
@@ -911,22 +914,6 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		box.add()
 
-	def _add_ignore(self):
-		'''Add ignore from selected message'''
-		message = self.messages.get_selected()
-		if message:
-			try:
-				#allmessages contain the colored message and arguments
-				name = message.args[1].user
-				if name[0] in "!#":
-					name = name[1:]
-				if name in self.bot.ignores:
-					return
-				self.bot.ignores.add(name)
-				self.redo_lines()
-			except IndexError:
-				pass
-		return
 	#LINK RELATED--------------------------------------------------------------
 	def parse_links(self, raw, prepend=False):
 		'''
@@ -952,15 +939,6 @@ class ChatangoOverlay(client.ChatOverlay):
 		last = links[-1]
 		linkopen.open_link(self.parent, last)
 		self.recolor_lines()
-
-	def _open_selected_links(self):
-		message = self.messages.get_selected()
-		try:	#don't bother if it's a system message (or one with no "post")
-			msg = message.args[1].post
-		except (TypeError, IndexError):
-			return
-		all_links = linkopen.LINK_RE.findall(msg)
-		LinkOverlay.open_links(self.parent, all_links, redraw=self)
 
 	def _click_link(self, x, y):
 		'''Click on a link as you would a hyperlink in a web browser'''
