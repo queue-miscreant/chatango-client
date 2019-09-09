@@ -749,8 +749,8 @@ class ConfirmOverlay(OverlayBase):
 			  ord('y'):	call
 			, ord('n'):	override(staticize(self.parent.blurb.release), -1)
 		})
-		self.nomouse()
-		self.noalt()
+		self.keys.nomouse()
+		self.keys.noalt()
 
 	def add(self):
 		'''Hold prompt blurb'''

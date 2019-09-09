@@ -14,8 +14,8 @@ from collections import deque
 from .display import SELECT_AND_MOVE, collen, numdrawing, raw_num \
 	, Coloring, DisplayException
 from .util import LazyIterList, History
-from .base import staticize, quitlambda \
-	, Box, OverlayBase, TextOverlay
+from .base import staticize, quitlambda, override \
+	, Box, KeyContainer, OverlayBase, TextOverlay
 from .overlay import ListOverlay, DisplayOverlay
 
 CHAR_COMMAND = '`'
@@ -158,8 +158,8 @@ class EscapeOverlay(OverlayBase):
 			, '\\':		add_slash
 			, 't':		add_tab
 		})
-		self.nomouse()
-		self.noalt()
+		self.keys.nomouse()
+		self.keys.noalt()
 
 	@staticmethod
 	def _add_char(scroll, char):
@@ -177,7 +177,6 @@ class Message:
 	msg_count = 0
 	def __init__(self, msg, *args):
 		if not isinstance(msg, Coloring):
-			print(msg, type(msg))
 			self._msg = Coloring(msg)
 		else:
 			self._msg = msg
@@ -231,6 +230,47 @@ class Message:
 		'''
 		return self._msg.breaklines(length, self.INDENT, keep_empty=keep_empty)
 
+	@classmethod
+	def examine(cls, class_name):
+		'''
+		Wrapper for a function that monitors messages. Such function may perform
+		some effect such as pushing a new message or alerting the user.
+		'''
+		#TODO
+		if not hasattr(cls, "keys"):
+			cls.keys = KeyContainer()
+		def wrap(func):
+			if cls._monitors.get(class_name) is None:
+				cls._monitors[class_name] = []
+			cls._monitors[class_name].append(func)
+		return wrap
+
+	@classmethod
+	def key_handler(cls, key_name, override_val=None):
+		'''
+		Decorator for adding a key handler. Key handlers for Messages objects
+		expect signature (calling overlay, message)
+		See OverlayBase.add_keys documentation for valid values of `key_name`
+		'''
+		if not hasattr(cls, "keys"):
+			cls.keys = KeyContainer()
+		def ret(func):
+			cook = func
+			if override_val is not None:
+				cook = override(func, override_val)
+			cls.keys.add_key(key_name, cook)
+			return func
+		return ret
+
+	def run_key(self, chars, overlay):
+		'''
+		Run a key callback for this particular `Message` object. Returns None
+		if no such key exists, otherwise encapsulates return in a tuple.
+		'''
+		if hasattr(self, "keys") and chars in self.keys:
+			return tuple(self.keys(chars, overlay, self))
+		return None
+
 class SystemMessage(Message):
 	'''System messages that are colored red-on-white'''
 	def colorize(self, msg, *args):
@@ -242,9 +282,8 @@ class Messages:
 		self.parent = parent
 
 		self.can_select = True
-		self._all_messages = deque()	#contains all Message objects
-		self._lines = []	#contains every line currently or recently
-							#involved in drawing
+		self._all_messages = deque()	#all Message objects
+		self._lines = []	#lines currently or recently involved in drawing
 		#selectors
 		self.selector = 0		#selected message
 		self.start_height = 0	#to calculate which message we're drawing from
@@ -290,16 +329,14 @@ class Messages:
 			need_recolor = self.lazy_color[0] != -1
 			if self.lazy_filter[0] != -1 or need_recolor:
 				self.redo_lines(recolor=need_recolor)
-			return 1
-		return None
+			self.parent.update_input()
+			return True
+		return False
 
 	def get_selected(self):
 		'''
-		Frontend for getting the selected message. Returns a 4-list:
-		[0]: the message (in a coloring object); [1] an argument tuple, which
-		is None for system messages; [2] the number of lines it occupies;
-		[3]: its messageID
-		returns None on not selecting
+		Frontend for getting the selected message. Returns None if no message is
+		selected, or a Message object (or subclass)
 		'''
 		if self.selector:
 			return self._all_messages[-self.selector]
@@ -784,12 +821,6 @@ class ChatOverlay(TextOverlay):
 		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''
 		CommandOverlay(self.parent, self).add()
 
-	def _post(self):
-		if self.messages.stop_select():
-			self.parent.update_input()
-			return 1
-		return None
-
 	def add(self):
 		'''Start timeloop and add overlay'''
 		super().add()
@@ -820,24 +851,18 @@ class ChatOverlay(TextOverlay):
 		Delegate running characters if a message is selected and supports it
 		'''
 		selected = self.messages.get_selected()
+		ret = None
 		if selected is not None:
-			ret = selected.delegated_key(self, chars)
-			if ret is not None:
-				return ret
-		return super().run_key(chars)
+			ret = selected.run_key(chars, self)
+		if ret is None:
+			ret = self.keys(chars)
+		else:
+			ret = ret[0]
 
-	#VIRTUAL FILTERING------------------------------------------
-	@classmethod
-	def examine(cls, class_name):
-		'''
-		Wrapper for a function that monitors messages. Such function may perform some
-		effect such as pushing a new message or alerting the user
-		'''
-		def wrap(func):
-			if cls._monitors.get(class_name) is None:
-				cls._monitors[class_name] = []
-			cls._monitors[class_name].append(func)
-		return wrap
+		#stop selecting if False is returned
+		return ret or self.messages.stop_select()
+
+	#TODO
 
 	def _replace_back(self, *_):
 		'''

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 '''Client package with customizable display and link opening capabilities.'''
 
-from .base import override, Box, OverlayBase, Manager
+from .base import override, Box, OverlayBase, Manager, KeyContainer
 from .overlay import ListOverlay, VisualListOverlay \
 	, ColorOverlay, ColorSliderOverlay, ConfirmOverlay, DisplayOverlay \
 	, TabOverlay, InputOverlay, InputMux
