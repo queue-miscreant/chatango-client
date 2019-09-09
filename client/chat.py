@@ -3,9 +3,6 @@
 '''
 Overlays that provide chat room-like interfaces.
 '''
-#TODO re-look at prepend
-#TODO deques for Messages
-
 import time
 import asyncio
 import traceback
@@ -580,6 +577,7 @@ class Messages:
 
 		self.lazy_delete.append(test, result)
 
+	#TODO make the mouse method peek into message callbacks 
 	def from_position(self, x, y):
 		'''Get the message and depth into the message at position x,y'''
 		#we always draw "upward," so 0 being the bottom is more useful
@@ -645,6 +643,7 @@ class Messages:
 			return -1
 		return None
 
+	#TODO
 	def iterate_with(self, callback):
 		'''
 		Returns an iterator that yields when the callback is true.
@@ -790,6 +789,8 @@ class ChatOverlay(TextOverlay):
 			  '\\':		self._replace_back
 			, 'a-k':	self.select_up
 			, 'a-j':	self.select_down
+			, "ppage":	self.select_up
+			, "npage":	self.select_down
 			, "mouse-wheel-up":		self.select_up
 			, "mouse-wheel-down":	self.select_down
 		})
