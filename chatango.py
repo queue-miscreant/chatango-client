@@ -296,62 +296,66 @@ class ChatangoMessage(client.Message):
 		msg = " {}: {}".format(str(post.user), cooked)
 
 		#extra arguments. use in colorizers
-		super().__init__(msg, bot, post, isreply, ishistory)
+		self.bot = bot
+		self.post = post
+		self.reply = isreply
+		self.history = ishistory
+		super().__init__(msg)
 
 		if bot.options["bell"] and isreply and not ishistory and \
 		not self.filtered:
-			self.overlay.parent.sound_bell()
+			bot.overlay.parent.sound_bell()
 
-	def colorize(self, msg, bot, post, isreply, ishistory):
+	def colorize(self):
 		raw_white = client.raw_num(0)
 		#these names are important
-		name_color = client.two56(post.n_color)
-		font_color = client.two56(post.f_color)
+		name_color = client.two56(self.post.n_color)
+		font_color = client.two56(self.post.f_color)
 		visited_link = client.two56.grayscale(12)
 
 		#use name colors?
-		username = str(post.user)
-		if not bot.options["htmlcolor"] \
-		or (bot.options["anoncolor"] and username[0] in "!#"):
+		username = str(self.post.user)
+		if not self.bot.options["htmlcolor"] \
+		or (self.bot.options["anoncolor"] and username[0] in "!#"):
 			name_color = get_color(username)
 			font_color = get_color(username)
 
 		#greentext, font color
 		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
-		msg.color_by_regex(LINE_RE, text_color, group=3)
+		self.color_by_regex(LINE_RE, text_color, group=3)
 
 		#links in white
 		link_color = lambda x: visited_link \
 			if linkopen.open_link.is_visited(x) else raw_white
-		msg.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
+		self.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
 
 		#underline quotes
-		msg.effect_by_regex(QUOTE_RE, 1)
+		self.effect_by_regex(QUOTE_RE, 1)
 
 		#make sure we color the name right
-		msg.insert_color(1, name_color)
+		self.insert_color(1, name_color)
 		#insurance the @s before a > are colored right
 		#		space/username/:(space)
 		msg_start = 1+len(username)+2
-		if not msg.colored_at(msg_start):
-			msg.insert_color(msg_start, font_color)
-		if isreply:
-			msg.add_global_effect(0, 1)
-		if ishistory:
-			msg.add_global_effect(1, 1)
+		if not self.colored_at(msg_start):
+			self.insert_color(msg_start, font_color)
+		if self.reply:
+			self.add_global_effect(0, 1)
+		if self.history:
+			self.add_global_effect(1, 1)
 
 		#channel
-		msg.insert_color(0, BEGIN_COLORS + post.channel + 12)
+		self.insert_color(0, BEGIN_COLORS + self.post.channel + 12)
 
-	def do_filter(self, bot, post, isreply, ishistory):
-		username = str(post.user)
+	def do_filter(self):
+		username = str(self.post.user)
 		if username[0] in "!#":
-			user = username[1:]
+			username = username[1:]
 		return any((
 			#filtered channels
-			  bot.filtered_channels[post.channel]
+			  self.bot.filtered_channels[self.post.channel]
 			#ignored users
-			, username.lower() in bot.ignores
+			, username.lower() in self.bot.ignores
 		))
 
 class ChatBot(pytango.Manager):
@@ -732,18 +736,18 @@ def _(mux, value, coloring):
 @ChatangoMessage.key_handler("enter")
 def open_selected_links(message, overlay):
 	'''Open links in selected message'''
-	msg = message.args[1].post
+	msg = message.post.post
 	all_links = linkopen.LINK_RE.findall(msg)
 	LinkOverlay.open_links(overlay.parent, all_links, redraw=overlay)
 
 @ChatangoMessage.key_handler("tab")
 def	reply_to_message(message, overlay):
 	'''Reply to selected message'''
-	msg, name = message.args[1].post, message.args[1].user
+	msg, name = message.post.post, message.post.user
 	if name[0] in "!#":
 		name = name[1:]
-	if message.args[0].me:
-		msg = msg.replace("@"+message.args[0].me, "")
+	if message.bot.me:
+		msg = msg.replace("@"+message.bot.me, "")
 	overlay.text.append("@{}: `{}`".format(name, msg.replace('`', "")))
 
 @ChatangoMessage.key_handler("^n")
@@ -751,15 +755,34 @@ def add_ignore(message, overlay):
 	'''Add ignore from selected message'''
 	try:
 		#allmessages contain the colored message and arguments
-		name = message.args[1].user
+		name = message.post.user
 		if name[0] in "!#":
 			name = name[1:]
-		if name in message.args[0].ignores:
+		if name in message.bot.ignores:
 			return
-		message.args[0].ignores.add(name)
+		message.bot.ignores.add(name)
 		overlay.redo_lines()
 	except IndexError:
 		pass
+
+@ChatangoMessage.key_handler("mouse-left")
+def _click_link(message, overlay, pos):
+	'''Click on a link as you would a hyperlink in a web browser'''
+	if pos == -1:
+		return 1
+	link = ""
+	smallest = -1
+	#look over all link matches; take the middle and find the smallest delta
+	for i in linkopen.LINK_RE.finditer(str(message)):
+		linkpos = (i.start() + i.end()) // 2
+		distance = abs(linkpos - pos)
+		if distance < smallest or smallest == -1:
+			smallest = distance
+			link = i.group()
+	if link:
+		linkopen.open_link(overlay.parent, link)
+		overlay.recolor_lines()
+	return 1
 
 class ChatangoOverlay(client.ChatOverlay):
 	def __init__(self, parent, bot):
@@ -783,7 +806,6 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "^p":			self.userpass
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
-			, "mouse-left":		self._click_link
 		})
 
 	def _max_select(self):
@@ -940,24 +962,6 @@ class ChatangoOverlay(client.ChatOverlay):
 		linkopen.open_link(self.parent, last)
 		self.recolor_lines()
 
-	def _click_link(self, x, y):
-		'''Click on a link as you would a hyperlink in a web browser'''
-		msg, pos = self.messages.from_position(x, y)
-		if pos == -1:
-			return 1
-		link = ""
-		smallest = -1
-		#look over all link matches; take the middle and find the smallest delta
-		for i in linkopen.LINK_RE.finditer(str(msg)):
-			linkpos = (i.start() + i.end()) // 2
-			distance = abs(linkpos - pos)
-			if distance < smallest or smallest == -1:
-				smallest = distance
-				link = i.group()
-		if link:
-			linkopen.open_link(self.parent, link)
-			self.recolor_lines()
-		return 1
 	#PARENT BOT RELATED--------------------------------------------------------
 	def reload_client(self):
 		'''Reload current group'''
@@ -987,17 +991,6 @@ class ChatangoOverlay(client.ChatOverlay):
 			await self.bot.reconnect()
 
 		self.parent.loop.create_task(callback())
-
-	def filter_message(self, post, isreply, ishistory):
-		username = str(post.user)
-		if username[0] in "!#":
-			user = username[1:]
-		return any((
-				#filtered channels
-				  self.bot.filtered_channels[post.channel]
-				#ignored users
-				, username.lower() in self.bot.ignores
-		))
 
 #COMMANDS-------------------------------------------------------------------
 @client.command("ignore")
@@ -1144,7 +1137,7 @@ def main():
 	#exec files in custom directory
 	if args.custom:
 		sys.path.append(HOME_PATH)
-		import custom
+		import custom	#pylint: disable=import-error
 		if custom.__doc__ != CUSTOM_DOC:
 			_write_init()
 			print("\x1b[31mAborted due to custom docstring mismatch. "\

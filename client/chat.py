@@ -37,8 +37,8 @@ class CommandOverlay(TextOverlay):
 			self.text.add_command(i, j)
 		self.control_history(self.history)
 		self.add_keys({
-			  'enter':			self._run
-			, 'backspace':		self._wrap_backspace
+			  "enter":			self._run
+			, "backspace":		self._wrap_backspace
 			, "a-backspace":	quitlambda
 		})
 
@@ -67,7 +67,7 @@ class CommandOverlay(TextOverlay):
 			self.parent.blurb.push("command \"{}\" not found".format(args[0]))
 			return -1
 		self.parent.loop.create_task(self.run_command(
-			  self.commands[args[0]] 
+			  self.commands[args[0]]
 			, self.parent, args[1:], name=args[0]))
 		return -1
 
@@ -109,10 +109,9 @@ class CommandOverlay(TextOverlay):
 	@staticmethod
 	async def run_command(command, param, args, name=""):
 		try:
-			if asyncio.iscoroutinefunction(command):
-				result = await command(param, *args)
-			else:
-				result = command(param, *args)
+			result = command(param, *args)
+			if asyncio.iscoroutine(result):
+				result = await result
 			if isinstance(result, OverlayBase):
 				result.add()
 		except:
@@ -163,7 +162,7 @@ class EscapeOverlay(OverlayBase):
 		scroll.append(char)
 		return -1
 
-class Message:
+class Message(Coloring):
 	'''
 	Virtual wrapper class around "Coloring" objects. Allows certain kinds of
 	message objects (like those from a certain service) to have a standard
@@ -172,38 +171,29 @@ class Message:
 	INDENT = "    "
 	SHOW_CLASS = True
 	msg_count = 0
-	def __init__(self, msg, *args):
-		if not isinstance(msg, Coloring):
-			self._msg = Coloring(msg)
-		else:
-			self._msg = msg
+	def __init__(self, msg, remove_fractur=True, **kwargs):
 		self._mid = Message.msg_count
 		Message.msg_count += 1
-		self._args = args
 		self._last_height = 0
 
-	def __str__(self):
-		return str(self._msg)
+		super().__init__(msg, remove_fractur)
+		self.__dict__.update(kwargs)
 
-	msg = property(lambda self: self._msg)
-	args = property(lambda self: self._args)
 	mid = property(lambda self: self._mid)
-	filtered = property(lambda self: self.SHOW_CLASS \
-		and self.do_filter(*self.args))
+	filtered = property(lambda self: self.SHOW_CLASS and self.do_filter())
 	height = property(lambda self: self._last_height)
 	@height.setter
 	def height(self, new):
 		self._last_height = new
 
-	def colorize(self, msg, *args):
+	def colorize(self):
 		'''
 		Virtual method to standardize colorizing a particular subclass of
 		message. Used in Messages objects to create a contiguous display of
 		messages.
 		'''
-		return msg
 
-	def do_filter(self, *args):
+	def do_filter(self):
 		'''
 		Virtual method to standardize filtering of a particular subclass of
 		message. Used in Messages objects to decide whether or not to display a
@@ -217,15 +207,14 @@ class Message:
 		beforehand.
 		'''
 		if do_clear:
-			self._msg.clear()
-		self.colorize(self._msg, *self._args)
+			self.clear()
+		self.colorize()
 
 	def breaklines(self, length, keep_empty=True):
 		'''
-		Break a message to `length` columns. Uses the `Colorize.breaklines`
-		method.
+		Break a message to `length` columns. Uses `Colorize.breaklines` method.
 		'''
-		return self._msg.breaklines(length, self.INDENT, keep_empty=keep_empty)
+		return super().breaklines(length, self.INDENT, keep_empty=keep_empty)
 
 	@classmethod
 	def examine(cls, class_name):
@@ -236,6 +225,7 @@ class Message:
 		#TODO
 		if not hasattr(cls, "keys"):
 			cls.keys = KeyContainer()
+			cls.keys.nomouse()
 		def wrap(func):
 			if cls._monitors.get(class_name) is None:
 				cls._monitors[class_name] = []
@@ -251,6 +241,8 @@ class Message:
 		'''
 		if not hasattr(cls, "keys"):
 			cls.keys = KeyContainer()
+			#mouse callbacks don't work quite the same; they rely on the parent
+			cls.keys.nomouse()
 		def ret(func):
 			cook = func
 			if override_val is not None:
@@ -259,19 +251,10 @@ class Message:
 			return func
 		return ret
 
-	def run_key(self, chars, overlay):
-		'''
-		Run a key callback for this particular `Message` object. Returns None
-		if no such key exists, otherwise encapsulates return in a tuple.
-		'''
-		if hasattr(self, "keys") and chars in self.keys:
-			return (self.keys(chars, self, overlay),)
-		return None
-
 class SystemMessage(Message):
 	'''System messages that are colored red-on-white'''
-	def colorize(self, msg, *args):
-		msg.insert_color(0, raw_num(1))
+	def colorize(self):
+		self.insert_color(0, raw_num(1))
 
 class Messages:
 	'''Container object for Message objects'''
@@ -326,7 +309,6 @@ class Messages:
 			need_recolor = self.lazy_color[0] != -1
 			if self.lazy_filter[0] != -1 or need_recolor:
 				self.redo_lines(recolor=need_recolor)
-			self.parent.update_input()
 			return True
 		return False
 
@@ -577,7 +559,6 @@ class Messages:
 
 		self.lazy_delete.append(test, result)
 
-	#TODO make the mouse method peek into message callbacks 
 	def from_position(self, x, y):
 		'''Get the message and depth into the message at position x,y'''
 		#we always draw "upward," so 0 being the bottom is more useful
@@ -687,7 +668,7 @@ class Messages:
 			i.recolor(do_clear=True)
 		newlines = i.breaklines(width)
 		#guaranteed to be an actual line by above loop
-		height = len(newlines)
+		i.height = len(newlines)
 
 		self.inner_height = max(0, i.height - height)
 		#distance only if we're still selecting
@@ -791,6 +772,7 @@ class ChatOverlay(TextOverlay):
 			, 'a-j':	self.select_down
 			, "ppage":	self.select_up
 			, "npage":	self.select_down
+			, "mouse":	self._mouse
 			, "mouse-wheel-up":		self.select_up
 			, "mouse-wheel-down":	self.select_down
 		})
@@ -848,24 +830,31 @@ class ChatOverlay(TextOverlay):
 		self.messages.redo_lines(newx, newy)
 
 	def run_key(self, chars):
-		'''
-		Delegate running characters if a message is selected and supports it
-		'''
+		'''Delegate running characters to a selected message that supports it'''
 		selected = self.messages.get_selected()
-		ret = None
-		if selected is not None:
-			ret = selected.run_key(chars, self)
-		if ret is None:
+		ret = tuple()
+		if selected is not None and hasattr(selected, "keys"):
+			#pass in the message and this overlay to the handler
+			ret = selected.keys(chars, selected, self)
+		if ret == tuple():
 			ret = self.keys(chars)
-		else:
-			ret = ret[0]
 
 		#stop selecting if False is returned
-		return ret or self.messages.stop_select()
+		if not ret and self.messages.stop_select():
+			self.parent.update_input()
+			ret = 1
+		elif ret == -1:
+			self.remove()
+		return ret
 
-	#TODO
+	def _mouse(self, x, y, state):
+		'''Delegate mouse'''
+		msg, pos = self.messages.from_position(x, y)
+		if hasattr(msg, "keys"):
+			return msg.keys.mouse(x, y, state, msg, self, pos)
+		return 1
 
-	def _replace_back(self, *_):
+	def _replace_back(self):
 		'''
 		Add a newline if the next character is n,
 		or a tab if the next character is t
