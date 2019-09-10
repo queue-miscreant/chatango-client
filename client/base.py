@@ -967,8 +967,8 @@ class Manager:
 			#just use the first arg as a function
 			if args and callable(args[0]):
 				if not asyncio.iscoroutinefunction(args[0]):
-					raise TypeError("Expected coroutine as first argument "+\
-						"to Manager.start")
+					raise TypeError("Expected coroutine as first argument to "\
+						"Manager.start")
 				prepared_coroutine = args[0](this, *args[1:])
 
 			this.loop.create_task(this.run(prepared_coroutine))

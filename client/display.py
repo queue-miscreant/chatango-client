@@ -753,7 +753,7 @@ class Scrollable:
 
 	def __init__(self, width, string=""):
 		if width <= _TABLEN:
-			raise DisplayException("Cannot create Scrollable smaller "+\
+			raise DisplayException("Cannot create Scrollable smaller "\
 				" or equal to tab width %d"%_TABLEN)
 		self._str = string.replace('\x7f', "")
 		self._width = width

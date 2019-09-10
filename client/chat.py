@@ -178,6 +178,9 @@ class Message(Coloring):
 
 		super().__init__(msg, remove_fractur)
 		self.__dict__.update(kwargs)
+		if hasattr(self, "_examine"):
+			for examiner in self._examine:
+				examiner(self)
 
 	mid = property(lambda self: self._mid)
 	filtered = property(lambda self: self.SHOW_CLASS and self.do_filter())
@@ -217,20 +220,15 @@ class Message(Coloring):
 		return super().breaklines(length, self.INDENT, keep_empty=keep_empty)
 
 	@classmethod
-	def examine(cls, class_name):
+	def examine(cls, func):
 		'''
-		Wrapper for a function that monitors messages. Such function may perform
-		some effect such as pushing a new message or alerting the user.
+		Wrapper for a function that monitors instantiation of messages.
+		`func` is expected to have signature (message), the message in question
 		'''
-		#TODO
-		if not hasattr(cls, "keys"):
-			cls.keys = KeyContainer()
-			cls.keys.nomouse()
-		def wrap(func):
-			if cls._monitors.get(class_name) is None:
-				cls._monitors[class_name] = []
-			cls._monitors[class_name].append(func)
-		return wrap
+		if not hasattr(cls, "_examine"):
+			cls._examine = []
+		cls._examine.append(func)
+		return func
 
 	@classmethod
 	def key_handler(cls, key_name, override_val=None):
@@ -624,7 +622,6 @@ class Messages:
 			return -1
 		return None
 
-	#TODO
 	def iterate_with(self, callback):
 		'''
 		Returns an iterator that yields when the callback is true.
@@ -634,8 +631,11 @@ class Messages:
 		while select <= len(self._all_messages):
 			message = self._all_messages[-select]
 			#ignore system messages
-			if callback(*message.args):
-				yield message, select
+			try:
+				if callback(message):
+					yield message, select
+			except:
+				pass
 			select += 1
 
 	#REAPPLY METHODS-----------------------------------------------------------

@@ -513,7 +513,7 @@ class ChatBot(pytango.Manager):
 	async def on_connection_error(self, _, error):
 		if isinstance(error, (ConnectionResetError, type(None))):
 			self.overlay.messages.stop_select()
-			self.overlay.msg_system("Connection lost; press ^R to reconnect")
+			self.overlay.msg_system("Connection lost; press ^r to reconnect")
 		else:
 			self.overlay.msg_system(
 				"Connection error occurred. Try joining another room with ^T")
@@ -914,7 +914,8 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _replies_scroller(self):
 		'''List replies in message scroller'''
-		callback = lambda _, isreply, __: isreply
+		callback = lambda message: isinstance(message, ChatangoMessage) \
+			and message.reply
 		client.add_message_scroller(self, callback
 			, empty="No replies have been accumulated"
 			, early="Earliest reply selected"
@@ -928,7 +929,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		@box.callback
 		def search(string):
-			callback = lambda post, _, __: -1 != post.post.lower().find(string)
+			callback = lambda message: -1 != str(message).lower().find(string)
 			client.add_message_scroller(self, callback
 				, empty="No message containing `%s` found" % string
 				, early="No earlier instance of `%s`" % string
