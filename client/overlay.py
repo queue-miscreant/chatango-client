@@ -16,7 +16,7 @@ __all__ = [
 ]
 
 def _search_cache(keys, value):
-	'''Search through an iterable for value that equals `value` and return it'''
+	'''Search through iterable for value that equals `value` and return key'''
 	for i in keys:
 		if i == value:
 			return i

@@ -749,7 +749,7 @@ def columnslice(string, width):
 class Scrollable:
 	'''Scrollable text input'''
 	#arbitrary number of characters a scrollable can have and not scroll
-	_MAX_NONSCROLL_WIDTH = 5
+	MAX_NONSCROLL_WIDTH = 5
 
 	def __init__(self, width, string=""):
 		if width <= _TABLEN:
@@ -816,7 +816,6 @@ class Scrollable:
 	#SET METHODS----------------------------------------------------------------
 	def _onchanged(self):
 		'''Useful callback to retreive a new 'good' slice of a string'''
-		pass
 
 	def setstr(self, new):
 		'''Set content of scrollable'''
@@ -826,10 +825,10 @@ class Scrollable:
 	def setnonscroll(self, new):
 		'''Set nonscrolling characters of scrollable'''
 		check = collen(new)
-		if check > self._MAX_NONSCROLL_WIDTH:
-			new = new[:columnslice(new, self._MAX_NONSCROLL_WIDTH)]
+		if check > self.MAX_NONSCROLL_WIDTH:
+			new = new[:columnslice(new, self.MAX_NONSCROLL_WIDTH)]
 		self._nonscroll = new
-		self._nonscroll_width = min(check, self._MAX_NONSCROLL_WIDTH)
+		self._nonscroll_width = min(check, self.MAX_NONSCROLL_WIDTH)
 		self._onchanged()
 
 	def setwidth(self, new):
@@ -939,8 +938,7 @@ class Scrollable:
 		self.home()
 
 	def undo(self):
-		#TODO populate a list of changes since some interval
-		#or after pressing space
+		#TODO populate a list of changes since some interval or after pressing space
 		pass
 
 class ScrollSuggest(Scrollable):
