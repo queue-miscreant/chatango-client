@@ -69,6 +69,7 @@ class KeyMethod:
 	def __eq__(self, other):
 		return self._func == other
 
+#Key setup
 class KeyContainer:
 	'''Object for parsing key sequences and passing them onto handlers'''
 	_VALID_KEYNAMES = {
@@ -78,35 +79,12 @@ class KeyContainer:
 	}
 	#these keys point to another key
 	_KEY_LUT = {
-		#curses redirects ctrl-h here for some reason
-		  curses.KEY_BACKSPACE:	127
-		#numpad enter
-		, curses.KEY_ENTER:		10
-		#ctrl-m to ctrl-j (carriage return to line feed)
-		#this really shouldn't be necessary, since curses does that
-		, 13:					10
+		  curses.KEY_BACKSPACE:	127		#undo curses ^h redirect
+		, curses.KEY_ENTER:		10		#numpad enter
+		, 13:					10		#CR to LF, but curses does it already
 	}
-	for curse_name in dir(curses):
-		if "KEY_" in curse_name:
-			better_name = curse_name[4:].lower()
-			#better name
-			if better_name == "dc":
-				better_name = "delete"
-			if better_name in ("resize", "mouse"):
-				continue
-			elif better_name not in _VALID_KEYNAMES: #don't map KEY_BACKSPACE or KEY_ENTER
-				_VALID_KEYNAMES[better_name] = getattr(curses, curse_name)
-
-	#simplicity's sake
-	for non_printing in range(32):
-		#no, not +96 because that gives wrong characters for ^@ and ^_ (\x00 and \x1f)
-		_VALID_KEYNAMES["^%s"%chr(non_printing+64).lower()] = non_printing
-	for printing_char in range(32, 127):
-		_VALID_KEYNAMES[chr(printing_char)] = printing_char
-
-	#MOUSE BUTTONS
-	#getch tends to hang on nodelay if PRESSED buttons are part of the mask,
-	#but RELEASED aren't; wheel up/down doesn't count
+	MOUSE_MASK = 0
+	#PRESSED tends to make curses.getch tends hang on nodelay; wheel is separate
 	_MOUSE_BUTTONS = {
 		  "left":		curses.BUTTON1_RELEASED
 		, "middle":		curses.BUTTON2_RELEASED
@@ -114,17 +92,9 @@ class KeyContainer:
 		, "wheel-up":	curses.BUTTON4_PRESSED
 		, "wheel-down":	2**21
 	}
-	MOUSE_MASK = 0
 	_MOUSE_ERROR = "mouse callback argument mismatch: expected signature "\
 		"(x, y, {0}) or ({0})"
-	_last_mouse = None #ungetmouse but not broken
-	for mouse_button in _MOUSE_BUTTONS.values():
-		MOUSE_MASK |= mouse_button
-
-	try:
-		del mouse_button, printing_char, non_printing, curse_name, better_name
-	except NameError:
-		pass
+	_last_mouse = None	#curses.ungetmouse but not broken
 
 	def __init__(self):
 		self._keys = {
@@ -231,18 +201,6 @@ class KeyContainer:
 		KeyContainer._last_mouse = (x, y, state)
 		return self._callmouse([-1], *args)
 
-	@classmethod
-	def clone_key(cls, old, new):
-		'''Redirect one key to another. DO NOT USE FOR VALUES IN range(32,128)'''
-		try:
-			if isinstance(old, str):
-				old = cls._VALID_KEYNAMES[old]
-			if isinstance(new, str):
-				new = cls._VALID_KEYNAMES[new]
-		except:
-			raise ValueError("%s or %s is an invalid key name"%(old, new))
-		cls._KEY_LUT[old] = new
-
 	def add_key(self, key_name, handler, method_self=None):
 		'''Key addition that supports some nicer names than ASCII numbers'''
 		if not inspect.ismethod(handler) and method_self is not None:
@@ -252,9 +210,8 @@ class KeyContainer:
 			self._keys[key_name] = handler
 			return
 
-		key_name = key_name.lower()
 		#alt buttons
-		if key_name.startswith("a-"):
+		if key_name.lower().startswith("a-"):
 			try:
 				true_name = self._VALID_KEYNAMES[key_name[2:]]
 				self._altkeys[true_name] = handler
@@ -262,14 +219,14 @@ class KeyContainer:
 				raise ValueError("key '%s' invalid" % key_name)
 			return
 		#mouse buttons
-		if key_name.startswith("mouse-"):
+		if key_name.lower().startswith("mouse-"):
 			try:
 				true_name = self._MOUSE_BUTTONS[key_name[6:]]
 				self._mouse[true_name] = handler
 			except KeyError:
 				raise ValueError("key '%s' invalid" % key_name)
 			return
-		if key_name == "mouse":
+		if key_name.lower() == "mouse":
 			self._mouse[-1] = handler
 			return
 
@@ -298,6 +255,41 @@ class KeyContainer:
 		'''Unbind alt keys'''
 		if 27 in self._keys:
 			del self._keys[27]
+
+	@classmethod
+	def initialize_class(cls):
+		for curse_name in dir(curses):
+			if "KEY_" in curse_name:
+				better_name = curse_name[4:].lower()
+				#better name
+				if better_name == "dc":
+					better_name = "delete"
+				if better_name in ("resize", "mouse"):
+					continue
+				elif better_name not in cls._VALID_KEYNAMES: #no remapping keys
+					cls._VALID_KEYNAMES[better_name] = getattr(curses, curse_name)
+
+		#simple command key names
+		for no_print in range(32):
+			#correct keynames for ^@ and ^_ (\x00 and \x1f), lowercase otherwise
+			cls._VALID_KEYNAMES["^%s"%chr(no_print+64).lower()] = no_print
+		for print_char in range(32, 127):
+			cls._VALID_KEYNAMES[chr(print_char)] = print_char
+		for mouse_button in cls._MOUSE_BUTTONS.values():
+			cls.MOUSE_MASK |= mouse_button
+
+	@classmethod
+	def clone_key(cls, old, new):
+		'''Redirect one key to another. DO NOT USE FOR VALUES IN range(32,128)'''
+		try:
+			if isinstance(old, str):
+				old = cls._VALID_KEYNAMES[old]
+			if isinstance(new, str):
+				new = cls._VALID_KEYNAMES[new]
+		except:
+			raise ValueError("%s or %s is an invalid key name"%(old, new))
+		cls._KEY_LUT[old] = new
+KeyContainer.initialize_class()
 
 def quitlambda():
 	'''Close current overlay'''
@@ -373,7 +365,6 @@ class OverlayBase:
 	'''
 	def __init__(self, parent):
 		self.parent = parent		#parent
-
 		self.index = None			#index in the stack
 		self._left = None			#text to draw in reverse video
 		self._right = None			#same but on the right side of the screen
@@ -384,14 +375,14 @@ class OverlayBase:
 
 	width = property(lambda self: self.parent.width)
 	height = property(lambda self: self.parent.height)
-	left = property(lambda self: self._left)
-	right = property(lambda self: self._right)
 
+	left = property(lambda self: self._left, doc="Left side display")
 	@left.setter
 	def left(self, new):
 		self._left = new
 		self.parent.update_status()
 
+	right = property(lambda self: self._right, doc="Right side display")
 	@right.setter
 	def right(self, new):
 		self._right = new
@@ -399,7 +390,7 @@ class OverlayBase:
 
 	def __call__(self, lines):
 		'''
-		When an overlay is called by Screen.display, it is supplied with a list
+		Virtual method called by Screen.display. It is supplied with a list
 		of lines to be printed to the screen. Modify lines by item (i.e
 		lines[value]) to display to the screen
 		'''
@@ -415,10 +406,7 @@ class OverlayBase:
 		return 1
 
 	def resize(self, newx, newy):
-		'''
-		Overridable function. All added overlays have this method called
-		on resize event
-		'''
+		'''Virtual function called on all overlays in stack on resize event'''
 
 	#frontend methods----------------------------
 	def add(self):
@@ -441,12 +429,11 @@ class OverlayBase:
 	def add_keys(self, new_functions, make_method=False):
 		'''
 		Add keys handlers from dict `new_functions`.
-		Keys of `new_functions` must be raw character number, a string of
-		length 1, a-[keyname] for Alt combination, ^[keyname] for Ctrl
-		combination, or mouse-{right, left...} for mouse.
-
-		Strictly, if not prepended by a- or mouse-, a key must be in
-		KeyContainer._VALID_KEYNAMES; usually curses KEY_* names, without KEY_
+		Keys of `new_functions` must be raw character number, a valid keyname,
+		a-[keyname] for Alt combination, ^[keyname] for Ctrl combination,
+		or mouse-{right, left...} for mouse.
+		Valid keynames are found in KeyContainer._VALID_KEYNAMES; usually curses
+		KEY_* names, without KEY_, or the string of length 1 typed
 		'''
 		for i, j in new_functions.items():
 			self.keys.add_key(i, j, method_self=(self if make_method else None))
@@ -469,25 +456,34 @@ class OverlayBase:
 	def add_on_init(cls, key):
 		'''Decorator for adding keys on init. See add_handler for details'''
 		if not hasattr(cls, "_add_on_init"):
-			setattr(cls, "_add_on_init", {})
+			cls._add_on_init = {}
 		def ret(func):
 			cls._add_on_init[key] = func
 			return func
 		return ret
 
+	@classmethod
+	def add_keydoc(cls, keys, predicate=""):
+		if not hasattr(cls, "_more_help"):
+			cls._more_help = []
+		cls._more_help.extend([predicate + i for i in dir(keys)])
+
 	def _get_help_overlay(self):
 		'''Get list of this overlay's keys'''
 		from .overlay import ListOverlay, DisplayOverlay
-		keys_list = ListOverlay(self.parent, dir(self.keys))
+		keys_list = dir(self.keys)
+		if hasattr(self, "_more_help"):
+			keys_list.extend(self._more_help)
+		key_overlay = ListOverlay(self.parent, keys_list)
 
-		@keys_list.key_handler("enter")
+		@key_overlay.key_handler("enter")
 		def get_help(me):
 			docstring = me.list[me.it]
 			help_display = DisplayOverlay(me.parent, docstring)
 			help_display.add_key("enter", quitlambda)
 			help_display.add()
 
-		return keys_list
+		return key_overlay
 
 	def open_help(self):
 		'''Open help overlay'''
@@ -512,7 +508,7 @@ class TextOverlay(OverlayBase):
 			, "shome":		self.text.clear
 			, "right":		staticize(self.text.movepos, 1
 								, doc="Move cursor right")
-			, "left":			staticize(self.text.movepos, -1
+			, "left":		staticize(self.text.movepos, -1
 								, doc="Move cursor left")
 			, "home":		self.text.home
 			, "end":		self.text.end
@@ -544,7 +540,6 @@ class TextOverlay(OverlayBase):
 
 	def _on_sentinel(self):
 		'''Callback run when self._sentinel is typed and self.text is empty'''
-		pass
 
 	def _transform_paste(self, string):
 		'''
@@ -554,9 +549,7 @@ class TextOverlay(OverlayBase):
 		return string
 
 	def control_history(self, history):
-		'''
-		Add standard key definitions for controls on History `history`
-		'''
+		'''Add standard key definitions for controls on History `history`'''
 		nexthist = lambda: self.text.setstr(history.nexthist(str(self.text)))
 		prevhist = lambda: self.text.setstr(history.prevhist(str(self.text)))
 		#preserve docstrings for get_keynames
@@ -569,9 +562,7 @@ class TextOverlay(OverlayBase):
 
 #OVERLAY MANAGER----------------------------------------------------------------
 class Blurb:
-	'''
-	Helper class to Screen that manipulates the last two lines of the window.
-	'''
+	'''Screen helper class that manipulates the last two lines of the window.'''
 	def __init__(self, parent):
 		self.parent = parent
 
@@ -635,8 +626,8 @@ class Blurb:
 
 class Screen:
 	'''
-	Abstraction for interacting with the curses screen.
-	Handles all I/O and maintains overlays
+	Abstraction for interacting with the curses screen. Maintains overlays and
+	handles I/O. Initialization also acquires and prepares the curses screen.
 	'''
 	_INTERLEAVE_DELAY = .001
 	_INPUT_DELAY = .01
@@ -651,15 +642,15 @@ class Screen:
 
 	def __init__(self, manager, refresh_blurbs=True, loop=None):
 		if not (sys.stdin.isatty() and sys.stdout.isatty()):
-			raise ImportError("interactive stdin/stdout required for Screen")
+			raise OSError("interactive stdin/stdout required for Screen")
 		self.manager = manager
 		self.loop = asyncio.get_event_loop() if loop is None else loop
 
-		self.active = False
+		self.active = True
 		self._candisplay = False
 		#guessed terminal dimensions
 		self.width = 40
-		self.height = 70
+		self.height = 30
 		#input/display stack
 		self._ins = []
 		#last high-priority overlay
@@ -670,13 +661,7 @@ class Screen:
 		if refresh_blurbs:
 			self.blurb.start_refresh(4)
 
-		self._displaybuffer = None
-		self._screen = None
-
-	def startup(self):
-		'''Begin the curses screen, add signal handlers, and redirect stdout'''
-		self.active = True
-		# redirect stdout
+		#redirect stdout
 		self._displaybuffer = sys.stdout
 		sys.stdout = open(_REDIRECTED_OUTPUT, "a+", buffering=1)
 		if sys.stderr.isatty():
@@ -685,8 +670,8 @@ class Screen:
 		#escape has delay, not that this matters since I use tmux frequently
 		os.environ.setdefault("ESCDELAY", "25")
 		#pass in the control chars for ctrl-c and ctrl-z
-		self.loop.add_signal_handler(SIGINT, lambda: curses.ungetch(3))
-		self.loop.add_signal_handler(SIGTSTP, lambda: curses.ungetch(26))
+		loop.add_signal_handler(SIGINT, lambda: curses.ungetch(3))
+		loop.add_signal_handler(SIGTSTP, lambda: curses.ungetch(26))
 
 		#curses input setup
 		self._screen = curses.initscr()		#init screen
@@ -937,7 +922,6 @@ class Manager:
 		'''Main client loop'''
 		try:
 			self.screen = Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop)
-			self.screen.startup()
 			await self.screen.resize()
 			if prepared_coroutine is not None:
 				await prepared_coroutine

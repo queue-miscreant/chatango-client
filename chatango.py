@@ -4,17 +4,18 @@
 Chatango extension to client. Receives data from a Chatango room via `ChatBot`
 and displays it to the screen via `ChatangoOverlay`.
 '''
-import json
 from os import path
 import asyncio
 import re
+import json
 from collections import deque
 
 import pytango
 import client
 from client import linkopen
 
-__all__ = ["ChatBot", "ChatangoOverlay", "create_colors", "get_color", "get_client"]
+__all__ = ["ChatBot", "ChatangoMessage", "ChatangoOverlay"
+	, "get_color", "get_client"]
 
 #SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
 FILENAME = "chatango_creds"
@@ -25,8 +26,7 @@ SAVE_PATH = path.join(HOME_PATH, FILENAME)
 #code ripped from stackoverflow questions/1057431
 CUSTOM_DOC = "ensures the `import custom` in will import all python files "\
 "in the directory"
-CUSTOM_INIT = '''
-"%s"
+CUSTOM_INIT = '''"%s"
 
 from os.path import dirname, basename, isfile
 import glob
@@ -39,12 +39,7 @@ def _write_init():
 	with open(path.join(CUSTOM_PATH, "__init__.py"), "w") as i:
 		i.write(CUSTOM_INIT)
 
-#REGEXES AND GLOBALS------------------------------------------------------------
-#look for whole word links starting with http:// or https://
-LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
-REPLY_RE = re.compile(r"@\w+?\b")
-QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
-
+#GLOBALS------------------------------------------------------------
 BEGIN_COLORS = client.num_defined_colors()
 _CLIENT = None
 
@@ -54,14 +49,10 @@ class _Persistent:
 	Add fields and their default value with add_field.
 	'''
 	def __init__(self):
-		#whether a particular value can be read_json, or write_json
-		self._readwrite = {}
-		#entire credentials file from read_json
-		self._entire = {}
-		#default value set by add_field
-		self._default = {}
-		#volatile data to be written to file
-		self._data = {}
+		self._readwrite = {}	#fields that can be read/written to json
+		self._entire = {}		#entire credentials file from read_json
+		self._default = {}		#default value set by add_field
+		self._data = {}			#volatile data to be written to file
 
 	def __str__(self):
 		ret = self._entire.copy()
@@ -217,12 +208,7 @@ class DequeSet(deque):
 			super().__init__()
 
 	def appendleft(self, new):
-		'''Add an item to the left of the deque'''
-		if new not in self:
-			super().appendleft(new)
-
-	def appendleft_promote(self, new):
-		'''Add an item to the deque, or already exists, pop and appendleft'''
+		'''Add or promote an element to the left side of the deque'''
 		try:
 			self.remove(new)
 		except ValueError:
@@ -230,12 +216,7 @@ class DequeSet(deque):
 		super().appendleft(new)
 
 	def append(self, new):
-		'''Add an item to the deque'''
-		if new not in self:
-			super().append(new)
-
-	def append_promote(self, new):
-		'''Add an item to the deque, or already exists, pop and append'''
+		'''Add or promote an element to the right side of the deque'''
 		try:
 			self.remove(new)
 		except ValueError:
@@ -243,15 +224,18 @@ class DequeSet(deque):
 		super().append(new)
 
 	def extend(self, iterable):
-		'''Append each element in iterable'''
+		'''Extend right side of deque with each element in iterable'''
 		super().extend(filter(lambda x: x not in self, iterable))
 
 	def extendleft(self, iterable):
-		'''Append each element in iterable'''
+		'''Extend left side of deque with each element in iterable'''
 		super().extendleft(filter(lambda x: x not in self, iterable))
 
 class ChatangoMessage(client.Message):
 	'''Message subclass for chatango posts'''
+	_LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
+	_QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
+
 	def __init__(self, post, bot, me, ishistory, alts=None):
 		#and is short-circuited
 		isreply = me is not None and (me in post.mentions)
@@ -292,15 +276,11 @@ class ChatangoMessage(client.Message):
 					cooked += i
 		if rtl:
 			cooked += rtlbuffer
-		#format as ' user: message'; the space is for the channel
-		msg = " {}: {}".format(str(post.user), cooked)
 
-		#extra arguments. use in colorizers
-		self.bot = bot
-		self.post = post
-		self.reply = isreply
-		self.history = ishistory
-		super().__init__(msg)
+		#format as ' user: message'; the space is for the channel
+		super().__init__(" {}: {}".format(str(post.user), cooked)
+		#extra arguments to use in colorizers
+			, bot=bot, post=post, reply=isreply, history=ishistory)
 
 		if bot.options["bell"] and isreply and not ishistory and \
 		not self.filtered:
@@ -322,7 +302,7 @@ class ChatangoMessage(client.Message):
 
 		#greentext, font color
 		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
-		self.color_by_regex(LINE_RE, text_color, group=3)
+		self.color_by_regex(self._LINE_RE, text_color, group=3)
 
 		#links in white
 		link_color = lambda x: visited_link \
@@ -330,7 +310,7 @@ class ChatangoMessage(client.Message):
 		self.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
 
 		#underline quotes
-		self.effect_by_regex(QUOTE_RE, 1)
+		self.effect_by_regex(self._QUOTE_RE, 1)
 
 		#make sure we color the name right
 		self.insert_color(1, name_color)
@@ -467,7 +447,7 @@ class ChatBot(pytango.Manager):
 		username = str(post.user).lower()
 		if username[0] in '!#':
 			username = username[1:]
-		self.members.appendleft_promote(username)
+		self.members.appendleft(username)
 		self.overlay.parse_links(post.post)
 		self.overlay.msg_append(ChatangoMessage(post, self, self.me, False
 			, alts=self.alts))
@@ -503,7 +483,7 @@ class ChatBot(pytango.Manager):
 
 	async def on_member_join(self, _, user):
 		if user != "anon":
-			self.members.appendleft_promote(str(user).lower())
+			self.members.appendleft(str(user).lower())
 		#notifications
 		self.overlay.parent.blurb.push("{} has joined".format(str(user)))
 
@@ -1034,7 +1014,7 @@ def _(parent, *args):
 	if not chatbot:
 		return None
 
-	return chatbot.overlay.get_help_overlay()
+	return chatbot.overlay.open_help()
 
 @client.command("avatar", client.tab_file)
 def _(parent, *args):
@@ -1094,8 +1074,8 @@ def main():
 		_write_init()
 
 	parser = argparse.ArgumentParser(description="Start the chatango client")
-	parser.add_argument("-c", dest="login", help="Set username and password. "+\
-		"If both are absent, you log in as an anon. If only password is "+\
+	parser.add_argument("-c", dest="login", help="Set username and password. "\
+		"If both are absent, you log in as an anon. If only password is "\
 		"absent, you set your name without having an account."
 		, nargs='*', metavar=("username", "password"), default=None)
 	parser.add_argument("-g", dest="group", help="Set group name"

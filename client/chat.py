@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 #chat.py
-'''
-Overlays that provide chat room-like interfaces.
-'''
+#TODO maybe unify Messages.up and down
+'''Overlays that provide chatroom-like interfaces.'''
 import time
 import asyncio
 import traceback
@@ -14,13 +13,11 @@ from .util import LazyIterList, History
 from .base import staticize, quitlambda, override \
 	, Box, KeyContainer, OverlayBase, TextOverlay
 from .overlay import ListOverlay, DisplayOverlay
-
-CHAR_COMMAND = '`'
-
-__all__ = ["CHAR_COMMAND", "CommandOverlay", "ChatOverlay", "add_message_scroller"]
+__all__ = ["CommandOverlay", "ChatOverlay", "add_message_scroller"]
 
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands'''
+	CHAR_COMMAND = '/'
 	replace = False
 	history = History()	#global command history
 	#command containers
@@ -29,10 +26,10 @@ class CommandOverlay(TextOverlay):
 
 	def __init__(self, parent, caller=None):
 		super().__init__(parent)
-		self._sentinel = ord(CHAR_COMMAND)
+		self._sentinel = ord(self.CHAR_COMMAND)
 		self.caller = caller
-		self.text.setnonscroll(CHAR_COMMAND)
-		self.text.completer.add_complete(CHAR_COMMAND, self.commands)
+		self.text.setnonscroll(self.CHAR_COMMAND)
+		self.text.completer.add_complete(self.CHAR_COMMAND, self.commands)
 		for i, j in self._command_complete.items():
 			self.text.add_command(i, j)
 		self.control_history(self.history)
@@ -46,9 +43,9 @@ class CommandOverlay(TextOverlay):
 		lines[-1] = "COMMAND"
 
 	def _on_sentinel(self):
-		if self.caller:
+		if self.caller is not None:
 			# override sentinel that added this overlay
-			self.caller.text.append(CHAR_COMMAND)
+			self.caller.text.append(self.CHAR_COMMAND)
 		return -1
 
 	def _wrap_backspace(self):
@@ -114,9 +111,8 @@ class CommandOverlay(TextOverlay):
 				result = await result
 			if isinstance(result, OverlayBase):
 				result.add()
-		except:
-			param.blurb.push("an error occurred while running command %s" % \
-				name)
+		except Exception as exc:
+			param.blurb.push("%s occurred in command '%s'" % (exc, name))
 			print(traceback.format_exc(), "\n")
 
 	#decorators for containers
@@ -124,9 +120,8 @@ class CommandOverlay(TextOverlay):
 	def command(cls, name, complete=None):
 		'''
 		Decorator that adds command `name` with argument suggestion `complete`
-		`complete` may either be a list or a function returning a list and a
-		number that specifies string index (of self.text) to start the
-		suggestion from
+		`complete` may either be a list or a callable with signature
+		(index), the string index to start completion from, that returns a list
 		'''
 		complete = complete if complete is not None else []
 		def wrapper(func):
@@ -214,9 +209,7 @@ class Message(Coloring):
 		self.colorize()
 
 	def breaklines(self, length, keep_empty=True):
-		'''
-		Break a message to `length` columns. Uses `Colorize.breaklines` method.
-		'''
+		'''Break a message to `length` columns. Standardizes outdent'''
 		return super().breaklines(length, self.INDENT, keep_empty=keep_empty)
 
 	@classmethod
@@ -261,7 +254,7 @@ class Messages:
 
 		self.can_select = True
 		self._all_messages = deque()	#all Message objects
-		self._lines = []	#lines currently or recently involved in drawing
+		self._lines = []		#lines currently or recently involved in drawing
 		#selectors
 		self.selector = 0		#selected message
 		self.start_height = 0	#to calculate which message we're drawing from
@@ -271,11 +264,9 @@ class Messages:
 		self.inner_height = 0	#inner message height, to start drawing message
 								#lines late
 		#lazy storage
-		self.lazy_color	= [-1, -1] #latest/earliest messages to recolor
-		self.lazy_filter = [-1, -1] #latest/earliest messages to refilter
-
-		#deletion lambdas
-		self.lazy_delete = []
+		self.lazy_color	= [-1, -1]	#latest/earliest messages to recolor
+		self.lazy_filter = [-1, -1]	#latest/earliest messages to refilter
+		self.lazy_delete = []		#deletion lambdas on attempt to display
 
 	def clear(self):
 		'''Clear all lines and messages'''
@@ -285,14 +276,12 @@ class Messages:
 
 		self.selector = 0
 		self.start_height = 0
-
 		self.linesup = 0
 		self.distance = 0
 		self.inner_height = 0
 
 		self.lazy_color	= [-1, -1]
 		self.lazy_filter = [-1, -1]
-
 		self.lazy_delete.clear()
 
 	def stop_select(self):
@@ -323,18 +312,17 @@ class Messages:
 		if not self._all_messages:
 			return
 		#seperate traversals
-		selftraverse, linetraverse = -self.linesup-1, -2
-		lenself, lenlines = -len(self._lines), -len(lines)
+		selftraverse, linetraverse = self.linesup+1, 2
 		msgno = -self.start_height-1
 
 		thismsg = self._all_messages[msgno].height - self.inner_height
 		#traverse list of lines
-		while selftraverse >= lenself and linetraverse >= lenlines:
+		while selftraverse <= len(self._lines) and linetraverse <= len(lines):
 			reverse = SELECT_AND_MOVE if msgno == -self.selector else ""
-			lines[linetraverse] = reverse + self._lines[selftraverse]
+			lines[-linetraverse] = reverse + self._lines[-selftraverse]
 
-			selftraverse -= 1
-			linetraverse -= 1
+			selftraverse += 1
+			linetraverse += 1
 			thismsg -= 1
 			#skip filtered messages (height = 0)
 			while not thismsg:
@@ -346,11 +334,8 @@ class Messages:
 
 	def apply_lazies(self, select, direction):
 		'''
-		Generator that yields on application of lazy iterators to mesages
-		The value yielded corresponds to the kind of lazy operation performed
-		0:	deletion
-		1:	filtering
-		2:	coloring
+		Applies lazy iterators to mesages. Returns the kind of lazy operation
+		performed: 0: deletion, 1:filtering, 2: coloring
 		'''
 		message = self._all_messages[-select]
 		#next message index is out of bounds
@@ -751,13 +736,13 @@ class Messages:
 class ChatOverlay(TextOverlay):
 	'''
 	Overlay that can push and select messages, and has an input box.
-	Optionally pushes time messages every `push_times` seconds. 0 to disable.
+	Optionally pushes time messages every `push_times` seconds, 0 to disable.
 	'''
 	replace = True
 	_monitors = {}
 	def __init__(self, parent, push_times=600):
 		super().__init__(parent)
-		self._sentinel = ord(CHAR_COMMAND)
+		self._sentinel = ord(CommandOverlay.CHAR_COMMAND)
 		self._push_times = push_times
 		self._push_task = None
 		self._last_time = -1
@@ -855,10 +840,7 @@ class ChatOverlay(TextOverlay):
 		return 1
 
 	def _replace_back(self):
-		'''
-		Add a newline if the next character is n,
-		or a tab if the next character is t
-		'''
+		'''Input escape sequences for \\n, \\t, \\\\'''
 		EscapeOverlay(self.parent, self.text).add()
 
 	#MESSAGE SELECTION----------------------------------------------------------

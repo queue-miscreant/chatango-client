@@ -855,13 +855,13 @@ class Scrollable:
 		self._onchanged()
 
 	def home(self):
-		'''Return to the beginning'''
+		'''Move cursor to the beginning'''
 		self._pos = 0
 		self._disp = 0
 		self._onchanged()
 
 	def end(self):
-		'''Move to the end'''
+		'''Move cursor to the end'''
 		self._pos = 0
 		self._disp = 0
 		self.movepos(len(self._str))
@@ -972,7 +972,7 @@ class ScrollSuggest(Scrollable):
 		self._argument_complete[command] = suggestion
 
 	def complete(self):
-		'''Complete the last word before the cursor or go to next suggestion'''
+		'''Tab forward in suggestions'''
 		#need to generate list
 		if not self._suggest_list:
 			close_quote = False
@@ -1043,7 +1043,7 @@ class ScrollSuggest(Scrollable):
 		return False
 
 	def backcomplete(self):
-		'''Return to previous entry in tab list'''
+		'''Tab backward in suggestions'''
 		if self._suggest_list:
 			self._suggest_num = (self._suggest_num-1)%len(self._suggest_list)
 			suggestion = self._suggest_list[self._suggest_num]
