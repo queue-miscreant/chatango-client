@@ -208,9 +208,11 @@ class Message(Coloring):
 			self.clear()
 		self.colorize()
 
-	def breaklines(self, length, keep_empty=True):
+	def breaklines(self, length, outdent=None, keep_empty=True):
 		'''Break a message to `length` columns. Standardizes outdent'''
-		return super().breaklines(length, self.INDENT, keep_empty=keep_empty)
+		if outdent is None:
+			outdent = self.INDENT
+		return super().breaklines(length, outdent, keep_empty)
 
 	@classmethod
 	def examine(cls, func):

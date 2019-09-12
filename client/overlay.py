@@ -668,7 +668,7 @@ class DisplayOverlay(OverlayBase, Box):
 			for i in strings]
 
 		#flattened list of broken strings
-		self._formatted = [j	for i in self._rawlist
+		self._formatted = [j for i in self._rawlist
 			for j in i.breaklines(self.width-2, outdent=self._outdent)]
 		#bigger than the box holding it
 		self.replace = len(self._formatted) > self.height-2
