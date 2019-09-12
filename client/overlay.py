@@ -745,9 +745,9 @@ class ConfirmOverlay(OverlayBase):
 			self.parent.blurb.release()
 			return -1
 
-		self._keys.update({ #run these in order
-			  ord('y'):	call
-			, ord('n'):	override(staticize(self.parent.blurb.release), -1)
+		self.add_keys({			#run these in order
+			  'y':	call
+			, 'n':	override(self.parent.blurb.release, -1)
 		})
 		self.keys.nomouse()
 		self.keys.noalt()
