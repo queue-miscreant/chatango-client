@@ -327,7 +327,7 @@ class ChatangoMessage(client.Message):
 		#channel
 		self.insert_color(0, BEGIN_COLORS + self.post.channel + 12)
 
-	def do_filter(self):
+	def filter(self):
 		username = str(self.post.user)
 		if username[0] in "!#":
 			username = username[1:]
