@@ -170,7 +170,7 @@ class KeyContainer:
 		chars = [i for i in chars if i != curses.KEY_MOUSE]
 		if chars[0] != -1:
 			#control not returned to loop until later
-			asyncio.get_event_loop().call_soon(self.run_key, chars, *args)
+			asyncio.get_event_loop().call_soon(self, chars, *args)
 		try:
 			if self._last_mouse is not None:
 				x, y, state = self._last_mouse	#pylint: disable=unpacking-non-sequence
