@@ -20,77 +20,11 @@ import inspect
 from functools import partial
 from signal import SIGTSTP, SIGINT #redirect ctrl-z and ctrl-c
 
-from .display import CLEAR_FORMATTING, num_defined_colors, raw_num \
-	, def_256_colors, collen, ScrollSuggest, Coloring
+from .display import CLEAR_FORMATTING, collen, ScrollSuggest, Coloring
 
-__all__ = [
-	  "MOUSE_BUTTONS", "quitlambda", "Box", "OverlayBase", "TextOverlay", "Manager"
-]
+__all__ = ["quitlambda", "Box", "OverlayBase", "TextOverlay", "Manager"]
 
-REDIRECTED_OUTPUT = "/tmp/client.log"
-
-#KEYBOARD KEYS------------------------------------------------------------------
-_VALID_KEYNAMES = {
-	  "tab":		9
-	, "enter":		10
-	, "backspace":	127
-}
-#these keys point to another key
-_KEY_LUT = {
-	#curses redirects ctrl-h here for some reason
-	  curses.KEY_BACKSPACE:	127
-	#numpad enter
-	, curses.KEY_ENTER:		10
-	#ctrl-m to ctrl-j (carriage return to line feed)
-	#this really shouldn't be necessary, since curses does that
-	, 13:					10
-}
-for curse_name in dir(curses):
-	if "KEY_" in curse_name:
-		better_name = curse_name[4:].lower()
-		#better name
-		if better_name == "dc":
-			better_name = "delete"
-		if better_name == "resize":
-			continue
-		elif better_name not in _VALID_KEYNAMES: #don't map KEY_BACKSPACE or KEY_ENTER
-			_VALID_KEYNAMES[better_name] = getattr(curses, curse_name)
-
-#simplicity's sake
-for non_printing in range(32):
-	#no, not +96 because that gives wrong characters for ^@ and ^_ (\x00 and \x1f)
-	_VALID_KEYNAMES["^%s"%chr(non_printing+64).lower()] = non_printing
-for printing_char in range(32, 127):
-	_VALID_KEYNAMES[chr(printing_char)] = printing_char
-
-#MOUSE BUTTONS
-#getch tends to hang on nodelay if PRESSED buttons are part of the mask,
-#but RELEASED aren't; wheel up/down doesn't count
-MOUSE_BUTTONS = {
-	  "left":		curses.BUTTON1_RELEASED
-	, "middle":		curses.BUTTON2_RELEASED
-	, "right":		curses.BUTTON3_RELEASED
-	, "wheel-up":	curses.BUTTON4_PRESSED
-	, "wheel-down":	2**21
-}
-_MOUSE_MASK = 0
-for mouse_button in MOUSE_BUTTONS.values():
-	_MOUSE_MASK |= mouse_button
-
-def clone_key(fro, to):
-	'''Redirect one key to another. DO NOT USE FOR VALUES IN range(32,128)'''
-	try:
-		if isinstance(fro, str):
-			fro = _VALID_KEYNAMES[fro]
-		if isinstance(to, str):
-			to = _VALID_KEYNAMES[to]
-	except:
-		raise ValueError("%s or %s is an invalid key name"%(fro, to))
-	_KEY_LUT[fro] = to
-
-def ctrl(letter):
-	return ord(letter.lower()) - ord('a') + 1
-
+_REDIRECTED_OUTPUT = "/tmp/client.log"
 #HANDLER-HELPER FUNCTIONS-------------------------------------------------------
 def staticize(func, *args, doc=None, **kwargs):
 	'''functools.partial, but conserves or adds documentation'''
@@ -100,8 +34,8 @@ def staticize(func, *args, doc=None, **kwargs):
 
 class override:
 	'''
-	Create a new function that returns `ret`. Avoids (or ensures)
-	firing _post in overlays
+	Create a new function that returns `ret`. Changes the value of a key's
+	return value to control redrawing/removing overlays
 	'''
 	def __init__(self, func, ret=0, nodoc=False):
 		self.func = func
@@ -122,16 +56,240 @@ class override:
 
 class KeyMethod:
 	'''
-	Decorator for overlays.
-	When OverlayBase.run_key is supplied with multiple characters, if a handler
-	for the key is found, then the rest of the characters are passed into the
-	handler as the only argument.
+	Wrapper for overlay methods.
+	When KeyContainer.__call__ is supplied with multiple characters, if a
+	handler for the key is found, then the rest of the characters are passed
+	into the handler, along with the rest of the arguments to __call__
 	'''
 	def __init__(self, func):
-		self.func = func
+		self._func = func
 		self.__doc__ = func.__doc__
-	def __call__(self, me, keys):
-		return self.func(me, keys)
+	def __call__(self, keys, *args):
+		return self._func(keys, *args)
+	def __eq__(self, other):
+		return self._func == other
+
+#Key setup
+class KeyContainer:
+	'''Object for parsing key sequences and passing them onto handlers'''
+	_VALID_KEYNAMES = {
+		  "tab":		9
+		, "enter":		10
+		, "backspace":	127
+	}
+	#these keys point to another key
+	_KEY_LUT = {
+		  curses.KEY_BACKSPACE:	127		#undo curses ^h redirect
+		, curses.KEY_ENTER:		10		#numpad enter
+		, 13:					10		#CR to LF, but curses does it already
+	}
+	MOUSE_MASK = 0
+	#PRESSED tends to make curses.getch tends hang on nodelay; wheel is separate
+	_MOUSE_BUTTONS = {
+		  "left":		curses.BUTTON1_RELEASED
+		, "middle":		curses.BUTTON2_RELEASED
+		, "right":		curses.BUTTON3_RELEASED
+		, "wheel-up":	curses.BUTTON4_PRESSED
+		, "wheel-down":	2**21
+	}
+	_MOUSE_ERROR = "mouse callback argument mismatch: expected signature "\
+		"(x, y, {0}) or ({0})"
+	_last_mouse = None	#curses.ungetmouse but not broken
+
+	def __init__(self):
+		self._keys = {
+			27:						KeyMethod(self._callalt)
+			, curses.KEY_MOUSE:		KeyMethod(self._callmouse)
+		}
+		self._altkeys = {}
+		self._mouse = {}
+
+	def screen_keys(self, screen):
+		self._keys.update({
+			12:	screen.redraw_all							#^l
+			, curses.KEY_RESIZE:	screen.schedule_resize
+		})
+
+	def __call__(self, chars, *args):
+		'''
+		Run a key's callback. This expects a single argument: a list of numbers
+		terminated by -1. Subsequent arguments are passed to the key handler.
+		Returns singleton tuple if there is no handler, otherwise propagates 
+		handler's return
+		'''
+		try:
+			char = self._KEY_LUT[chars[0]]
+		except KeyError:
+			char = chars[0]
+
+		#ignore the command character and trailing -1
+		#second clause ignores heading newlines
+		fun, other_keys = None, None
+		if (char in self._keys) and (char == 27 or len(chars) <= 2 or char > 255):
+			fun, other_keys = self._keys[char], chars[1:] or [-1]
+		elif -1 in self._keys and (char in (9, 10, 13) or char in range(32, 255)):
+			fun, other_keys = self._keys[-1], chars[:-1]
+		if fun is not None and other_keys is not None:
+			if isinstance(fun, KeyMethod):
+				return fun(other_keys, *args)
+			return fun(*args)
+		return tuple()
+
+	def __dir__(self):
+		'''Get a list of keynames and their documentation'''
+		ret = []
+		for i, j in self._VALID_KEYNAMES.items():
+			#ignore named characters and escape, they're not verbose
+			if i in ("^[", "^i", "^j", chr(127), "mouse"):
+				continue
+			if i == ' ':
+				i = "space"
+			doc_string = ""
+			format_string = ""
+			if j in self._keys:
+				doc_string = inspect.getdoc(self._keys[j])
+				format_string = "{}: {}"
+			elif j in self._altkeys:
+				doc_string = inspect.getdoc(self._altkeys[j])
+				format_string = "a-{}: {}"
+			else:
+				continue
+
+			if not doc_string:
+				doc_string = "(no documentation)"
+			ret.append(format_string.format(i, doc_string))
+		return ret
+
+	def _callalt(self, chars, *args):
+		'''Run a alt-key's callback'''
+		return self._altkeys[chars[0]](*args) \
+			if chars[0] in self._altkeys else tuple()
+
+	def _callmouse(self, chars, *args):
+		'''Run a mouse's callback. Saves invalid mouse data for next call'''
+		chars = [i for i in chars if i != curses.KEY_MOUSE]
+		if chars[0] != -1:
+			#control not returned to loop until later
+			asyncio.get_event_loop().call_soon(self, chars, *args)
+		try:
+			if self._last_mouse is not None:
+				x, y, state = self._last_mouse	#pylint: disable=unpacking-non-sequence
+				KeyContainer._last_mouse = None
+			else:
+				_, x, y, _, state = curses.getmouse()
+			error_sig = "..."
+			if state not in self._mouse:
+				if -1 not in self._mouse:
+					KeyContainer._last_mouse = (x, y, state)
+					return tuple()
+				error_sig = "(state, ...)"
+				args = (state, *args)
+				state = -1
+			try:
+				return self._mouse[state](x, y, *args)
+			except TypeError:
+				return self._mouse[state](*args)
+		except curses.error:
+			pass
+		except TypeError as exc:
+			raise TypeError(self._MOUSE_ERROR.format(error_sig)) from exc
+
+		return tuple()
+
+	def mouse(self, x, y, state, *args):
+		'''Unget some mouse data and run the associated mouse callback'''
+		KeyContainer._last_mouse = (x, y, state)
+		return self._callmouse([-1], *args)
+
+	def add_key(self, key_name, handler, method_self=None):
+		'''Key addition that supports some nicer names than ASCII numbers'''
+		if not inspect.ismethod(handler) and method_self is not None:
+			handler = staticize(handler, method_self)
+
+		if isinstance(key_name, int):
+			self._keys[key_name] = handler
+			return
+
+		#alt buttons
+		if key_name.lower().startswith("a-"):
+			try:
+				true_name = self._VALID_KEYNAMES[key_name[2:]]
+				self._altkeys[true_name] = handler
+			except KeyError:
+				raise ValueError("key '%s' invalid" % key_name)
+			return
+		#mouse buttons
+		if key_name.lower().startswith("mouse-"):
+			try:
+				true_name = self._MOUSE_BUTTONS[key_name[6:]]
+				self._mouse[true_name] = handler
+			except KeyError:
+				raise ValueError("key '%s' invalid" % key_name)
+			return
+		if key_name.lower() == "mouse":
+			self._mouse[-1] = handler
+			return
+
+		#everything else
+		try:
+			true_name = self._VALID_KEYNAMES[key_name]
+			self._keys[true_name] = handler
+		except:
+			raise ValueError("key '%s' invalid" % key_name)
+
+	def input(self, handler):
+		'''
+		Set a handler for any generic input (that doesn't have another handler)
+		Will bind `handler` to a KeyMethod instance if it isn't already
+		'''
+		if not isinstance(handler, KeyMethod):
+			handler = KeyMethod(handler)
+		self._keys[-1] = handler
+
+	def nomouse(self):
+		'''Unbind the mouse from _keys'''
+		if curses.KEY_MOUSE in self._keys:
+			del self._keys[curses.KEY_MOUSE]
+
+	def noalt(self):
+		'''Unbind alt keys'''
+		if 27 in self._keys:
+			del self._keys[27]
+
+	@classmethod
+	def initialize_class(cls):
+		for curse_name in dir(curses):
+			if "KEY_" in curse_name:
+				better_name = curse_name[4:].lower()
+				#better name
+				if better_name == "dc":
+					better_name = "delete"
+				if better_name in ("resize", "mouse"):
+					continue
+				elif better_name not in cls._VALID_KEYNAMES: #no remapping keys
+					cls._VALID_KEYNAMES[better_name] = getattr(curses, curse_name)
+
+		#simple command key names
+		for no_print in range(32):
+			#correct keynames for ^@ and ^_ (\x00 and \x1f), lowercase otherwise
+			cls._VALID_KEYNAMES["^%s"%chr(no_print+64).lower()] = no_print
+		for print_char in range(32, 127):
+			cls._VALID_KEYNAMES[chr(print_char)] = print_char
+		for mouse_button in cls._MOUSE_BUTTONS.values():
+			cls.MOUSE_MASK |= mouse_button
+
+	@classmethod
+	def clone_key(cls, old, new):
+		'''Redirect one key to another. DO NOT USE FOR VALUES IN range(32,128)'''
+		try:
+			if isinstance(old, str):
+				old = cls._VALID_KEYNAMES[old]
+			if isinstance(new, str):
+				new = cls._VALID_KEYNAMES[new]
+		except:
+			raise ValueError("%s or %s is an invalid key name"%(old, new))
+		cls._KEY_LUT[old] = new
+KeyContainer.initialize_class()
 
 def quitlambda():
 	'''Close current overlay'''
@@ -207,134 +365,48 @@ class OverlayBase:
 	'''
 	def __init__(self, parent):
 		self.parent = parent		#parent
-
 		self.index = None			#index in the stack
 		self._left = None			#text to draw in reverse video
 		self._right = None			#same but on the right side of the screen
-		self._keys = {
-			  3:	staticize(self.parent.stop, doc="Exit client")	#^c
-			, 12:	parent.redraw_all								#^l
-			, 27:	self._callalt
-			#no post on resize
-			, curses.KEY_RESIZE:	parent.schedule_resize
-			, curses.KEY_MOUSE:		self._callmouse
-		}
-		self._altkeys =	{-1: quitlambda}
-		self._mouse = {}
+		self.keys = KeyContainer()
+		self.keys.screen_keys(parent)
 		if hasattr(self, "_add_on_init"):
 			self.add_keys(self._add_on_init, make_method=True)
 
 	width = property(lambda self: self.parent.width)
 	height = property(lambda self: self.parent.height)
-	left = property(lambda self: self._left)
-	right = property(lambda self: self._right)
 
+	left = property(lambda self: self._left, doc="Left side display")
 	@left.setter
 	def left(self, new):
 		self._left = new
 		self.parent.update_status()
 
+	right = property(lambda self: self._right, doc="Right side display")
 	@right.setter
 	def right(self, new):
 		self._right = new
 		self.parent.update_status()
 
-	def __dir__(self):
-		'''Get a list of keynames and their documentation'''
-		ret = []
-		for i, j in _VALID_KEYNAMES.items():
-			#ignore named characters and escape, they're not verbose
-			if i in ("^[", "^i", "^j", chr(127), "mouse"):
-				continue
-			if i == ' ':
-				i = "space"
-			doc_string = ""
-			format_string = ""
-			if j in self._keys:
-				doc_string = inspect.getdoc(self._keys[j])
-				format_string = "{}: {}"
-			elif j in self._altkeys:
-				doc_string = inspect.getdoc(self._altkeys[j])
-				format_string = "a-{}: {}"
-			else:
-				continue
-
-			if not doc_string:
-				doc_string = "(no documentation)"
-			ret.append(format_string.format(i, doc_string))
-		ret.sort()
-		return ret
-
 	def __call__(self, lines):
 		'''
-		When an overlay is called by Screen.display, it is supplied with a list
+		Virtual method called by Screen.display. It is supplied with a list
 		of lines to be printed to the screen. Modify lines by item (i.e
 		lines[value]) to display to the screen
 		'''
-		pass
-
-	@KeyMethod
-	def _callalt(self, chars):
-		'''Run a alt-key's callback'''
-		return chars[0] in self._altkeys and self._altkeys[chars[0]]()
-
-	@KeyMethod
-	def _callmouse(self, chars):
-		'''Run a mouse's callback'''
-		chars = [i for i in chars if i != curses.KEY_MOUSE]
-		if chars[0] != -1:
-			#control not returned to loop until later
-			self.parent.loop.call_soon(self.run_key, chars)
-		try:
-			_, x, y, _, state = curses.getmouse()
-			if state in self._mouse:
-				try:
-					return self._mouse[state](x, y)
-				except TypeError:
-					return self._mouse[state]()
-				except Exception as exc:
-					raise TypeError("mouse callback does not have "+\
-						"either 0 or 2 arguments") from exc
-		except curses.error:
-			pass
-		return None
-
-	def _post(self):
-		'''
-		In run_key, if a key handler returns a value equivalent to boolean
-		False, this function is run and its return value replaces the handler's
-		'''
-		return 1
 
 	def run_key(self, chars):
 		'''
-		Run a key's callback. This expects a single argument: a list of
-		numbers terminated by -1
+		Run a key callback. This expects a single argument: a list of numbers
+		terminated by -1. If the return value has boolean True, Screen will
+		redraw; if the return value is -1, the overlay will remove itself
 		'''
-		try:
-			char = _KEY_LUT[chars[0]]
-		except KeyError:
-			char = chars[0]
-
-		#ignore the command character and trailing -1
-		#second clause ignores heading newlines
-		fun, args = None, None
-		if (char in self._keys) and (char == 27 or len(chars) <= 2 or char > 255):
-			fun, args = self._keys[char], chars[1:] or [-1]
-		elif -1 in self._keys and (char in (9, 10, 13) or char in range(32, 255)):
-			fun, args = self._keys[-1], chars[:-1]
-		if fun is not None and args is not None:
-			if isinstance(fun, KeyMethod):
-				return fun(self, args) or self._post()
-			return fun() or self._post()
-		return None
+		if self.keys(chars) == -1:
+			self.remove()
+		return 1
 
 	def resize(self, newx, newy):
-		'''
-		Overridable function. All added overlays have this method called
-		on resize event
-		'''
-		pass
+		'''Virtual function called on all overlays in stack on resize event'''
 
 	#frontend methods----------------------------
 	def add(self):
@@ -354,50 +426,17 @@ class OverlayBase:
 		self.remove()
 		new.add()
 
-	def _add_key(self, key_name, handler, make_method):
-		'''Backend for add_key'''
-		if not inspect.ismethod(handler) and make_method:
-			handler = staticize(handler, self)
-
-		if isinstance(key_name, int):
-			self._keys[key_name] = handler
-			return
-
-		#alt buttons
-		if key_name.lower().startswith("a-"):
-			try:
-				true_name = _VALID_KEYNAMES[key_name[2:]]
-				self._altkeys[true_name] = handler
-			except KeyError:
-				raise ValueError("key '%s' invalid" % key_name)
-			return
-		#mouse buttons
-		if key_name.lower().startswith("mouse-"):
-			try:
-				true_name = MOUSE_BUTTONS[key_name[6:]]
-				self._mouse[true_name] = handler
-			except KeyError:
-				raise ValueError("key '%s' invalid" % key_name)
-			return
-		#everything else
-		try:
-			true_name = _VALID_KEYNAMES[key_name]
-			self._keys[true_name] = handler
-		except:
-			raise ValueError("key '%s' invalid" % key_name)
-
 	def add_keys(self, new_functions, make_method=False):
 		'''
 		Add keys handlers from dict `new_functions`.
-		Keys of `new_functions` must be raw character number, a string of
-		length 1, a-[keyname] for Alt combination, ^[keyname] for Ctrl
-		combination, or mouse-{right, left...} for mouse.
-
-		Strictly, if not prepended by a- or mouse-, a key must be in
-		_VALID_KEYNAMES
+		Keys of `new_functions` must be raw character number, a valid keyname,
+		a-[keyname] for Alt combination, ^[keyname] for Ctrl combination,
+		or mouse-{right, left...} for mouse.
+		Valid keynames are found in KeyContainer._VALID_KEYNAMES; usually curses
+		KEY_* names, without KEY_, or the string of length 1 typed
 		'''
 		for i, j in new_functions.items():
-			self._add_key(i, j, make_method=make_method)
+			self.keys.add_key(i, j, method_self=(self if make_method else None))
 
 	def key_handler(self, key_name, override_val=None, make_method=True):
 		'''
@@ -408,7 +447,8 @@ class OverlayBase:
 			cook = func
 			if override_val is not None:
 				cook = override(func, override_val)
-			self._add_key(key_name, cook, make_method=make_method)
+			self.keys.add_key(key_name, cook
+				, method_self=(self if make_method else None))
 			return func
 		return ret
 
@@ -416,35 +456,34 @@ class OverlayBase:
 	def add_on_init(cls, key):
 		'''Decorator for adding keys on init. See add_handler for details'''
 		if not hasattr(cls, "_add_on_init"):
-			setattr(cls, "_add_on_init", {})
+			cls._add_on_init = {}
 		def ret(func):
 			cls._add_on_init[key] = func
 			return func
 		return ret
 
-	def nomouse(self):
-		'''Unbind the mouse from _keys'''
-		if curses.KEY_MOUSE in self._keys:
-			del self._keys[curses.KEY_MOUSE]
-
-	def noalt(self):
-		'''Unbind alt keys'''
-		if 27 in self._keys:
-			del self._keys[27]
+	@classmethod
+	def add_keydoc(cls, keys, predicate=""):
+		if not hasattr(cls, "_more_help"):
+			cls._more_help = []
+		cls._more_help.extend([predicate + i for i in dir(keys)])
 
 	def _get_help_overlay(self):
 		'''Get list of this overlay's keys'''
 		from .overlay import ListOverlay, DisplayOverlay
-		keys_list = ListOverlay(self.parent, dir(self))
+		keys_list = dir(self.keys)
+		if hasattr(self, "_more_help"):
+			keys_list.extend(self._more_help)
+		key_overlay = ListOverlay(self.parent, keys_list)
 
-		@keys_list.key_handler("enter")
+		@key_overlay.key_handler("enter")
 		def get_help(me):
 			docstring = me.list[me.it]
 			help_display = DisplayOverlay(me.parent, docstring)
 			help_display.add_key("enter", quitlambda)
 			help_display.add()
 
-		return keys_list
+		return key_overlay
 
 	def open_help(self):
 		'''Open help overlay'''
@@ -457,7 +496,7 @@ class TextOverlay(OverlayBase):
 		self.text = _NScrollable(self.parent)
 		#ASCII code of sentinel char
 		self._sentinel = 0
-		self._keys[-1] = self._input
+		self.keys.input(self._input)
 
 		self.add_keys({
 			  "tab":		self.text.complete
@@ -469,12 +508,11 @@ class TextOverlay(OverlayBase):
 			, "shome":		self.text.clear
 			, "right":		staticize(self.text.movepos, 1
 								, doc="Move cursor right")
-			, "left":			staticize(self.text.movepos, -1
+			, "left":		staticize(self.text.movepos, -1
 								, doc="Move cursor left")
 			, "home":		self.text.home
 			, "end":		self.text.end
 			, 520:			self.text.delnextword
-
 			, "a-h":		self.text.wordback
 			, "a-l":		self.text.wordnext
 			, "a-backspace":	self.text.delword
@@ -484,7 +522,6 @@ class TextOverlay(OverlayBase):
 		'''Adjust scrollable on resize'''
 		self.text.setwidth(newx)
 
-	@KeyMethod
 	def _input(self, chars):
 		'''
 		Appends to self.text, removing control characters. If self.text is
@@ -495,22 +532,14 @@ class TextOverlay(OverlayBase):
 			chars[0] == self._sentinel:
 			return self._on_sentinel()
 		#allow unicode input with the bytes().decode()
-		#take out characters that can't be decoded
-		buffer = []
-		control_flag = False
-		for i in chars:
-			if i == 194 or control_flag:
-				control_flag ^= 1
-				continue
-			buffer.append(i)
+		#take out characters that can't be decoded (i.e., those used by curses)
+		buffer = bytes(filter(lambda x: x < 256, chars))
 		if not buffer:
 			return None
-		uni = bytes(buffer).decode()
-		return self.text.append(self._transform_paste(uni))
+		return self.text.append(self._transform_paste(buffer.decode()))
 
 	def _on_sentinel(self):
 		'''Callback run when self._sentinel is typed and self.text is empty'''
-		pass
 
 	def _transform_paste(self, string):
 		'''
@@ -520,9 +549,7 @@ class TextOverlay(OverlayBase):
 		return string
 
 	def control_history(self, history):
-		'''
-		Add standard key definitions for controls on History `history`
-		'''
+		'''Add standard key definitions for controls on History `history`'''
 		nexthist = lambda: self.text.setstr(history.nexthist(str(self.text)))
 		prevhist = lambda: self.text.setstr(history.prevhist(str(self.text)))
 		#preserve docstrings for get_keynames
@@ -534,77 +561,8 @@ class TextOverlay(OverlayBase):
 		})
 
 #OVERLAY MANAGER----------------------------------------------------------------
-class ColorManager:
-	'''
-	Abstraction for printing 256 color terminal output. When inited or
-	.toggle'd to True, calling will return a color number for use with
-	Coloring. Otherwise, returns the `uncolored` color
-	'''
-	def __init__(self, two56_colors=False):
-		self._two56 = False
-		self._two56_start = None
-		if two56_colors:
-			self._two56 = True
-			self._two56_start = num_defined_colors()
-
-	def __call__(self, color, green=None, blue=None):
-		'''
-		Convert a hex string to 256 color variant or get
-		color as a pre-caluclated number from `color`
-		Returns raw_num(0) if not running in 256 color mode
-		'''
-		if not self._two56:
-			return raw_num(0)
-
-		if isinstance(color, int):
-			return self._two56_start + color
-		if isinstance(color, float):
-			raise TypeError("cannot interpret float as color number")
-
-		if color is not None and green is not None and blue is not None:
-			color = (color, green, blue)
-		elif not color:			#empty string
-			return raw_num(0)
-
-		try:
-			if isinstance(color, str):
-				parts_len = len(color)//3
-				in216 = [int(int(color[i*parts_len:(i+1)*parts_len], 16)*5/\
-					(16**parts_len)) for i in range(3)]
-			else:
-				in216 = [int(color[i]*5/255) for i in range(3)]
-
-			#too white or too black
-			if sum(in216) < 2 or sum(in216) > 34:
-				return raw_num(0)
-			return self._two56_start + 16 + \
-				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
-		except (AttributeError, TypeError):
-			return raw_num(0)
-
-	def __bool__(self):
-		return self._two56
-
-	def grayscale(self, color):
-		'''
-		Gets a grayscale color.
-		`color` can be from 0 (black) to 24 (white)
-		'''
-		color = min(max(color, 0), 24)
-		return self(color + 232)
-
-	def toggle(self, state):
-		'''Turn 256 colors on (and if undefined, define colors) or off'''
-		self._two56 = state
-		if state and self._two56_start is None: #not defined on startup
-			self._two56_start = num_defined_colors()
-			def_256_colors()
-
 class Blurb:
-	'''
-	Helper class to Screen that manipulates the last two lines of the window.
-	
-	'''
+	'''Screen helper class that manipulates the last two lines of the window.'''
 	def __init__(self, parent):
 		self.parent = parent
 
@@ -668,8 +626,8 @@ class Blurb:
 
 class Screen:
 	'''
-	Abstraction for interacting with the curses screen.
-	Handles all I/O and maintains overlays
+	Abstraction for interacting with the curses screen. Maintains overlays and
+	handles I/O. Initialization also acquires and prepares the curses screen.
 	'''
 	_INTERLEAVE_DELAY = .001
 	_INPUT_DELAY = .01
@@ -684,17 +642,15 @@ class Screen:
 
 	def __init__(self, manager, refresh_blurbs=True, loop=None):
 		if not (sys.stdin.isatty() and sys.stdout.isatty()):
-			raise ImportError("interactive stdin/stdout required for Screen")
+			raise OSError("interactive stdin/stdout required for Screen")
 		self.manager = manager
-
 		self.loop = asyncio.get_event_loop() if loop is None else loop
-		self.two56 = ColorManager()
 
-		self.active = False
+		self.active = True
 		self._candisplay = False
 		#guessed terminal dimensions
 		self.width = 40
-		self.height = 70
+		self.height = 30
 		#input/display stack
 		self._ins = []
 		#last high-priority overlay
@@ -705,32 +661,25 @@ class Screen:
 		if refresh_blurbs:
 			self.blurb.start_refresh(4)
 
-		self._displaybuffer = None
-		self._screen = None
-
-	def __enter__(self):
-		'''Begin the curses screen, add signal handlers, and redirect stdout'''
-		self.active = True
-		# redirect stdout
+		#redirect stdout
 		self._displaybuffer = sys.stdout
-		sys.stdout = open(REDIRECTED_OUTPUT, "a+", buffering=1)
+		sys.stdout = open(_REDIRECTED_OUTPUT, "a+", buffering=1)
 		if sys.stderr.isatty():
 			sys.stderr = sys.stdout
 
 		#escape has delay, not that this matters since I use tmux frequently
 		os.environ.setdefault("ESCDELAY", "25")
 		#pass in the control chars for ctrl-c and ctrl-z
-		self.loop.add_signal_handler(SIGINT, lambda: curses.ungetch(3))
-		self.loop.add_signal_handler(SIGTSTP, lambda: curses.ungetch(26))
+		loop.add_signal_handler(SIGINT, lambda: curses.ungetch(3))
+		loop.add_signal_handler(SIGTSTP, lambda: curses.ungetch(26))
 
 		#curses input setup
 		self._screen = curses.initscr()		#init screen
 		curses.noecho(); curses.cbreak(); self._screen.keypad(1) #setup curses
 		self._screen.nodelay(1)	#don't wait for enter to get input
 		self._screen.getch() #the first getch clears the screen
-		return self
 
-	def __exit__(self, typ, value, trace):
+	def shutdown(self):
 		'''Remove all overlays and undo everything in enter'''
 		self.blurb.end_refresh()
 		#let overlays do cleanup
@@ -759,7 +708,7 @@ class Screen:
 		'''Turn the mouse on or off'''
 		if not (self.active and self._candisplay):
 			return None
-		return curses.mousemask(state and _MOUSE_MASK)
+		return curses.mousemask(state and KeyContainer.MOUSE_MASK)
 
 	#Display Methods------------------------------------------------------------
 	async def resize(self):
@@ -947,9 +896,7 @@ class Screen:
 			chars.append(nextch)
 		ret = self._ins[-1].run_key(chars)
 
-		if ret == -1:
-			self._ins[-1].remove()
-		elif ret:
+		if ret:
 			await self.display()
 
 	def stop(self):
@@ -967,33 +914,54 @@ class Manager:
 			setattr(loop, "create_future", lambda: asyncio.Future(loop=self.loop))
 		self.loop = loop
 		#general state
-		self.prepared = asyncio.Event(loop=loop)
 		self.exited = asyncio.Event(loop=loop)
 
 		self.screen = None
 
-	async def run(self, refresh_blurbs=True):
+	async def run(self, prepared_coroutine=None, refresh_blurbs=True):
 		'''Main client loop'''
 		try:
-			with Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop) \
-			as screen:
-				self.screen = screen
-				await screen.resize()
-				self.prepared.set()
+			self.screen = Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop)
+			await self.screen.resize()
+			if prepared_coroutine is not None:
+				await prepared_coroutine
 
-				#done for now; call coroutines waiting for preparation
-				while screen.active:
-					await screen.input()
+			#done for now; call coroutines waiting for preparation
+			while self.screen.active:
+				await self.screen.input()
 		except asyncio.CancelledError:
 			pass	#catch cancellations
 		finally:
 			for i in self._on_exit:
 				await i
+			self.screen.shutdown()
 			self.screen = None
 			self.exited.set()
 
-	def start(self):
-		return self.loop.create_task(self.run())
+	@classmethod
+	def start(cls, *args, loop=None):
+		'''
+		Create an instance of the Manager() class and return the instance.
+		Further arguments are interpreted as func, arg0, arg1,... and called
+		when the manager is prepared with `func(Manager, arg0, arg1,...)`
+		'''
+		#instantiate
+		this, prepared_coroutine = cls(loop=loop), None
+		try:
+			#just use the first arg as a function
+			if args and callable(args[0]):
+				if not asyncio.iscoroutinefunction(args[0]):
+					raise TypeError("Expected coroutine as first argument to "\
+						"Manager.start")
+				prepared_coroutine = args[0](this, *args[1:])
+
+			this.loop.create_task(this.run(prepared_coroutine))
+			#wait for the loop to exit
+			this.loop.run_until_complete(this.exited.wait())
+		finally:
+			if this.screen is not None:
+				this.screen.shutdown()
+			this.loop.run_until_complete(this.loop.shutdown_asyncgens())
 
 	def stop(self):
 		if self.screen is not None:

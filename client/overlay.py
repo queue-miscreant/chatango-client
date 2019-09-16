@@ -4,10 +4,9 @@
 Overlays that allow multiple input formats. Also includes InputMux, which
 provides a nice interface for modifying variables within a context.
 '''
-
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, raw_num, get_color \
-	, Coloring, DisplayException
+	, two56, Coloring, JustifiedColoring, DisplayException
 from .base import staticize, override, quitlambda \
 	, Box, OverlayBase, TextOverlay, SizeException
 
@@ -16,24 +15,34 @@ __all__ = [
 	, "ColorSliderOverlay", "ConfirmOverlay", "DisplayOverlay", "InputMux"
 ]
 
+def _search_cache(keys, value):
+	'''Search through iterable for value that equals `value` and return key'''
+	for i in keys:
+		if i == value:
+			return i
+	return value
+
 #DISPLAY CLASSES----------------------------------------------------------
 class ListOverlay(OverlayBase, Box):
-	'''Display a list of strings, optionally drawing something additional'''
+	'''
+	Allows user to select an entry from a list.
+	By default, the list is cloned, but any other callable returning a list can
+	be specified with the `builder` argument
+	The display of each entry can be altered with the `line_drawer` decorator.
+	'''
 	replace = True
-	def __init__(self, parent, out_list, modes=None):
+	def __init__(self, parent, out_list, modes=None, builder=list, refresh_on_input=False):
 		super().__init__(parent)
 		self._it = 0
 		self.mode = 0
-		if isinstance(out_list, tuple) and len(out_list) == 2 \
-		and callable(out_list[0]):
-			self._builder, self.raw = out_list
-			self.list = self._builder(self.raw)
-		else:
-			self._builder, self.raw = None, None
-			self.list = out_list
+
+		self.raw, self._builder = out_list, builder
+		self.list = builder(self.raw)
+
 		self._draw_other = None
 		self._modes = [""] if modes is None else modes
 		self._search = None
+		self._draw_cache = set()
 
 		up =	staticize(self.increment, -1,
 			doc="Up one list item")
@@ -109,9 +118,22 @@ class ListOverlay(OverlayBase, Box):
 		self.parent.write_status(status, 1)
 		self._search = new
 
+	@property
+	def selected(self):
+		'''The currently selected element from self.list.'''
+		return self.list[self.it]
+
 	def remove(self):
 		super().remove()
 		self.parent.update_input()
+
+	def __getitem__(self, val):
+		'''Sugar for `self.list[val]`'''
+		return self.list[val]
+
+	def __iter__(self):
+		'''Sugar for `iter(self.list)`'''
+		return iter(self.list)
 
 	def __call__(self, lines):
 		'''
@@ -121,11 +143,11 @@ class ListOverlay(OverlayBase, Box):
 		lines[0] = self.box_top()
 		size = self.height-2
 		maxx = self.width-2
-		#worst case column: |(value[0])...(value[-1])|
-		#				    1    2     345  6	     7
+		#worst case column: |(value[0])…(value[-1])|
+		#				    1    2     3  4        5
 		#worst case rows: |(list member)|(RESERVED)
 		#				  1	2			3
-		if size < 1 or maxx < 5:
+		if size < 1 or maxx < 3:
 			raise SizeException()
 		#which portion of the list is currently displaced
 		partition = self.it - (self.it%size)
@@ -133,16 +155,18 @@ class ListOverlay(OverlayBase, Box):
 		sub_list = self.list[partition:partition+size]
 		sub_list = sub_list + ["" for i in range(size-len(sub_list))]
 		#display lines
-		for i, value in enumerate(sub_list):
-			half = maxx//2
-			#add an elipsis in the middle of the string if it
-			#can't be displayed and, right justify
-			row = value[:max(half, 1)] + "..." + value[min(-half+3, -1):] \
-				if len(value) > maxx else value
-			row = Coloring(self.box_just(row))
+		for i, row in enumerate(sub_list):
+			if not isinstance(row, JustifiedColoring):
+				row = JustifiedColoring(str(row))
+			#alter the string to be drawn
 			if i+partition < len(self.list):
 				self._draw_line(row, i+partition)
-			lines[i+1] = self.box_noform(format(row))
+			row = _search_cache(self._draw_cache, row)
+			#draw the justified string
+			lines[i+1] = self.box_noform(row.justify(maxx))
+			#and cache it
+			self._draw_cache.add(row)
+
 		lines[-1] = self.box_bottom(self._modes[self.mode])
 		return lines
 
@@ -253,6 +277,20 @@ class VisualListOverlay(ListOverlay, Box):
 			, 'v':	self.toggle_select
 		})
 
+	@property
+	def current(self):
+		'''Sugar more similar to `ListOverlay.selected`'''
+		return self.list[self.it]
+
+	@property
+	def selected(self):
+		'''Get list of selected items'''
+		indices = self._selected_index()
+		#add the iterator; idempotent if already in set
+		#here so that the currently selected line doesn't draw an underline
+		indices.add(self.it)
+		return [self.list[i] for i in indices]
+
 	def _do_move(self, dest):
 		'''Update selection'''
 		if self._start_select + 1:
@@ -291,16 +329,6 @@ class VisualListOverlay(ListOverlay, Box):
 	def _selected_index(self):
 		'''Get list (set) of selected and buffered indices'''
 		return self._selected.symmetric_difference(self._select_buffer)
-
-	def selected_list(self):
-		'''Get list of selected items'''
-		indices = self._selected_index()
-		#add the iterator; idempotent if already in set
-		#here so that the currently selected line doesn't draw an underline
-		indices.add(self.it)
-		if self.raw:
-			return [self.raw[len(self.list)-i-1] for i in indices]
-		return [self.list[i] for i in indices]
 
 	def clear_quit(self):
 		'''Clear the selection or quit the overlay'''
@@ -363,16 +391,15 @@ class ColorOverlay(ListOverlay, Box):
 		'''Add color samples to the end of lines'''
 		super()._draw_line(string, i)
 		#reserved for color sliders
-		if i == len(self._COLOR_LIST)-1 or not self.parent.two56:
+		if i == len(self._COLOR_LIST)-1 or not two56:
 			return
 		which = self._spectrum[self.mode][i]
 		if self.mode == 3: #grayscale
-			color = self.parent.two56.grayscale(i * 2)
+			color = two56.grayscale(i * 2)
 		else:
-			color = self.parent.two56([i*255/5 for i in which])
+			color = two56([i*255/5 for i in which])
 		try:
-			string.insert_color(-1, color)
-			string.effect_range(-1, 0, 0)
+			string.add_indicator(' ', color, 0)
 		except DisplayException:
 			pass
 
@@ -505,7 +532,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 
 	def _update_text(self):
 		self._colored_text = Coloring(self.to_hex(self.color))
-		self._colored_text.insert_color(0, self.parent.two56(self.color))
+		self._colored_text.insert_color(0, two56(self.color))
 
 	@staticmethod
 	def to_hex(color):
@@ -515,7 +542,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 class InputOverlay(TextOverlay, Box):
 	'''
 	An overlay to retrieve input from the user.
-	Can either use `await this.result` or set a callback with callback
+	Can either use `await this.result` or set a callback with `callback`
 	'''
 	replace = False
 	def __init__(self, parent, prompt=None, password=False, default=""):
@@ -548,7 +575,7 @@ class InputOverlay(TextOverlay, Box):
 		start = self.height//2 - len(self._prompts)//2
 		end = self.height//2 + len(self._prompts)
 		if start+len(self._prompts) > self.height:
-			lines[start] = self._prompts[0][:-1] + '…'
+			lines[start] = self._prompts[0][:-1] + JustifiedColoring._ELLIPSIS
 		lines[start] = self.box_top()
 		for i, j in enumerate(self._prompts):
 			lines[start+i+1] = self.box_part(j)
@@ -641,7 +668,7 @@ class DisplayOverlay(OverlayBase, Box):
 			for i in strings]
 
 		#flattened list of broken strings
-		self._formatted = [j	for i in self._rawlist
+		self._formatted = [j for i in self._rawlist
 			for j in i.breaklines(self.width-2, outdent=self._outdent)]
 		#bigger than the box holding it
 		self.replace = len(self._formatted) > self.height-2
@@ -718,12 +745,12 @@ class ConfirmOverlay(OverlayBase):
 			self.parent.blurb.release()
 			return -1
 
-		self._keys.update({ #run these in order
-			  ord('y'):	call
-			, ord('n'):	override(staticize(self.parent.blurb.release), -1)
+		self.add_keys({			#run these in order
+			  'y':	call
+			, 'n':	override(self.parent.blurb.release, -1)
 		})
-		self.nomouse()
-		self.noalt()
+		self.keys.nomouse()
+		self.keys.noalt()
 
 	def add(self):
 		'''Hold prompt blurb'''
@@ -887,8 +914,7 @@ class InputMux:
 		@staticmethod
 		def draw_color(mux, value, coloring):
 			'''Default color drawer'''
-			coloring.insert_color(-1, mux.parent.two56(value))
-			coloring.effect_range(-1, 0, 0)
+			coloring.add_indicator(' ', two56(value), 0)
 
 		@staticmethod
 		def draw_string(_, value, coloring):

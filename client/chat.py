@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 #chat.py
-'''
-Overlays that provide chat room-like interfaces.
-'''
-
+'''Overlays that provide chatroom-like interfaces.'''
 import time
 import asyncio
 import traceback
+from collections import deque
+
 from .display import SELECT_AND_MOVE, collen, numdrawing, raw_num \
 	, Coloring, DisplayException
 from .util import LazyIterList, History
-from .base import staticize, quitlambda \
-	, Box, OverlayBase, TextOverlay
+from .base import staticize, quitlambda, override \
+	, Box, KeyContainer, OverlayBase, TextOverlay
 from .overlay import ListOverlay, DisplayOverlay
-
-CHAR_COMMAND = '`'
-
-__all__ = ["CHAR_COMMAND", "CommandOverlay", "ChatOverlay", "add_message_scroller"]
+__all__ = ["CommandOverlay", "ChatOverlay", "add_message_scroller"]
 
 class CommandOverlay(TextOverlay):
 	'''Overlay to run commands'''
+	CHAR_COMMAND = '/'
 	replace = False
 	history = History()	#global command history
 	#command containers
@@ -28,16 +25,16 @@ class CommandOverlay(TextOverlay):
 
 	def __init__(self, parent, caller=None):
 		super().__init__(parent)
-		self._sentinel = ord(CHAR_COMMAND)
+		self._sentinel = ord(self.CHAR_COMMAND)
 		self.caller = caller
-		self.text.setnonscroll(CHAR_COMMAND)
-		self.text.completer.add_complete(CHAR_COMMAND, self.commands)
+		self.text.setnonscroll(self.CHAR_COMMAND)
+		self.text.completer.add_complete(self.CHAR_COMMAND, self.commands)
 		for i, j in self._command_complete.items():
 			self.text.add_command(i, j)
 		self.control_history(self.history)
 		self.add_keys({
-			  'enter':			self._run
-			, 'backspace':		self._wrap_backspace
+			  "enter":			self._run
+			, "backspace":		self._wrap_backspace
 			, "a-backspace":	quitlambda
 		})
 
@@ -45,9 +42,9 @@ class CommandOverlay(TextOverlay):
 		lines[-1] = "COMMAND"
 
 	def _on_sentinel(self):
-		if self.caller:
+		if self.caller is not None:
 			# override sentinel that added this overlay
-			self.caller.text.append(CHAR_COMMAND)
+			self.caller.text.append(self.CHAR_COMMAND)
 		return -1
 
 	def _wrap_backspace(self):
@@ -66,7 +63,7 @@ class CommandOverlay(TextOverlay):
 			self.parent.blurb.push("command \"{}\" not found".format(args[0]))
 			return -1
 		self.parent.loop.create_task(self.run_command(
-			  self.commands[args[0]] 
+			  self.commands[args[0]]
 			, self.parent, args[1:], name=args[0]))
 		return -1
 
@@ -108,25 +105,21 @@ class CommandOverlay(TextOverlay):
 	@staticmethod
 	async def run_command(command, param, args, name=""):
 		try:
-			if asyncio.iscoroutinefunction(command):
-				result = await command(param, *args)
-			else:
-				result = command(param, *args)
+			result = command(param, *args)
+			if asyncio.iscoroutine(result):
+				result = await result
 			if isinstance(result, OverlayBase):
 				result.add()
-		except:
-			param.blurb.push("an error occurred while running command %s" % \
-				name)
+		except Exception as exc: #pylint: disable=broad-except
+			param.blurb.push("%s occurred in command '%s'" % (exc, name))
 			print(traceback.format_exc(), "\n")
 
-	#decorators for containers
 	@classmethod
 	def command(cls, name, complete=None):
 		'''
-		Decorator that adds command `name` with argument suggestion `complete`
-		`complete` may either be a list or a function returning a list and a
-		number that specifies string index (of self.text) to start the
-		suggestion from
+		Decorator that adds command `name` with argument suggestion `complete`,
+		which may either be a list or a callable with signature (index), the
+		string index to start completion from, that returns a list
 		'''
 		complete = complete if complete is not None else []
 		def wrapper(func):
@@ -154,60 +147,146 @@ class EscapeOverlay(OverlayBase):
 			, '\\':		add_slash
 			, 't':		add_tab
 		})
-		self.nomouse()
-		self.noalt()
+		self.keys.nomouse()
+		self.keys.noalt()
 
 	@staticmethod
 	def _add_char(scroll, char):
 		scroll.append(char)
 		return -1
 
-class Messages:
-	'''Container object for message objects'''
+class Message(Coloring):
+	'''
+	Virtual wrapper class around "Coloring" objects. Allows certain kinds of
+	message objects (like those from a certain service) to have a standard
+	colorizing method, without binding tightly to a ChatOverlay subclass
+	'''
 	INDENT = "    "
+	SHOW_CLASS = True
+	msg_count = 0
+	def __init__(self, msg, remove_fractur=True, **kwargs):
+		super().__init__(msg, remove_fractur)
+		self.__dict__.update(kwargs)
+		if hasattr(self, "_examine"):
+			for examiner in self._examine:
+				examiner(self)
+
+		self._mid = Message.msg_count
+		self._last_height = 0
+		Message.msg_count += 1
+
+	mid = property(lambda self: self._mid)
+	filtered = property(lambda self: self.SHOW_CLASS and self.filter())
+	height = property(lambda self: self._last_height)
+
+	def do_filter(self):
+		'''Dummy out the height to indicate if the message is filtered'''
+		self._last_height = not self.filtered
+
+	def recolor(self, do_clear=False):
+		'''Apply `colorize`, optionally clearing the message beforehand.'''
+		if do_clear:
+			self.clear()
+		self.colorize()
+
+	def colorize(self):
+		'''
+		Virtual method to standardize colorizing a particular subclass of
+		message. Used in Messages objects to create a contiguous display of
+		messages.
+		'''
+
+	def filter(self):
+		'''
+		Virtual method to standardize filtering of a particular subclass of
+		message. Used in Messages objects to decide whether or not to display a
+		message. True means that the message is filtered.
+		'''
+		return False
+
+	def breaklines(self, width, outdent=None, keep_empty=True, mod_height=True):
+		'''
+		Break a message to `length` columns. Standardizes outdent.
+		Modify height if mod_height is True, returns None on mismatch otherwise
+		'''
+		ret = super().breaklines(width, self.INDENT \
+			if outdent is None else outdent, keep_empty)
+		if not mod_height and len(ret) != self._last_height:
+			return None
+		self._last_height = len(ret)
+		return ret
+
+	@classmethod
+	def examine(cls, func):
+		'''
+		Wrapper for a function that monitors instantiation of messages.
+		`func` must have signature (message), the instance in question
+		'''
+		if not hasattr(cls, "_examine"):
+			cls._examine = []
+		cls._examine.append(func)
+		return func
+
+	@classmethod
+	def key_handler(cls, key_name, override_val=None):
+		'''
+		Decorator for adding a key handler. Key handlers for Messages objects
+		expect signature (message, calling overlay)
+		See OverlayBase.add_keys documentation for valid values of `key_name`
+		'''
+		if not hasattr(cls, "keys"):
+			cls.keys = KeyContainer()
+			#mouse callbacks don't work quite the same; they need an overlay
+			cls.keys.nomouse()
+		def ret(func):
+			cook = func
+			if override_val is not None:
+				cook = override(func, override_val)
+			cls.keys.add_key(key_name, cook)
+			return func
+		return ret
+
+class SystemMessage(Message):
+	'''System messages that are colored red-on-white'''
+	def colorize(self):
+		self.insert_color(0, raw_num(1))
+
+class Messages:
+	'''Container object for Message objects'''
 	def __init__(self, parent):
 		self.parent = parent
 
 		self.can_select = True
-		self._all_messages = []	#contains every message as 4-lists of Coloring
-								#objects, arg tuples, message length since last
-								#break, and message ID
-		self._lines = []		#contains every line currently or recently
-								#involved in drawing
-		self.msg_id = 0			#next message id
+		self._all_messages = deque()	#all Message objects
+		self._lines = deque()	#lines currently or recently involved in drawing
 		#selectors
 		self.selector = 0		#selected message
 		self.start_height = 0	#to calculate which message we're drawing from
 								#so that selected can be seen relative to it
 		self.linesup = 0		#start drawing from this lines index (reversed)
 		self.distance = 0		#number of lines down from start_height's message
-		self.inner_height = 0	#inner message height, to start drawing message
-								#lines late
+		self.inner_height = 0	#inner message height, from the bottom of the 
+								#selected message
 		#lazy storage
-		self.lazy_color	= [-1, -1] #latest/earliest messages to recolor
-		self.lazy_filter = [-1, -1] #latest/earliest messages to refilter
-
-		#deletion lambdas
-		self.lazy_delete = []
+		self.lazy_color	= [-1, -1]	#latest/earliest messages to recolor
+		self.lazy_filter = [-1, -1]	#latest/earliest messages to refilter
+		self.lazy_delete = []		#deletion lambdas on attempt to display
 
 	def clear(self):
 		'''Clear all lines and messages'''
 		self.can_select = True
-		self._all_messages = []
-		self._lines = []
+		self._all_messages.clear()
+		self._lines.clear()
 
-		self.msg_id = 0
 		self.selector = 0
 		self.start_height = 0
-
 		self.linesup = 0
 		self.distance = 0
 		self.inner_height = 0
 
 		self.lazy_color	= [-1, -1]
 		self.lazy_filter = [-1, -1]
-
-		self.lazy_delete = []
+		self.lazy_delete.clear()
 
 	def stop_select(self):
 		'''Stop selecting'''
@@ -221,91 +300,80 @@ class Messages:
 			need_recolor = self.lazy_color[0] != -1
 			if self.lazy_filter[0] != -1 or need_recolor:
 				self.redo_lines(recolor=need_recolor)
-			return 1
-		return None
+			return True
+		return False
 
 	def get_selected(self):
 		'''
-		Frontend for getting the selected message. Returns a 4-list:
-		[0]: the message (in a coloring object); [1] an argument tuple, which
-		is None for system messages; [2] the number of lines it occupies;
-		[3]: its messageID
-		returns None on not selecting
+		Frontend for getting the selected message. Returns None if no message is
+		selected, or a Message object (or subclass)
 		'''
 		if self.selector:
 			return self._all_messages[-self.selector]
 		return None
 
 	def display(self, lines):
-		if self.msg_id == 0:
+		if not self._all_messages:
 			return
 		#seperate traversals
-		selftraverse, linetraverse = -self.linesup-1, -2
-		lenself, lenlines = -len(self._lines), -len(lines)
+		selftraverse, linetraverse = self.linesup+1, 2
 		msgno = -self.start_height-1
 
-		thismsg = self._all_messages[msgno][2] - self.inner_height
+		thismsg = self._all_messages[msgno].height - self.inner_height
 		#traverse list of lines
-		while selftraverse >= lenself and linetraverse >= lenlines:
+		while selftraverse <= len(self._lines) and linetraverse <= len(lines):
 			reverse = SELECT_AND_MOVE if msgno == -self.selector else ""
-			lines[linetraverse] = reverse + self._lines[selftraverse]
+			lines[-linetraverse] = reverse + self._lines[-selftraverse]
 
-			selftraverse -= 1
-			linetraverse -= 1
+			selftraverse += 1
+			linetraverse += 1
 			thismsg -= 1
+			#skip filtered messages (height = 0)
 			while not thismsg:
 				msgno -= 1
 				if msgno >= -len(self._all_messages):
-					thismsg = self._all_messages[msgno][2]
+					thismsg = self._all_messages[msgno].height
 				else:
 					break
 
 	def apply_lazies(self, select, direction):
 		'''
-		Generator that yields on application of lazy iterators to mesages
-		The value yielded corresponds to the kind of lazy operation performed
-		0:	deletion
-		1:	filtering
-		2:	coloring
+		Applies lazy iterators to mesages. Returns the kind of lazy operation
+		performed: 0: deletion, 1:filtering, 2: coloring
 		'''
 		message = self._all_messages[-select]
 		#next message index is out of bounds
 		next_oob = (select+direction < len(self._all_messages)) \
 			and select+direction
 		#next message if out of bounds to apply lazies on
-		next_filter = self._all_messages[-select-direction][3] if next_oob else -1
+		next_filter = self._all_messages[-select-direction].mid if next_oob else -1
 
 		#test all lazy deleters
 		for test, result in self.lazy_delete:
 			if test(message, result):
 				del self._all_messages[-select]
-				if message[3] == self.lazy_filter[direction == 1]:
+				if message.mid == self.lazy_filter[direction == 1]:
 					self.lazy_filter[direction == 1] = next_filter
-				if message[3] == self.lazy_color[direction == 1]:
+				if message.mid == self.lazy_color[direction == 1]:
 					self.lazy_color[direction == 1] = next_filter
 				return 0
 
 		#lazy filters
-		if message[3] == self.lazy_filter[direction == 1]:
-			#use a dummy length (0/1) to signal that the message should be drawn
-			message[2] = ((message[1] is None) or \
-				not self.parent.filter_message(*message[1]))
+		if message.mid == self.lazy_filter[direction == 1]:
+			message.do_filter()
 			self.lazy_filter[direction == 1] = next_filter
 
-		if message[3] == self.lazy_color[direction == 1]:
-			#ignore system
-			if message[1] is not None:
-				message[0].clear()
-				self.parent.colorize_message(message[0], *message[1])
+		if message.mid == self.lazy_color[direction == 1]:
+			message.recolor(do_clear=True)
 			self.lazy_color[direction == 1] = next_filter
 
-		return message[2]
+		return message.height
 
 	def up(self):
 		height = self.parent.height-1
 		#scroll within a message if possible, and exit
 		if self.selector \
-		and self._all_messages[-self.selector][2] - height > self.inner_height:
+		and self._all_messages[-self.selector].height - height > self.inner_height:
 			self.linesup += 1
 			self.inner_height += 1
 			return -1
@@ -323,29 +391,26 @@ class Messages:
 		#next message out of bounds and select refers to an actual message
 		if self.linesup + self.distance + addlines > len(self._lines) \
 		and select-1 <= len(self._all_messages):
-			message = self._all_messages[-select+1]
+			msg = self._all_messages[-select+1]
 			#break the message, then add at the beginning
-			new = message[0].breaklines(self.parent.width, self.INDENT)
-			message[2] = len(new)
-			#append or prepend
-			self._lines[0:0] = new
-			offscreen += message[2]-addlines
-			addlines = message[2]
+			self._lines.extendleft(reversed(msg.breaklines(self.parent.width)))
+			offscreen += msg.height-addlines
+			addlines = msg.height
 
 		self.distance += addlines
 
 		#can only make sense when the instance properly handles variables
 		#so checking validity is futile
 		if offscreen > 0:
-			#get a delta from the top, just in case we aren't there already
 			self.linesup += offscreen
-			canscroll = self._all_messages[-self.start_height-1][2] - self.inner_height
+			#get a delta from the top, just in case we aren't there already
+			canscroll = self._all_messages[-self.start_height-1].height - self.inner_height
 			#scroll through messages if needed
 			if offscreen - canscroll >= 0:
 				while offscreen - canscroll >= 0:
 					offscreen -= canscroll
 					self.start_height += 1
-					canscroll = self._all_messages[-self.start_height-1][2]
+					canscroll = self._all_messages[-self.start_height-1].height
 				self.inner_height = offscreen
 			else:
 				self.inner_height += offscreen
@@ -374,18 +439,15 @@ class Messages:
 			select -= 1
 		select += (addlines > 0)
 
-		last_lines = self._all_messages[-self.selector][2]
+		last_lines = self._all_messages[-self.selector].height
 		next_pos = self.linesup + self.distance - last_lines - addlines
 		#append message lines if necessary
 		if next_pos < 0 < select:
 			message = self._all_messages[-select]
 			#break the message, then add at the end
-			new = message[0].breaklines(self.parent.width, self.INDENT)
-			addlines = len(new)
-			message[2] = addlines
-			self._lines.extend(new)
+			self._lines.extend(message.breaklines(self.parent.width))
 			#to cancel out with distance in the else statement below
-			self.inner_height = -max(addlines, addlines-height)
+			self.inner_height = -max(message.height, message.height-height)
 
 		#fix the last line to show all of the message
 		if select == self.start_height+1:
@@ -416,59 +478,51 @@ class Messages:
 
 		return addlines
 
-	def append(self, message, args=None):
+	def append(self, msg: Message):
 		'''Add new message to the end of _all_messages and lines'''
 		#undisplayed messages have length zero
-		msg = [message, args, 0, self.msg_id]
-		self.msg_id += 1
 		self._all_messages.append(msg)
 
 		#don't bother drawing; filter
-		if (args is not None) and self.parent.filter_message(*args):
+		if msg.filtered:
 			self.selector += (self.selector > 0)
 			self.start_height += (self.start_height > 0)
-			return msg[-1]
+			return msg.mid
 
-		new = message.breaklines(self.parent.width, self.INDENT)
-		msg[2] = len(new)
+		new = msg.breaklines(self.parent.width)
 		#adjust selector iterators
 		if self.selector:
 			self.selector += 1
 			#scrolled up too far to see
 			if self.start_height \
-			or msg[2] + self.distance > (self.parent.height-1):
+			or msg.height + self.distance > (self.parent.height-1):
 				self.start_height += 1
-				self.lazy_filter[0]	= msg[3]
-				self.lazy_color[0]	= msg[3]
-				return msg[-1]
-			self.distance += msg[2]
+				self.lazy_filter[0]	= msg.mid
+				self.lazy_color[0]	= msg.mid
+				return msg.mid
+			self.distance += msg.height
 		#add lines if and only if necessary
 		self._lines.extend(new)
 
-		return msg[-1]
+		return msg.mid
 
-	def prepend(self, message, args=None):
+	def prepend(self, msg: Message):
 		'''Prepend new message. Use msg_prepend instead'''
-		#run filters early so that the message can be selected up to properly
-		dummy = not self.parent.filter_message(*args) if args is not None else 1
-		msg = [message, args, dummy, self.msg_id]
-		self.msg_id += 1
-		self._all_messages.insert(0, msg)
+		msg.do_filter()
+		self._all_messages.appendleft(msg)
 		#lazyfilter checking ensures that prepending to lines is valid
-		if dummy and self.lazy_filter[1] == -1:
-			new = message.breaklines(self.parent.width, self.INDENT)
-			self._lines[0:0] = new
-			msg[2] = len(new)
+		if msg.height and self.lazy_filter[1] == -1:
+			self._lines.extendleft(reversed(msg.breaklines(self.parent.width)))
 
-		return msg[-1]
+		return msg.mid
 
-	def delete(self, result, test=lambda x, y: x[3] == y):
+	def delete(self, result, test=lambda x, y: x.mid == y):
 		'''Delete message from value result and callable test'''
 		if not callable(test):
 			raise TypeError("delete requires callable")
 
 		msgno = self.start_height+1
-		height = self._all_messages[-msgno][2]-self.inner_height
+		height = self._all_messages[-msgno].height-self.inner_height
 
 		while height <= self.parent.height-1:
 			if test(self._all_messages[-msgno], result):
@@ -476,7 +530,7 @@ class Messages:
 				self.redo_lines()
 				return
 			msgno += 1
-			height += self._all_messages[-msgno][2]
+			height += self._all_messages[-msgno].height
 
 		self.lazy_delete.append(test, result)
 
@@ -490,7 +544,7 @@ class Messages:
 		msgno = self.start_height+1
 		msg = self._all_messages[-msgno]
 		#visible lines shown
-		height = msg[2] - self.inner_height
+		height = msg.height - self.inner_height
 		#find message until we exceed the height
 		while height < y:
 			#advance the message number, or return if we go too far
@@ -498,7 +552,7 @@ class Messages:
 			if msgno > len(self._all_messages):
 				return "", -1
 			msg = self._all_messages[-msgno]
-			height += msg[2]
+			height += msg.height
 
 		#line depth into the message
 		depth = height - y
@@ -506,11 +560,11 @@ class Messages:
 		#adjust the position
 		for i in range(depth):
 			#only subtract from the length of the previous line if it's not the first one
-			pos += numdrawing(self._lines[i-height]) - (i and len(self.INDENT))
-		if x >= collen(self.INDENT) or not depth:
+			pos += numdrawing(self._lines[i-height]) - (i and len(msg.INDENT))
+		if x >= collen(msg.INDENT) or not depth:
 			#try to get a slice up to the position 'x'
 			pos += max(0
-				, numdrawing(self._lines[depth-height], x) - len(self.INDENT))
+				, numdrawing(self._lines[depth-height], x) - len(msg.INDENT))
 		return msg, pos
 
 	def scroll_to(self, index):
@@ -522,15 +576,15 @@ class Messages:
 			return
 		start = index
 		i = self._all_messages[-start]
-		while start < len(self._all_messages) and not i[2]:
+		while start < len(self._all_messages) and not i.height:
 			start += 1
 			i = self._all_messages[-start]
 
 		#try again going downwards if we need to (the last message is blank)
-		if start == len(self._all_messages) and not i[2]:
+		if start == len(self._all_messages) and not i.height:
 			start = index-1
 			i = self._all_messages[-start]
-			while start > 1 and not i[2]:
+			while start > 1 and not i.height:
 				start -= 1
 				i = self._all_messages[-start]
 
@@ -553,10 +607,14 @@ class Messages:
 		select = 1
 		while select <= len(self._all_messages):
 			message = self._all_messages[-select]
-			#ignore system messages
-			if message[1] and callback(*message[1]):
-				yield message[0], select
 			select += 1
+			try:
+				ret = callback(message)
+			except Exception: #pylint: disable=broad-except
+				print(traceback.format_exc(), "\n")
+				continue
+			if ret:
+				yield message, select
 
 	#REAPPLY METHODS-----------------------------------------------------------
 	def redo_lines(self, width=None, height=None, recolor=False):
@@ -569,8 +627,7 @@ class Messages:
 		#search for a fitting message to set as selector
 		start = self.selector or 1
 		i = self._all_messages[-start]
-		while start < len(self._all_messages) and (i[1] is not None) \
-		and self.parent.filter_message(*i[1]):
+		while start < len(self._all_messages) and i.filtered:
 			start += 1
 			i = self._all_messages[-start]
 		#only need if we were selecting to begin with
@@ -585,108 +642,98 @@ class Messages:
 		if self.start_height:
 			recolor = True
 
-		#don't decolor system messages
-		if recolor and i[1] is not None:
-			i[0].clear()
-			self.parent.colorize_message(i[0], *i[1])
-		newlines = i[0].breaklines(width, self.INDENT)
+		if recolor:
+			i.recolor(do_clear=True)
 		#guaranteed to be an actual line by above loop
-		i[2] = len(newlines)
+		self._lines.clear()
+		self._lines.extend(reversed(i.breaklines(width)))
 
-		self.inner_height = max(0, i[2] - height)
+		self.inner_height = max(0, i.height - height)
 		#distance only if we're still selecting
-		self.distance = min(height, self.selector and i[2])
+		self.distance = min(height, self.selector and i.height)
 		self.linesup = self.inner_height
 
 		msgno, lineno = start+1, self.distance
 
-		self.lazy_filter[0]	= self._all_messages[-max(0, start-1)][3] \
+		self.lazy_filter[0]	= self._all_messages[-max(0, start-1)].mid \
 			if self.selector else -1
 
 		while lineno < height and msgno <= len(self._all_messages):
 			i = self._all_messages[-msgno]
-			system = i[1] is None
 			#check if the message should be drawn
-			if recolor and not system:	#don't decolor system messages
-				i[0].clear()
-				self.parent.colorize_message(i[0], *i[1])
+			if recolor:
+				i.recolor(do_clear=True)
 			#re-filter message
-			if not system and self.parent.filter_message(*i[1]):
-				i[2] = 0
+			i.do_filter()
+			if not i.height:
 				msgno += 1
 				continue
 			#break and add lines
-			new = i[0].breaklines(width, self.INDENT)
-			newlines[0:0] = new
-			i[2] = len(new)
-			lineno += i[2]
+			self._lines.extendleft(reversed(i.breaklines(width)))
+			lineno += i.height
 			msgno += 1
 
-		self.lazy_filter[1]	= self._all_messages[-msgno][3] \
+		self.lazy_filter[1]	= self._all_messages[-msgno].mid \
 			if msgno-1 != len(self._all_messages) else -1
 
 		if recolor:
 			#duplicate the lazy bounds
 			self.lazy_color = list(self.lazy_filter)
 
-		self._lines = newlines
 		self.can_select = True
 
 	def recolor_lines(self):
-		'''Re-apply parent's colorize_message and redraw all visible lines'''
+		'''Re-apply Message coloring and redraw all visible lines'''
 		if not self._all_messages:
 			return
 		width = self.parent.width
 		height = self.parent.height-1
 
 		start = self.start_height+1
-		while self._all_messages[-start][2] == 0 \
+		while self._all_messages[-start].height == 0 \
 		and start <= len(self._all_messages):
 			#find a non-hidden message
 			start += 1
 		start_message = self._all_messages[-start]
 
-		if start_message[1] is not None:	#don't decolor system messages
-			start_message[0].clear()
-			self.parent.colorize_message(start_message[0], *start_message[1])
-
-		newlines = start_message[0].breaklines(width, self.INDENT)
-		if len(newlines) != start_message[2]:
+		start_message.recolor(do_clear=True)
+		self._lines.clear()
+		try:
+			self._lines.extend(
+				start_message.breaklines(width, mod_height=False))
+		except TypeError:
 			raise DisplayException("recolor_lines called before redo_lines")
 
-		self.lazy_color[0] = self._all_messages[-self.start_height][3] \
+		self.lazy_color[0] = self._all_messages[-self.start_height].mid \
 			if self.start_height else -1
 
-		lineno, msgno = start_message[2]-self.inner_height, start+1
+		lineno, msgno = start_message.height-self.inner_height, start+1
 		while lineno < height and msgno <= len(self._all_messages):
-			message, args, length, _ = self._all_messages[-msgno]
-			if args is not None:	#don't decolor system messages
-				message.clear()
-				self.parent.colorize_message(message, *args)
-			if length: #unfiltered (non zero lines)
-				new = message.breaklines(width, self.INDENT)
-				if len(new) != length:
+			message = self._all_messages[-msgno]
+			message.recolor()
+			if message.height: #unfiltered (non zero lines)
+				try:
+					self._lines.extendleft(reversed(
+						message.breaklines(width, mod_height=False)))
+				except TypeError:
 					raise DisplayException("recolor_lines called before redo_lines")
-				newlines[0:0] = new
-				lineno += length
+				lineno += message.height
 			msgno += 1
 
-		self.lazy_color[1] = self._all_messages[-msgno][3] \
+		self.lazy_color[1] = self._all_messages[-msgno].mid \
 			if msgno-1 != len(self._all_messages) else -1
 
-		self._lines = newlines
 		self.linesup = self.inner_height
 
 class ChatOverlay(TextOverlay):
 	'''
 	Overlay that can push and select messages, and has an input box.
-	Optionally pushes time messages every `push_times` seconds. 0 to disable.
+	Optionally pushes time messages every `push_times` seconds, 0 to disable.
 	'''
 	replace = True
-	_monitors = {}
 	def __init__(self, parent, push_times=600):
 		super().__init__(parent)
-		self._sentinel = ord(CHAR_COMMAND)
+		self._sentinel = ord(CommandOverlay.CHAR_COMMAND)
 		self._push_times = push_times
 		self._push_task = None
 		self._last_time = -1
@@ -699,20 +746,14 @@ class ChatOverlay(TextOverlay):
 			  '\\':		self._replace_back
 			, 'a-k':	self.select_up
 			, 'a-j':	self.select_down
+			, "ppage":	self.select_up
+			, "npage":	self.select_down
+			, "mouse":	self._mouse
 			, "mouse-wheel-up":		self.select_up
 			, "mouse-wheel-down":	self.select_down
 		})
 
-		examiners = self._monitors.get(type(self).__name__)
-		if examiners is not None:
-			self._examine = examiners
-		else:
-			self._examine = []
-
-	@property
-	def can_select(self):
-		return self.messages.can_select
-
+	can_select = property(lambda self: self.messages.can_select)
 	@can_select.setter
 	def can_select(self, new):
 		self.messages.can_select = new
@@ -732,12 +773,6 @@ class ChatOverlay(TextOverlay):
 	def _on_sentinel(self):
 		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''
 		CommandOverlay(self.parent, self).add()
-
-	def _post(self):
-		if self.messages.stop_select():
-			self.parent.update_input()
-			return 1
-		return None
 
 	def add(self):
 		'''Start timeloop and add overlay'''
@@ -764,41 +799,33 @@ class ChatOverlay(TextOverlay):
 		super().resize(newx, newy)
 		self.messages.redo_lines(newx, newy)
 
-	#VIRTUAL FILTERING------------------------------------------
-	@classmethod
-	def examine(cls, class_name):
-		'''
-		Wrapper for a function that monitors messages. Such function may perform some
-		effect such as pushing a new message or alerting the user
-		'''
-		def wrap(func):
-			if cls._monitors.get(class_name) is None:
-				cls._monitors[class_name] = []
-			cls._monitors[class_name].append(func)
-		return wrap
+	def run_key(self, chars):
+		'''Delegate running characters to a selected message that supports it'''
+		selected = self.messages.get_selected()
+		ret = tuple()
+		if selected is not None and hasattr(selected, "keys"):
+			#pass in the message and this overlay to the handler
+			ret = selected.keys(chars, selected, self)
+		if ret == tuple():
+			ret = self.keys(chars)
 
-	def colorize_message(self, msg, *args):
-		'''
-		Virtual function. Overload to apply some transformation on argument
-		`msg`, which is a client.Coloring object. Arguments are left generic
-		so that the user can define message args
-		'''
-		return msg
+		#stop selecting if False is returned
+		if not ret and self.messages.stop_select():
+			self.parent.update_input()
+			ret = 1
+		elif ret == -1:
+			self.remove()
+		return ret
 
-	def filter_message(self, *args):
-		'''
-		Virtual function called to see if a message can be displayed. If False,
-		the message can be displayed. Otherwise, the message is pushed to
-		_all_messages without drawing to lines. Arguments are left generic so
-		that the user can define message args
-		'''
-		return False
+	def _mouse(self, x, y, state):
+		'''Delegate mouse'''
+		msg, pos = self.messages.from_position(x, y)
+		if hasattr(msg, "keys"):
+			return msg.keys.mouse(x, y, state, msg, self, pos)
+		return 1
 
-	def _replace_back(self, *_):
-		'''
-		Add a newline if the next character is n,
-		or a tab if the next character is t
-		'''
+	def _replace_back(self):
+		'''Input escape sequences for \\n, \\t, \\\\'''
 		EscapeOverlay(self.parent, self.text).add()
 
 	#MESSAGE SELECTION----------------------------------------------------------
@@ -852,10 +879,7 @@ class ChatOverlay(TextOverlay):
 	#MESSAGE ADDITION----------------------------------------------------------
 	def msg_system(self, base):
 		'''System message'''
-		base = Coloring(base)
-		base.insert_color(0, raw_num(1))
-		self.parent.schedule_display()
-		return self.messages.append(base, None)
+		return self.msg_append(SystemMessage(base))
 
 	def msg_time(self, numtime=None, predicate=""):
 		'''Push a system message of the time'''
@@ -868,21 +892,17 @@ class ChatOverlay(TextOverlay):
 			self._last_time = ret
 		return ret
 
-	def msg_append(self, post, *args):
-		'''Parse a message, apply colorize_message, and append'''
-		post = Coloring(post)
-		self.colorize_message(post, *args)
-		for i in self._examine:
-			i(self, post, *args)
+	def msg_append(self, post: Message):
+		'''Apply a message's coloring, pass it through examiners, and append'''
+		post.recolor()
 		self.parent.schedule_display()
-		return self.messages.append(post, list(args))
+		return self.messages.append(post)
 
-	def msg_prepend(self, post, *args):
-		'''Parse a message, apply colorize_message, and prepend'''
-		post = Coloring(post)
-		self.colorize_message(post, *args)
+	def msg_prepend(self, post: Message):
+		'''Apply a message's coloring, pass it through examiners, and prepend'''
+		post.recolor()
 		self.parent.schedule_display()
-		return self.messages.prepend(post, list(args))
+		return self.messages.prepend(post)
 
 class _MessageScrollOverlay(DisplayOverlay):
 	'''
@@ -898,7 +918,7 @@ class _MessageScrollOverlay(DisplayOverlay):
 		self.late = late
 
 		super().__init__(overlay.parent, lazy_list[0][0]
-			, overlay.messages.INDENT)
+			, Message.INDENT)
 
 		scroll_down, scroll_up, scroll_to = \
 			  lambda: self.next(-1) \

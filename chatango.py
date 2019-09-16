@@ -4,17 +4,18 @@
 Chatango extension to client. Receives data from a Chatango room via `ChatBot`
 and displays it to the screen via `ChatangoOverlay`.
 '''
-import json
 from os import path
 import asyncio
 import re
+import json
 from collections import deque
 
 import pytango
 import client
 from client import linkopen
 
-__all__ = ["ChatBot", "ChatangoOverlay", "create_colors", "get_color", "get_client"]
+__all__ = ["ChatBot", "ChatangoMessage", "ChatangoOverlay"
+	, "get_color", "get_client"]
 
 #SETTINGS AND CUSTOM SCRIPTS----------------------------------------------------
 FILENAME = "chatango_creds"
@@ -25,8 +26,7 @@ SAVE_PATH = path.join(HOME_PATH, FILENAME)
 #code ripped from stackoverflow questions/1057431
 CUSTOM_DOC = "ensures the `import custom` in will import all python files "\
 "in the directory"
-CUSTOM_INIT = '''
-"%s"
+CUSTOM_INIT = '''"%s"
 
 from os.path import dirname, basename, isfile
 import glob
@@ -39,12 +39,7 @@ def _write_init():
 	with open(path.join(CUSTOM_PATH, "__init__.py"), "w") as i:
 		i.write(CUSTOM_INIT)
 
-#REGEXES AND GLOBALS------------------------------------------------------------
-#look for whole word links starting with http:// or https://
-LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
-REPLY_RE = re.compile(r"@\w+?\b")
-QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
-
+#GLOBALS------------------------------------------------------------
 BEGIN_COLORS = client.num_defined_colors()
 _CLIENT = None
 
@@ -54,14 +49,10 @@ class _Persistent:
 	Add fields and their default value with add_field.
 	'''
 	def __init__(self):
-		#whether a particular value can be read_json, or write_json
-		self._readwrite = {}
-		#entire credentials file from read_json
-		self._entire = {}
-		#default value set by add_field
-		self._default = {}
-		#volatile data to be written to file
-		self._data = {}
+		self._readwrite = {}	#fields that can be read/written to json
+		self._entire = {}		#entire credentials file from read_json
+		self._default = {}		#default value set by add_field
+		self._data = {}			#volatile data to be written to file
 
 	def __str__(self):
 		ret = self._entire.copy()
@@ -208,52 +199,6 @@ def get_client():
 		return _CLIENT
 	return None
 
-def parse_post(post, me, ishistory, alts=None):
-	'''Helper for parsing pytango.Post objects'''
-	#and is short-circuited
-	isreply = me is not None and (me in post.mentions)
-	if alts is not None:
-		for alt in alts:
-			if not alt:
-				continue
-			isreply = isreply or (alt in post.mentions)
-
-	#remove egregiously large amounts of newlines (more than 2)
-	#also edit sections with right to left override
-	cooked = ""
-	newline_count = 0
-	rtlbuffer, rtl = "", False
-	for i in post.post:
-		if i == '\n':
-			#right-to-left sequences end on newlines
-			if rtl:
-				cooked += rtlbuffer + (newline_count < 2 and i or "")
-				rtl = False
-				rtlbuffer = ""
-			if newline_count < 2:
-				cooked += i
-			newline_count += 1
-		#technically not right, since RTL marks should match marks, and
-		#overrides overrides
-		elif ord(i) in (8206, 8237):
-			cooked += rtlbuffer
-			rtlbuffer = ""
-			rtl = False
-		elif ord(i) in (8207, 8238):
-			rtl = True
-		else:
-			newline_count = 0
-			if rtl:
-				rtlbuffer = i + rtlbuffer
-			else:
-				cooked += i
-	if rtl:
-		cooked += rtlbuffer
-	#format as ' user: message'; the space is for the channel
-	msg = " {}: {}".format(str(post.user), cooked)
-	#extra arguments. use in colorizers
-	return (msg, post, isreply, ishistory)
-
 class DequeSet(deque):
 	'''Set, but whose elements can be moved to the front or end like a deque'''
 	def __init__(self, iterable=None):
@@ -262,16 +207,8 @@ class DequeSet(deque):
 		else:
 			super().__init__()
 
-	def __repr__(self):
-		return "DequeSet({})".format(super().__repr__())
-
 	def appendleft(self, new):
-		'''Add an item to the left of the deque'''
-		if new not in self:
-			super().appendleft(new)
-
-	def appendleft_promote(self, new):
-		'''Add an item to the deque, or already exists, pop and appendleft'''
+		'''Add or promote an element to the left side of the deque'''
 		try:
 			self.remove(new)
 		except ValueError:
@@ -279,12 +216,7 @@ class DequeSet(deque):
 		super().appendleft(new)
 
 	def append(self, new):
-		'''Add an item to the deque'''
-		if new not in self:
-			super().append(new)
-
-	def append_promote(self, new):
-		'''Add an item to the deque, or already exists, pop and append'''
+		'''Add or promote an element to the right side of the deque'''
 		try:
 			self.remove(new)
 		except ValueError:
@@ -292,12 +224,119 @@ class DequeSet(deque):
 		super().append(new)
 
 	def extend(self, iterable):
-		'''Append each element in iterable'''
+		'''Extend right side of deque with each element in iterable'''
 		super().extend(filter(lambda x: x not in self, iterable))
 
 	def extendleft(self, iterable):
-		'''Append each element in iterable'''
+		'''Extend left side of deque with each element in iterable'''
 		super().extendleft(filter(lambda x: x not in self, iterable))
+
+class ChatangoMessage(client.Message):
+	'''Message subclass for chatango posts'''
+	_LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
+	_QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
+
+	def __init__(self, post, bot, me, ishistory, alts=None):
+		#and is short-circuited
+		isreply = me is not None and (me in post.mentions)
+		if alts is not None:
+			for alt in alts:
+				if not alt:
+					continue
+				isreply = isreply or (alt in post.mentions)
+
+		#remove egregiously large amounts of newlines (more than 2)
+		#also edit sections with right to left override
+		cooked = ""
+		newline_count = 0
+		rtlbuffer, rtl = "", False
+		for i in post.post:
+			if i == '\n':
+				#right-to-left sequences end on newlines
+				if rtl:
+					cooked += rtlbuffer + (newline_count < 2 and i or "")
+					rtl = False
+					rtlbuffer = ""
+				if newline_count < 2:
+					cooked += i
+				newline_count += 1
+			#technically not right, since RTL marks should match marks, and
+			#overrides overrides
+			elif ord(i) in (8206, 8237):
+				cooked += rtlbuffer
+				rtlbuffer = ""
+				rtl = False
+			elif ord(i) in (8207, 8238):
+				rtl = True
+			else:
+				newline_count = 0
+				if rtl:
+					rtlbuffer = i + rtlbuffer
+				else:
+					cooked += i
+		if rtl:
+			cooked += rtlbuffer
+
+		#format as ' user: message'; the space is for the channel
+		super().__init__(" {}: {}".format(str(post.user), cooked)
+		#extra arguments to use in colorizers
+			, bot=bot, post=post, reply=isreply, history=ishistory)
+
+		if bot.options["bell"] and isreply and not ishistory and \
+		not self.filtered:
+			bot.overlay.parent.sound_bell()
+
+	def colorize(self):
+		raw_white = client.raw_num(0)
+		#these names are important
+		name_color = client.two56(self.post.n_color)
+		font_color = client.two56(self.post.f_color)
+		visited_link = client.two56.grayscale(12)
+
+		#use name colors?
+		username = str(self.post.user)
+		if not self.bot.options["htmlcolor"] \
+		or (self.bot.options["anoncolor"] and username[0] in "!#"):
+			name_color = get_color(username)
+			font_color = get_color(username)
+
+		#greentext, font color
+		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
+		self.color_by_regex(self._LINE_RE, text_color, group=3)
+
+		#links in white
+		link_color = lambda x: visited_link \
+			if linkopen.open_link.is_visited(x) else raw_white
+		self.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
+
+		#underline quotes
+		self.effect_by_regex(self._QUOTE_RE, 1)
+
+		#make sure we color the name right
+		self.insert_color(1, name_color)
+		#insurance the @s before a > are colored right
+		#		space/username/:(space)
+		msg_start = 1+len(username)+2
+		if not self.colored_at(msg_start):
+			self.insert_color(msg_start, font_color)
+		if self.reply:
+			self.add_global_effect(0, 1)
+		if self.history:
+			self.add_global_effect(1, 1)
+
+		#channel
+		self.insert_color(0, BEGIN_COLORS + self.post.channel + 12)
+
+	def filter(self):
+		username = str(self.post.user)
+		if username[0] in "!#":
+			username = username[1:]
+		return any((
+			#filtered channels
+			  self.bot.filtered_channels[self.post.channel]
+			#ignored users
+			, username.lower() in self.bot.ignores
+		))
 
 class ChatBot(pytango.Manager):
 	'''Bot for interacting with the chat'''
@@ -397,24 +436,21 @@ class ChatBot(pytango.Manager):
 	async def on_pm_connect(self, _):
 		self.overlay.msg_system("Connected to PMs")
 
+	'''
 	async def on_pm(self, _, post, historical):
 		msg = " {}: {}".format(str(post.user), post.post)
 		self.overlay.msg_append(msg, post, True, historical)
+	'''
 
 	async def on_message(self, _, post):
 		#double check for anons
 		username = str(post.user).lower()
 		if username[0] in '!#':
 			username = username[1:]
-		self.members.appendleft_promote(username)
+		self.members.appendleft(username)
 		self.overlay.parse_links(post.post)
-		msg = parse_post(post, self.me, False, alts=self.alts)
-		#						  isreply		ishistory
-		if self.options["bell"] and msg[2] and not msg[3] and \
-		not self.overlay.filter_message(*(msg[1:])):
-			self.overlay.parent.sound_bell()
-
-		self.overlay.msg_append(*msg)
+		self.overlay.msg_append(ChatangoMessage(post, self, self.me, False
+			, alts=self.alts))
 
 	async def on_history_done(self, _, history):
 		for post in history:
@@ -423,8 +459,8 @@ class ChatBot(pytango.Manager):
 				username = username[1:]
 			self.members.append(username)
 			self.overlay.parse_links(post.post, True)
-			msg = parse_post(post, self.me, True)
-			self.overlay.msg_prepend(*msg)
+			self.overlay.msg_prepend(ChatangoMessage(post, self, self.me, True
+				, alts=self.alts))
 		self.overlay.can_select = True
 
 	async def on_flood_warning(self, _):
@@ -447,7 +483,7 @@ class ChatBot(pytango.Manager):
 
 	async def on_member_join(self, _, user):
 		if user != "anon":
-			self.members.appendleft_promote(str(user).lower())
+			self.members.appendleft(str(user).lower())
 		#notifications
 		self.overlay.parent.blurb.push("{} has joined".format(str(user)))
 
@@ -457,7 +493,7 @@ class ChatBot(pytango.Manager):
 	async def on_connection_error(self, _, error):
 		if isinstance(error, (ConnectionResetError, type(None))):
 			self.overlay.messages.stop_select()
-			self.overlay.msg_system("Connection lost; press ^R to reconnect")
+			self.overlay.msg_system("Connection lost; press ^r to reconnect")
 		else:
 			self.overlay.msg_system(
 				"Connection error occurred. Try joining another room with ^T")
@@ -476,13 +512,12 @@ class LinkOverlay(client.VisualListOverlay):
 	def __init__(self, parent, last_links, redraw=None):
 		self._redraw_overlay = redraw
 
-		builder = lambda raw: [i.replace("https://", "").replace("http://", "")
-			for i in reversed(raw)]
-		super().__init__(parent, (builder, last_links)
-			, modes=["default"] + linkopen.get_defaults())
+		builder = lambda raw: list(reversed(raw))
+		super().__init__(parent, last_links
+			, modes=["default"] + linkopen.get_defaults(), builder=builder)
 
-		find_new = lambda i: (linkopen.open_link.is_visited(self.raw[len(self.list)-i-1])) ^\
-						(linkopen.open_link.is_visited(self.raw[len(self.list)-self.it-1]))
+		find_new = lambda i: linkopen.open_link.is_visited(self[i]) ^\
+						linkopen.open_link.is_visited(self.current)
 		prev_new, next_new = self.goto_lambda(find_new)
 
 		self.add_keys({
@@ -493,7 +528,19 @@ class LinkOverlay(client.VisualListOverlay):
 			, "a-j":	next_new
 		})
 
-	def open_links(self, links, opener=0):
+	#enter key
+	def select(self):
+		'''Open link with selected opener'''
+		if not self.list:
+			return None
+		#try to get selected links
+		all_links = self.selected
+		self._open_links(all_links, self.mode)
+		self.clear()
+		return -1
+
+	@staticmethod
+	def open_links(parent, links, opener=0, redraw=None):
 		'''
 		Open a list of `links` with `opener`.
 		Optionally needs updates colors of chat_overlay
@@ -505,43 +552,34 @@ class LinkOverlay(client.VisualListOverlay):
 
 		def callback():
 			for i in links:
-				linkopen.open_link(self.parent, i, opener)
+				linkopen.open_link(parent, i, opener)
 			#don't recolor if the list is empty
-			if links and isinstance(self._redraw_overlay, client.ChatOverlay):
-				self._redraw_overlay.recolor_lines()
+			if links and isinstance(redraw, client.ChatOverlay):
+				redraw.recolor_lines()
 
 		if len(links) >= warning_links:
 			msg = "Really open {} links? (y/n)".format(len(links))
-			client.ConfirmOverlay(self.parent, msg, callback).add()
+			client.ConfirmOverlay(parent, msg, callback).add()
 		else:
 			callback()
 
-	#enter key
-	def select(self):
-		'''Open link with selected opener'''
-		if not self.list:
-			return None
-		#try to get selected links
-		all_links = self.selected_list()
-		self.open_links(all_links, self.mode)
-		self.clear()
-		return -1
+	def _open_links(self, links, opener=0):
+		return self.open_links(self.parent, links, opener, self._redraw_overlay)
 
 	def open_images(self):
-		links = []
-		for i, j in enumerate(self.list):
-			actual = self.raw[len(self.list)-i-1]
-			if (linkopen.get_extension(j).lower() in ("png", "jpg", "jpeg")) \
-			and (not linkopen.open_link.is_visited(actual)):
-				links.append(actual)
-		self.open_links(links, self.mode)
+		'''Open all images that have not been visited'''
+		self._open_links([link for link in self.list \
+			if (linkopen.get_extension(link).lower() in ("png", "jpg", "jpeg")) \
+			and (not linkopen.open_link.is_visited(link))], self.mode)
 
 	def _draw_line(self, line, number):
 		'''Draw visited links in a slightly grayer color'''
+		#remove the protocol
+		line.setstr(str(line).replace("https://", "").replace("http://", ""))
+		#draw whether this link is visited
+		if linkopen.open_link.is_visited(self[number]):
+			line.insert_color(0, client.two56.grayscale(12))
 		super()._draw_line(line, number)
-		current = self.raw[len(self.list)-number-1]
-		if linkopen.open_link.is_visited(current):
-			line.insert_color(0, self.parent.two56.grayscale(12))
 
 #Formatting InputMux------------------------------------------------------------
 Formatting = client.InputMux()	#formatting mux
@@ -638,7 +676,7 @@ def two56(context):
 @two56.setter
 def _(context, value):
 	context.bot.options["256color"] = value
-	context.parent.two56.toggle(value)
+	client.two56.toggle(value)
 	context.recolor_lines()
 
 @Options.listel("bool")
@@ -655,7 +693,7 @@ def _(mux, value, coloring):
 	htmlcolor.draw_bool(mux, value, coloring)
 	if not two56.get(mux.context):
 		coloring.clear()
-		coloring.insert_color(0, mux.parent.two56.grayscale(12))
+		coloring.insert_color(0, client.two56.grayscale(12))
 
 @Options.listel("bool")
 def anoncolor(context):
@@ -671,9 +709,61 @@ def _(mux, value, coloring):
 	anoncolor.draw_bool(mux, value, coloring)
 	if not (two56.get(mux.context) and htmlcolor.get(mux.context)):
 		coloring.clear()
-		coloring.insert_color(0, mux.parent.two56.grayscale(12))
+		coloring.insert_color(0, client.two56.grayscale(12))
 
 #Extended overlay---------------------------------------------------------------
+@ChatangoMessage.key_handler("a-enter", 1)
+@ChatangoMessage.key_handler("enter")
+def open_selected_links(message, overlay):
+	'''Open links in selected message'''
+	msg = message.post.post
+	all_links = linkopen.LINK_RE.findall(msg)
+	LinkOverlay.open_links(overlay.parent, all_links, redraw=overlay)
+
+@ChatangoMessage.key_handler("tab")
+def	reply_to_message(message, overlay):
+	'''Reply to selected message'''
+	msg, name = message.post.post, message.post.user
+	if name[0] in "!#":
+		name = name[1:]
+	if message.bot.me:
+		msg = msg.replace("@"+message.bot.me, "")
+	overlay.text.append("@{}: `{}`".format(name, msg.replace('`', "")))
+
+@ChatangoMessage.key_handler("^n")
+def add_ignore(message, overlay):
+	'''Add ignore from selected message'''
+	try:
+		#allmessages contain the colored message and arguments
+		name = message.post.user
+		if name[0] in "!#":
+			name = name[1:]
+		if name in message.bot.ignores:
+			return
+		message.bot.ignores.add(name)
+		overlay.redo_lines()
+	except IndexError:
+		pass
+
+@ChatangoMessage.key_handler("mouse-left")
+def _click_link(message, overlay, pos):
+	'''Click on a link as you would a hyperlink in a web browser'''
+	if pos == -1:
+		return 1
+	link = ""
+	smallest = -1
+	#look over all link matches; take the middle and find the smallest delta
+	for i in linkopen.LINK_RE.finditer(str(message)):
+		linkpos = (i.start() + i.end()) // 2
+		distance = abs(linkpos - pos)
+		if distance < smallest or smallest == -1:
+			smallest = distance
+			link = i.group()
+	if link:
+		linkopen.open_link(overlay.parent, link)
+		overlay.recolor_lines()
+	return 1
+
 class ChatangoOverlay(client.ChatOverlay):
 	def __init__(self, parent, bot):
 		self.last_links = []
@@ -683,8 +773,6 @@ class ChatangoOverlay(client.ChatOverlay):
 		self.bot = bot
 		self.add_keys({
 			  "enter":		self._enter
-			, "a-enter":	self._alt_enter
-			, "tab":		self._tab
 			, "a-g":		self.select_top
 			, "f2":			self._show_links
 			, "f3":			self._show_members
@@ -694,13 +782,10 @@ class ChatangoOverlay(client.ChatOverlay):
 #			, "f7":			self.pmConnect
 			, "f12":		self._show_options
 			, "^f":			self._search_scroller
-			, "^n":			self._add_ignore
 			, "^t":			self.join_group
 			, "^p":			self.userpass
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
-			, "mouse-left":		self._click_link
-			, "mouse-middle":	client.override(self._open_selected_links, 1)
 		})
 
 	def _max_select(self):
@@ -719,9 +804,6 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _enter(self):
 		'''Open selected message's links or send message'''
-		if self.messages.get_selected():
-			self._open_selected_links()
-			return
 		text = str(self.text)
 		#if it's not just spaces
 		if not text.isspace():
@@ -730,28 +812,6 @@ class ChatangoOverlay(client.ChatOverlay):
 			self.history.append(text)
 			#call the send
 			self.bot.send_post(text)
-
-	def _alt_enter(self):
-		'''Open link and don't stop selecting'''
-		self._open_selected_links()
-		return 1
-
-	def _tab(self):
-		'''Reply to selected message or complete'''
-		message = self.messages.get_selected()
-		if message:
-			try:
-				#allmessages contain the colored message and arguments
-				msg, name = message[1][0].post, message[1][0].user
-				if name[0] in "!#":
-					name = name[1:]
-				if self.bot.me:
-					msg = msg.replace("@"+self.bot.me, "")
-				self.text.append("@{}: `{}`".format(name, msg.replace('`', "")))
-			except IndexError:
-				pass
-			return
-		self.text.complete()
 
 	def _show_links(self):
 		'''List accumulated links'''
@@ -763,7 +823,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			return
 		#a current version of the users. will be 1:1 with the listoverlay
 		users = list(sorted(self.bot.joined_group.users, key=lambda x: x.name.lower()))
-		box = client.ListOverlay(self.parent, [format(user) for user in users])
+		box = client.ListOverlay(self.parent, users)
 
 		@box.key_handler("enter")
 		def select(me):
@@ -790,6 +850,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		@box.line_drawer
 		def draw_ignored(me, string, i):
+			string.setstr(format(users[i]))
 			selected = users[i].name.lower()
 			if selected in self.bot.ignores:
 				string.add_indicator('i', 3)
@@ -823,7 +884,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			if self.bot.filtered_channels[i]:
 				return
 			col = BEGIN_COLORS + (i and i+12 or 16)
-			string.insert_color(-1, col)
+			string.add_indicator(' ', col)
 
 		box.add()
 
@@ -833,7 +894,8 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _replies_scroller(self):
 		'''List replies in message scroller'''
-		callback = lambda _, isreply, __: isreply
+		callback = lambda message: isinstance(message, ChatangoMessage) \
+			and message.reply
 		client.add_message_scroller(self, callback
 			, empty="No replies have been accumulated"
 			, early="Earliest reply selected"
@@ -847,7 +909,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		@box.callback
 		def search(string):
-			callback = lambda post, _, __: -1 != post.post.lower().find(string)
+			callback = lambda message: -1 != str(message).lower().find(string)
 			client.add_message_scroller(self, callback
 				, empty="No message containing `%s` found" % string
 				, early="No earlier instance of `%s`" % string
@@ -855,22 +917,6 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		box.add()
 
-	def _add_ignore(self):
-		'''Add ignore from selected message'''
-		message = self.messages.get_selected()
-		if message:
-			try:
-				#allmessages contain the colored message and arguments
-				name = message[1][0].user
-				if name[0] in "!#":
-					name = name[1:]
-				if name in self.bot.ignores:
-					return
-				self.bot.ignores.add(name)
-				self.redo_lines()
-			except IndexError:
-				pass
-		return
 	#LINK RELATED--------------------------------------------------------------
 	def parse_links(self, raw, prepend=False):
 		'''
@@ -897,33 +943,6 @@ class ChatangoOverlay(client.ChatOverlay):
 		linkopen.open_link(self.parent, last)
 		self.recolor_lines()
 
-	def _open_selected_links(self):
-		message = self.messages.get_selected()
-		try:	#don't bother if it's a system message (or one with no "post")
-			msg = message[1][0].post
-		except (TypeError, IndexError):
-			return
-		all_links = linkopen.LINK_RE.findall(msg)
-		self.open_links(all_links)
-
-	def _click_link(self, x, y):
-		'''Click on a link as you would a hyperlink in a web browser'''
-		msg, pos = self.messages.from_position(x, y)
-		if pos == -1:
-			return 1
-		link = ""
-		smallest = -1
-		#look over all link matches; take the middle and find the smallest delta
-		for i in linkopen.LINK_RE.finditer(str(msg[0])):
-			linkpos = (i.start() + i.end()) // 2
-			distance = abs(linkpos - pos)
-			if distance < smallest or smallest == -1:
-				smallest = distance
-				link = i.group()
-		if link:
-			linkopen.open_link(self.parent, link)
-			self.recolor_lines()
-		return 1
 	#PARENT BOT RELATED--------------------------------------------------------
 	def reload_client(self):
 		'''Reload current group'''
@@ -953,58 +972,6 @@ class ChatangoOverlay(client.ChatOverlay):
 			await self.bot.reconnect()
 
 		self.parent.loop.create_task(callback())
-
-	def filter_message(self, post, isreply, ishistory):
-		username = str(post.user)
-		if username[0] in "!#":
-			user = username[1:]
-		return any((
-				#filtered channels
-				  self.bot.filtered_channels[post.channel]
-				#ignored users
-				, username.lower() in self.bot.ignores
-		))
-
-	def colorize_message(self, msg, post, isreply, ishistory):
-		raw_white = client.raw_num(0)
-		#these names are important
-		name_color = self.parent.two56(post.n_color)
-		font_color = self.parent.two56(post.f_color)
-		visited_link = self.parent.two56.grayscale(12)
-
-		#use name colors?
-		username = str(post.user)
-		if not self.bot.options["htmlcolor"] \
-		or (self.bot.options["anoncolor"] and username[0] in "!#"):
-			name_color = get_color(username)
-			font_color = get_color(username)
-
-		#greentext, font color
-		text_color = lambda x: x[0] == '>' and BEGIN_COLORS+11 or font_color
-		msg.color_by_regex(LINE_RE, text_color, group=3)
-
-		#links in white
-		link_color = lambda x: visited_link \
-			if linkopen.open_link.is_visited(x) else raw_white
-		msg.color_by_regex(linkopen.LINK_RE, link_color, font_color, 1)
-
-		#underline quotes
-		msg.effect_by_regex(QUOTE_RE, 1)
-
-		#make sure we color the name right
-		msg.insert_color(1, name_color)
-		#insurance the @s before a > are colored right
-		#		space/username/:(space)
-		msg_start = 1+len(username)+2
-		if not msg.colored_at(msg_start):
-			msg.insert_color(msg_start, font_color)
-		if isreply:
-			msg.add_global_effect(0, 1)
-		if ishistory:
-			msg.add_global_effect(1, 1)
-
-		#channel
-		msg.insert_color(0, BEGIN_COLORS + post.channel + 12)
 
 #COMMANDS-------------------------------------------------------------------
 @client.command("ignore")
@@ -1047,7 +1014,7 @@ def _(parent, *args):
 	if not chatbot:
 		return None
 
-	return chatbot.overlay.get_help_overlay()
+	return chatbot.overlay.open_help()
 
 @client.command("avatar", client.tab_file)
 def _(parent, *args):
@@ -1068,13 +1035,7 @@ def _(parent, *args):
 	else:
 		parent.blurb.push("Failed to update avatar")
 
-async def start_client(loop, creds):
-	create_colors()
-
-	manager = client.Manager(loop=loop)
-	manage_task = manager.start()
-	await manager.prepared.wait()
-
+async def start_client(manager, creds):
 	#fill in credential holes
 	for i, j in zip(("user", "passwd", "room")
 	, ("Username", "Password", "Room name")):
@@ -1088,24 +1049,22 @@ async def start_client(loop, creds):
 			creds[i] = await inp.result
 		except asyncio.CancelledError:
 			manager.stop()
-			return manage_task, manager.exited
+			return
 
 	#options
 	if creds["options"]["ignoresave"]:
 		creds.set_write("ignores")
 
-	manager.screen.two56.toggle(creds["options"]["256color"])
+	client.two56.toggle(creds["options"]["256color"])
 	manager.screen.toggle_mouse(creds["options"]["mouse"])
 
 	global _CLIENT
 	_CLIENT = ChatBot(manager.screen, creds)
-	return manage_task, manager.exited #the future to exit the loop
 
 def main():
 	#parse arguments and start client
 	import argparse
 	import os
-	import traceback
 	import sys
 
 	if not path.exists(HOME_PATH):
@@ -1115,8 +1074,8 @@ def main():
 		_write_init()
 
 	parser = argparse.ArgumentParser(description="Start the chatango client")
-	parser.add_argument("-c", dest="login", help="Set username and password. "+\
-		"If both are absent, you log in as an anon. If only password is "+\
+	parser.add_argument("-c", dest="login", help="Set username and password. "\
+		"If both are absent, you log in as an anon. If only password is "\
 		"absent, you set your name without having an account."
 		, nargs='*', metavar=("username", "password"), default=None)
 	parser.add_argument("-g", dest="group", help="Set group name"
@@ -1159,7 +1118,7 @@ def main():
 	#exec files in custom directory
 	if args.custom:
 		sys.path.append(HOME_PATH)
-		import custom
+		import custom	#pylint: disable=import-error
 		if custom.__doc__ != CUSTOM_DOC:
 			_write_init()
 			print("\x1b[31mAborted due to custom docstring mismatch. "\
@@ -1167,21 +1126,10 @@ def main():
 			return
 
 	#start
-	loop = asyncio.get_event_loop()
-	main_task = None
+	create_colors()
 	try:
-		main_task, end_future = \
-			loop.run_until_complete(start_client(loop, creds))
-		if end_future:
-			loop.run_until_complete(end_future.wait())
-	except Exception:
-		print("\x1b[31mFatal error occurred\x1b[m")
-		traceback.print_exc()
+		client.Manager.start(start_client, creds)
 	finally:
-		if main_task is not None and not main_task.done():
-			main_task.cancel()
-		loop.run_until_complete(loop.shutdown_asyncgens())
-
 		creds.write_json(SAVE_PATH)
 
 if __name__ == "__main__":

@@ -12,9 +12,9 @@ from .util import Tokenize
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "_COLORS"
-			, "SELECT_AND_MOVE", "def_256_colors", "get_color"
-			, "raw_num", "num_defined_colors", "collen", "numdrawing"
-			, "columnslice", "Coloring", "Scrollable", "ScrollSuggest"]
+			, "SELECT_AND_MOVE", "two56", "get_color", "raw_num"
+			, "num_defined_colors", "collen", "numdrawing", "columnslice"
+			, "Coloring", "JustifiedColoring", "Scrollable", "ScrollSuggest"]
 
 BAD_CHARSETS = [
 	  (119964, 26, ord('A'))	#uppercase math
@@ -27,7 +27,7 @@ BAD_CHARSETS = [
 	, (120094, 26, ord('a'))	#lowercase math fractur
 ]
 
-def parse_fractur(raw):
+def _parse_fractur(raw):
 	cooked = ""
 	for i in raw:
 		#look for fractur and double-width fonts that don't comply with wcwidth
@@ -93,9 +93,6 @@ SELECT_AND_MOVE = CHAR_CURSOR + SELECT
 CLEAR_FORMATTING = "\x1b[m"
 _TABLEN = 4
 
-#arbitrary number of characters a scrollable can have and not scroll
-MAX_NONSCROLL_WIDTH = 5
-
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
 	'''Exception for handling errors from Coloring or Scrollable manipulation'''
@@ -124,9 +121,70 @@ def def_effect(on, off):
 	_EFFECTS.append((on, off))
 	_EFFECTS_BITS = (_EFFECTS_BITS << 1) | 1
 
-def def_256_colors():
-	for i in range(256):
-		def_color(i)
+class ColorManager:
+	'''
+	Abstraction for printing 256 color terminal output. When inited or
+	.toggle'd to True, calling will return a color number for use with
+	Coloring. Otherwise, returns the `uncolored` color
+	'''
+	def __init__(self):
+		self._two56 = False
+		self._two56_start = None
+
+	def __call__(self, color, green=None, blue=None):
+		'''
+		Convert a hex string to 256 color variant or get
+		color as a pre-caluclated number from `color`
+		Returns raw_num(0) if not running in 256 color mode
+		'''
+		if not self._two56:
+			return raw_num(0)
+
+		if isinstance(color, int):
+			return self._two56_start + color
+		if isinstance(color, float):
+			raise TypeError("cannot interpret float as color number")
+
+		if color is not None and green is not None and blue is not None:
+			color = (color, green, blue)
+		elif not color:			#empty string
+			return raw_num(0)
+
+		try:
+			if isinstance(color, str):
+				parts_len = len(color)//3
+				in216 = [int(int(color[i*parts_len:(i+1)*parts_len], 16)*5/\
+					(16**parts_len)) for i in range(3)]
+			else:
+				in216 = [int(color[i]*5/255) for i in range(3)]
+
+			#too white or too black
+			if sum(in216) < 2 or sum(in216) > 34:
+				return raw_num(0)
+			return self._two56_start + 16 + \
+				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
+		except (AttributeError, TypeError):
+			return raw_num(0)
+
+	def __bool__(self):
+		return self._two56
+
+	def grayscale(self, color):
+		'''
+		Gets a grayscale color.
+		`color` can be from 0 (black) to 24 (white)
+		'''
+		color = min(max(color, 0), 24)
+		return self(color + 232)
+
+	def toggle(self, state):
+		'''Turn 256 colors on (and if undefined, define colors) or off'''
+		self._two56 = state
+		if state and self._two56_start is None: #not defined on startup
+			self._two56_start = num_defined_colors()
+			for i in range(256):
+				def_color(i)
+two56 = ColorManager()
 
 def get_color(color):
 	'''insertColor without position or coloring object'''
@@ -152,18 +210,22 @@ def num_defined_colors():
 	'''
 	return len(_COLORS) - _NUM_PREDEFINED
 
-
 class Coloring:
 	'''Container for a string and coloring to be done'''
 	def __init__(self, string, remove_fractur=True):
 		global _CAN_DEFINE_EFFECTS
 		_CAN_DEFINE_EFFECTS = False
 		if remove_fractur:
-			string = parse_fractur(string)
+			string = _parse_fractur(string)
 		self._str = string
 		self._positions = []
 		self._formatting = []
 		self._maxpos = -1
+
+	def __hash__(self):
+		'''Base hash on internal parameters only, to make memoization easier'''
+		return hash((self._str
+			, frozenset(self._positions), frozenset(self._formatting)))
 
 	def clear(self):
 		'''Clear all positions and formatting'''
@@ -171,9 +233,18 @@ class Coloring:
 		self._positions.clear()
 		self._formatting.clear()
 
+	def setstr(self, new, clear=True):
+		'''
+		Set contained string to something new. By default, also clears the
+		contained formatting.
+		'''
+		if clear:
+			self.clear()
+		self._str = new
+
 	def __repr__(self):
-		return "<Coloring string = {}, positions = {}, formatting = {}>".format(
-			repr(self._str), self._positions, self._formatting)
+		return "<{} string = {}, positions = {}, formatting = {}>".format(
+			type(self), repr(self._str), self._positions, self._formatting)
 
 	def __str__(self):
 		'''Get the string contained'''
@@ -196,7 +267,7 @@ class Coloring:
 						formatting += effect[0]
 			ret += self._str[tracker:pos] + formatting
 			tracker = pos
-			last_effect = next_effect
+			last_effect ^= next_effect
 		ret += self._str[tracker:]
 		return ret + CLEAR_FORMATTING
 
@@ -225,29 +296,6 @@ class Coloring:
 			self._str = self._str[:start] + sub + self._str[end:]
 			return
 		self._str = self._str[:start] + sub
-
-	def add_indicator(self, sub, color=None):
-		'''
-		Replace some spaces at the end of a string. Optionally inserts a color
-		for the string `sub`. Useful for ListOverlays.
-		'''
-		if sub == "":
-			return
-		pos, columns = 1, collen(sub)
-		while pos <= columns:
-			# keep a space, so pos-1
-			if self._str[-pos-1] != ' ':
-				# fewer columns in `sub` than room in _str
-				if columns < pos-1:
-					raise DisplayException("Not enough room for indicator %s" %\
-						sub)
-				sub = sub[:columnslice(sub, pos-2)] + "…"
-				break
-			pos += 1
-		pos -= 1
-		self._str = self._str[:-pos] + sub
-		if color:
-			self.insert_color(-pos, color)
 
 	def colored_at(self, position):
 		'''return a bool that represents if that position is colored yet'''
@@ -381,6 +429,8 @@ class Coloring:
 		'''
 		Break string (courteous of spaces) into a list of strings spanning
 		up to `length` columns
+		If there are empty lines (i.e. two newlines in a row), `keep_empty`
+		preserves them as such, which is the default behavior
 		'''
 		outdent_len = collen(outdent)
 		TABSPACE = length - outdent_len	#the number of columns sans the outdent
@@ -489,6 +539,158 @@ class Coloring:
 
 		return broken
 
+class JustifiedColoring(Coloring):
+	'''
+	Coloring object that can lazily add indicator lamps at the end of its
+	displayed string.
+	'''
+	_ELLIPSIS = '…'
+	def __init__(self, string, remove_fractur=True):
+		super().__init__(string, remove_fractur)
+		self._indicator = None
+
+		self._memoargs = None
+		self._rendered = None
+
+	def __hash__(self):
+		'''Include indicator in memoize hash'''
+		return hash((self._str, self._indicator
+			, frozenset(self._positions), frozenset(self._formatting)))
+
+	def __eq__(self, other):
+		return isinstance(other, JustifiedColoring) \
+			and (hash(self) == hash(other))
+
+	def add_indicator(self, sub: str, color=None, effect=None):
+		'''
+		Replace some spaces at the end of a string. Optionally inserts a color
+		for the string `sub`. Useful for ListOverlays.
+		'''
+		if sub == "":
+			return
+		formatting = ""
+		try:
+			formatting += _COLORS[color + _NUM_PREDEFINED]
+		except (TypeError, IndexError):
+			pass
+		try:
+			formatting += _EFFECTS[effect][0]
+		except (TypeError, IndexError):
+			pass
+		self._indicator = (sub, formatting)
+
+	def _justify(self, length):
+		'''
+		Backend for justify that does the parsing of `positions` and `formatting`
+		Adds the ellipsis and or leaves the string alone
+		'''
+		if not self._str:
+			return "", length
+
+		max_width = length//2
+		#try slicing the right half of the string short enough
+		right = len(self._str) + 1 - columnslice(reversed(self._str), max_width)
+		places = list(zip(self._positions, self._formatting))
+
+		#test if we have a suitably short string and just put them out of range
+		if right <= len(self._str) // 2 + 1:
+			left = len(self._str) + 1
+			right = left
+		#furthest slice index of the left half of the string
+		#if we don't have an odd split which we can insert the ellipsis into
+		else:
+			#ensure we have room for the ellipsis
+			if not length-max_width:
+				max_width -= 1
+			left = columnslice(self._str, max_width)
+			i, last_form = 0, 0
+			while i < len(self._positions) and self._positions[i] < left:
+				self._formatting = places[i]
+				i += 1
+			places.insert(i, (left, None))
+			while i < len(self._positions) and self._positions[i] < right:
+				last_form = places[i]
+				i += 1
+			places.insert(i+1, (right, last_form))
+
+		#slightly altered format-style loop
+		ret = ""
+		tracker = 0
+		last_effect = 0
+		running_length = 0
+
+		for pos, form in places:
+			if form is None:
+				#signal to begin omitting stuff
+				temp = self._str[tracker:left] + self._ELLIPSIS
+				ret += temp
+				running_length += collen(temp)
+				continue
+			elif left < pos < right:
+				continue
+
+			color = form >> len(_EFFECTS)
+			next_effect = form & _EFFECTS_BITS
+			formatting = _COLORS[color-1] if color > 0 else ""
+			for i, effect in enumerate(_EFFECTS):
+				if (1 << i) & next_effect:
+					if (1 << i) & last_effect:
+						formatting += effect[1]
+					else:
+						formatting += effect[0]
+			#but if we're back out of the woods
+			if tracker < right == pos:
+				ret += formatting
+			else:
+				temp = self._str[tracker:pos]
+				running_length += collen(temp)
+				ret += temp + formatting
+
+			tracker = pos
+			last_effect ^= next_effect
+
+		temp = self._str[tracker:]
+		#the string and the unused length
+		return ret + temp, length - (collen(temp) + running_length)
+
+	def justify(self, length, justchar=' ', ensure_indicator=2):
+		'''
+		Split string in two, joined with an ellipsis character and add indicator
+		'''
+		#quick memoization
+		if self._memoargs == (length, justchar, ensure_indicator):
+			return self._rendered
+
+		sub, color, columns = None, None, 0
+		if self._indicator is None:
+			ensure_indicator = 0
+		else:
+			sub, color = self._indicator
+			columns = collen(sub)
+			ensure_indicator = min(ensure_indicator, columns)
+		display, room = self._justify(length - ensure_indicator)
+		#number of columns allowed to the indicator
+		room += ensure_indicator
+
+		indicator = ""
+		if ensure_indicator:
+			#trim if too many columns
+			if columns > ensure_indicator:
+				final_column = columnslice(sub, room-1)
+				if final_column < len(sub):
+					sub = sub[:final_column] + self._ELLIPSIS
+				else:
+					sub = sub[:final_column]
+				columns = collen(sub)
+
+			indicator = color + sub
+			#room indicates how many spaces to add; so this should be accurate
+			room -= columns
+
+		self._memoargs = (length, justchar, ensure_indicator)
+		self._rendered = display + (justchar * room) + indicator + CLEAR_FORMATTING
+		return self._rendered
+
 def collen(string):
 	'''Column width of a string'''
 	escape = False
@@ -549,11 +751,14 @@ def columnslice(string, width):
 #SCROLLABLE CLASSES-------------------------------------------------------------
 class Scrollable:
 	'''Scrollable text input'''
+	#arbitrary number of characters a scrollable can have and not scroll
+	MAX_NONSCROLL_WIDTH = 5
+
 	def __init__(self, width, string=""):
 		if width <= _TABLEN:
-			raise DisplayException("Cannot create Scrollable smaller "+\
+			raise DisplayException("Cannot create Scrollable smaller "\
 				" or equal to tab width %d"%_TABLEN)
-		self._str = string
+		self._str = string.replace('\x7f', "")
 		self._width = width
 		#position of the cursor and display column of the cursor
 		self._pos = len(string)
@@ -617,20 +822,19 @@ class Scrollable:
 	#SET METHODS----------------------------------------------------------------
 	def _onchanged(self):
 		'''Useful callback to retreive a new 'good' slice of a string'''
-		pass
 
 	def setstr(self, new):
 		'''Set content of scrollable'''
-		self._str = new
+		self._str = new.replace('\x7f', "")
 		self.end()
 
 	def setnonscroll(self, new):
 		'''Set nonscrolling characters of scrollable'''
 		check = collen(new)
-		if check > MAX_NONSCROLL_WIDTH:
-			new = new[:columnslice(new, MAX_NONSCROLL_WIDTH)]
+		if check > self.MAX_NONSCROLL_WIDTH:
+			new = new[:columnslice(new, self.MAX_NONSCROLL_WIDTH)]
 		self._nonscroll = new
-		self._nonscroll_width = min(check, MAX_NONSCROLL_WIDTH)
+		self._nonscroll_width = min(check, self.MAX_NONSCROLL_WIDTH)
 		self._onchanged()
 
 	def setwidth(self, new):
@@ -656,13 +860,13 @@ class Scrollable:
 		self._onchanged()
 
 	def home(self):
-		'''Return to the beginning'''
+		'''Move cursor to the beginning'''
 		self._pos = 0
 		self._disp = 0
 		self._onchanged()
 
 	def end(self):
-		'''Move to the end'''
+		'''Move cursor to the end'''
 		self._pos = 0
 		self._disp = 0
 		self.movepos(len(self._str))
@@ -690,8 +894,10 @@ class Scrollable:
 	#CHARACTER INSERTION--------------------------------------------------------
 	def append(self, new):
 		'''Append string at cursor'''
-		self._str = self._str[:self._pos] + new + self._str[self._pos:]
+		self._str = self._str[:self._pos] + new.replace('\x7f', "") + \
+			self._str[self._pos:]
 		self.movepos(len(new))
+
 	#CHARACTER DELETION METHODS-------------------------------------------------
 	def backspace(self):
 		'''Backspace one char at cursor'''
@@ -738,8 +944,7 @@ class Scrollable:
 		self.home()
 
 	def undo(self):
-		#TODO populate a list of changes since some interval
-		#or after pressing space
+		#TODO populate a list of changes since some interval or after pressing space
 		pass
 
 class ScrollSuggest(Scrollable):
@@ -771,7 +976,7 @@ class ScrollSuggest(Scrollable):
 		self._argument_complete[command] = suggestion
 
 	def complete(self):
-		'''Complete the last word before the cursor or go to next suggestion'''
+		'''Tab forward in suggestions'''
 		#need to generate list
 		if not self._suggest_list:
 			close_quote = False
@@ -842,7 +1047,7 @@ class ScrollSuggest(Scrollable):
 		return False
 
 	def backcomplete(self):
-		'''Return to previous entry in tab list'''
+		'''Tab backward in suggestions'''
 		if self._suggest_list:
 			self._suggest_num = (self._suggest_num-1)%len(self._suggest_list)
 			suggestion = self._suggest_list[self._suggest_num]
