@@ -265,8 +265,8 @@ class Messages:
 								#so that selected can be seen relative to it
 		self.linesup = 0		#start drawing from this lines index (reversed)
 		self.distance = 0		#number of lines down from start_height's message
-		self.inner_height = 0	#inner message height, to start drawing message
-								#lines late
+		self.inner_height = 0	#inner message height, from the bottom of the 
+								#selected message
 		#lazy storage
 		self.lazy_color	= [-1, -1]	#latest/earliest messages to recolor
 		self.lazy_filter = [-1, -1]	#latest/earliest messages to refilter
@@ -699,8 +699,8 @@ class Messages:
 		start_message.recolor(do_clear=True)
 		self._lines.clear()
 		try:
-			self._lines.extend(reversed(
-				start_message.breaklines(width, mod_height=False)))
+			self._lines.extend(
+				start_message.breaklines(width, mod_height=False))
 		except TypeError:
 			raise DisplayException("recolor_lines called before redo_lines")
 
@@ -731,7 +731,6 @@ class ChatOverlay(TextOverlay):
 	Optionally pushes time messages every `push_times` seconds, 0 to disable.
 	'''
 	replace = True
-	_monitors = {}
 	def __init__(self, parent, push_times=600):
 		super().__init__(parent)
 		self._sentinel = ord(CommandOverlay.CHAR_COMMAND)
@@ -753,12 +752,6 @@ class ChatOverlay(TextOverlay):
 			, "mouse-wheel-up":		self.select_up
 			, "mouse-wheel-down":	self.select_down
 		})
-
-		examiners = self._monitors.get(type(self).__name__)
-		if examiners is not None:
-			self._examine = examiners
-		else:
-			self._examine = []
 
 	can_select = property(lambda self: self.messages.can_select)
 	@can_select.setter
@@ -902,8 +895,6 @@ class ChatOverlay(TextOverlay):
 	def msg_append(self, post: Message):
 		'''Apply a message's coloring, pass it through examiners, and append'''
 		post.recolor()
-		for i in self._examine:
-			i(self, post)
 		self.parent.schedule_display()
 		return self.messages.append(post)
 

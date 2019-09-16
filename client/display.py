@@ -222,6 +222,11 @@ class Coloring:
 		self._formatting = []
 		self._maxpos = -1
 
+	def __hash__(self):
+		'''Base hash on internal parameters only, to make memoization easier'''
+		return hash((self._str
+			, frozenset(self._positions), frozenset(self._formatting)))
+
 	def clear(self):
 		'''Clear all positions and formatting'''
 		self._maxpos = -1
@@ -548,9 +553,7 @@ class JustifiedColoring(Coloring):
 		self._rendered = None
 
 	def __hash__(self):
-		'''
-		Base hash on internal parameters only, to make memoization easier
-		'''
+		'''Include indicator in memoize hash'''
 		return hash((self._str, self._indicator
 			, frozenset(self._positions), frozenset(self._formatting)))
 
