@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 #client.overlay.py
+#TODO clicking in listoverlays
 '''
 Overlays that allow multiple input formats. Also includes InputMux, which
 provides a nice interface for modifying variables within a context.
