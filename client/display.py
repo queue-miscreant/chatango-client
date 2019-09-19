@@ -96,7 +96,6 @@ _TABLEN = 4
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
 	'''Exception for handling errors from Coloring or Scrollable manipulation'''
-	pass
 
 def def_color(fore, back="none", intense=False):
 	'''Define a new foreground/background pair, with optional intense color'''
@@ -121,11 +120,11 @@ def def_effect(on, off):
 	_EFFECTS.append((on, off))
 	_EFFECTS_BITS = (_EFFECTS_BITS << 1) | 1
 
-class ColorManager:
+class _ColorManager:
 	'''
-	Abstraction for printing 256 color terminal output. When inited or
-	.toggle'd to True, calling will return a color number for use with
-	Coloring. Otherwise, returns the `uncolored` color
+	Abstraction for printing 256 color terminal output. When `.toggle`'d to
+	True, calling will return a color number for use with Coloring.
+	Otherwise, returns the `uncolored` color
 	'''
 	def __init__(self):
 		self._two56 = False
@@ -184,7 +183,7 @@ class ColorManager:
 			self._two56_start = num_defined_colors()
 			for i in range(256):
 				def_color(i)
-two56 = ColorManager()
+two56 = _ColorManager() #pylint: disable=invalid-name
 
 def get_color(color):
 	'''insertColor without position or coloring object'''
@@ -193,15 +192,15 @@ def get_color(color):
 	except IndexError:
 		raise DisplayException("Color definition %d not found" % color)
 
-def raw_num(c):
+def raw_num(pair_number):
 	'''
 	Get raw pair number, without respect to number of predefined ones.
 	Use in conjunction with getColor or Coloring.insertColor to use
 	predefined colors
 	'''
-	if c < 0:
-		raise DisplayException("raw numbers must not be below 0")
-	return c - _NUM_PREDEFINED
+	if pair_number < 0:
+		raise DisplayException("raw numbers may not be below 0")
+	return pair_number - _NUM_PREDEFINED
 
 def num_defined_colors():
 	'''
@@ -209,6 +208,11 @@ def num_defined_colors():
 	more colors are defined. Used in toggle256.
 	'''
 	return len(_COLORS) - _NUM_PREDEFINED
+
+def _continue_formatting(last_color, last_effect, next_effect):
+	formatting = _COLORS[last_color-1] if last_color > 0 else ""
+	return formatting + "".join(effect[bool((1 << i) & last_effect)] \
+		for i, effect in enumerate(_EFFECTS) if (1 << i) & next_effect)
 
 class Coloring:
 	'''Container for a string and coloring to be done'''
@@ -258,14 +262,8 @@ class Coloring:
 		for pos, form in zip(self._positions, self._formatting):
 			color = form >> len(_EFFECTS)
 			next_effect = form & _EFFECTS_BITS
-			formatting = _COLORS[color-1] if color > 0 else ""
-			for i, effect in enumerate(_EFFECTS):
-				if (1 << i) & next_effect:
-					if (1 << i) & last_effect:
-						formatting += effect[1]
-					else:
-						formatting += effect[0]
-			ret += self._str[tracker:pos] + formatting
+			ret += self._str[tracker:pos] + \
+				_continue_formatting(color, last_effect, next_effect)
 			tracker = pos
 			last_effect ^= next_effect
 		ret += self._str[tracker:]
@@ -461,33 +459,25 @@ class Coloring:
 				get_format = format_pos != len(self._positions)
 				#do we even need to draw this?
 				if space > 0:
-					line_buffer += _COLORS[last_color-1] \
-						if last_color > 0 else ""
-					for i, effect in enumerate(_EFFECTS):
-						if (1 << i) & next_effect:
-							if (1 << i) & last_effect:
-								line_buffer += effect[1]
-							else:
-								line_buffer += effect[0]
+					line_buffer += _continue_formatting(last_color
+						, last_effect, next_effect)
 				#effects are turned off and on by the same bit
 				last_effect ^= next_effect
 			if j == '\t':
 				#tabs are the length of outdents
 				lenj = outdent_len
-				line_buffer += self._str[start:pos]
+				#add in a space to preserve string position
+				line_buffer += self._str[start:pos] + ' '
 				start = pos+1 #skip over tab
 				line_buffer += ' '*min(lenj, space)
 			elif j == '\n':
-				#add the new line
-				line_buffer += self._str[start:pos]
+				#add the new line; see above reason for ' '
+				line_buffer += self._str[start:pos] + ' '
 				if (line_buffer.rstrip() != outdent.rstrip()) or keep_empty:
 					broken.append(line_buffer + CLEAR_FORMATTING)
 				#refresh variables
 				line_buffer = outdent
-				line_buffer += _COLORS[last_color-1] if last_color > 0 else ""
-				for i, effect in enumerate(_EFFECTS):
-					if last_effect & (1 << i):
-						line_buffer += effect[0]
+				line_buffer += _continue_formatting(last_color, 0, last_effect)
 				start = pos+1 #skip over newline
 				lastcol = 0
 				space = TABSPACE
@@ -506,24 +496,15 @@ class Coloring:
 				#do we have a 'last space (breaking char)' recent enough to split after?
 				if 0 < lastcol < THRESHOLD:
 					broken.append(line_buffer + CLEAR_FORMATTING)
-					line_buffer = outdent
-					line_buffer += _COLORS[last_color-1] \
-						if last_color > 0 else ""
-					for i, effect in enumerate(_EFFECTS):
-						if (1 << i) & last_effect:
-							line_buffer += effect[0]
+					line_buffer = outdent + _continue_formatting(last_color
+						, 0, last_effect)
 					lenj += lastcol
 				#split on a long word
 				else:
 					broken.append(line_buffer + self._str[start:pos] + \
 						CLEAR_FORMATTING)
-					line_buffer = outdent
-					line_buffer += _COLORS[last_color-1] \
-						if last_color > 0 else ""
-
-					for i, effect in enumerate(_EFFECTS):
-						if (1 << i) & last_effect:
-							line_buffer += effect[0]
+					line_buffer = outdent + _continue_formatting(last_color
+						, 0, last_effect)
 					start = pos
 				lastcol = 0
 				space = TABSPACE - lenj
@@ -631,13 +612,7 @@ class JustifiedColoring(Coloring):
 
 			color = form >> len(_EFFECTS)
 			next_effect = form & _EFFECTS_BITS
-			formatting = _COLORS[color-1] if color > 0 else ""
-			for i, effect in enumerate(_EFFECTS):
-				if (1 << i) & next_effect:
-					if (1 << i) & last_effect:
-						formatting += effect[1]
-					else:
-						formatting += effect[0]
+			formatting = _continue_formatting(color, last_effect, next_effect)
 			#but if we're back out of the woods
 			if tracker < right == pos:
 				ret += formatting
@@ -699,8 +674,7 @@ def collen(string):
 		temp = (i == '\x1b') or escape
 		#not escaped and not transitioning to escape
 		if not temp:
-			char_width = wcwidth(i)
-			ret += (char_width > 0) and char_width
+			ret += max(0, wcwidth(i))
 		elif i.isalpha(): #is escaped and i is alpha
 			escape = False
 			continue
@@ -738,8 +712,7 @@ def columnslice(string, width):
 		temp = (i == '\x1b') or escape
 		#escapes (FSM-style)
 		if not temp:
-			char = wcwidth(i)
-			trace += (char > 0) and char
+			trace += max(0, wcwidth(i))
 			if trace > width:
 				return lentr
 		elif i.isalpha(): #is escaped and i is alpha
@@ -769,7 +742,7 @@ class Scrollable:
 		self.password = False
 
 	def __repr__(self):
-		return "Scollable({},{})".format(self._width, repr(self._str))
+		return f"{type(self)}({self._width}, {repr(self._str)})"
 
 	def __str__(self):
 		'''Return the raw text contained'''
