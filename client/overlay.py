@@ -511,7 +511,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 		lines[-5] = self.box_part(names) #4 lines
 		lines[-4] = self.box_part(vals) #3 line
 		lines[-3] = sep #2 lines
-		lines[-2] = self.box_part(format(self._colored_text).rjust(int(wide*1.5)+3)) #1
+		lines[-2] = self.box_part(format(self._colored_text).rjust(3*(wide+1)//2)) #1
 		lines[-1] = self.box_bottom() #last line
 
 	def _select(self):

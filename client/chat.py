@@ -299,11 +299,6 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		'''
 		return self._all_messages[-self._selector] if self._selector else None
 
-	def dump(self, **kwargs):
-		print(f"selector: {self._selector}, start_message: {self._start_message}, "\
-			f"start_inner: {self._start_inner}, height_up: {self._height_up}, " +
-			", ".join(f"{key}: {value}" for key, value in kwargs.items()))
-
 	def display(self, lines):
 		'''Using cached data in the messages, display to lines'''
 		if not self._all_messages:
@@ -336,7 +331,6 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._lazy_offset = 0
 
 	def up(self, amount=1):
-		self.dump(height=self.parent.height-1)
 		height = self.parent.height-1
 
 		#scroll within a message if possible, and exit
@@ -373,7 +367,6 @@ class Messages: #pylint: disable=too-many-instance-attributes
 				last_height = self._all_messages[-start].height
 				startlines += last_height
 				start += 1
-			self.dump(startlines=startlines, last_height=last_height, addlines=addlines)
 			self._start_message = start-2
 			#the last message is perfect for what we need
 			if startlines - last_height == addlines:
@@ -389,7 +382,6 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		return addlines
 
 	def down(self, amount=1):
-		self.dump(height=self.parent.height-1)
 		if not self._selector:
 			return 0
 		height = self.parent.height-1
@@ -585,7 +577,6 @@ class ChatOverlay(TextOverlay):
 			, "mouse":	self._mouse
 			, "mouse-wheel-up":		self.select_up
 			, "mouse-wheel-down":	self.select_down
-			, "~":		lambda: self.messages.dump(height=self.height-1) or 1
 		})
 
 	can_select = property(lambda self: self.messages.can_select)

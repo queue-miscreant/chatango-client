@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 #pylint: disable=too-many-lines
 #client.display.py
+#TODO coalesce things under ColorManager; use import to expose bound methods
 '''
 Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
@@ -7,6 +8,7 @@ generic string containers.
 '''
 import re
 from shlex import shlex
+from math import ceil, floor
 from .wcwidth import wcwidth
 from .util import Tokenize
 
@@ -99,7 +101,7 @@ class DisplayException(Exception):
 
 def def_color(fore, back="none", intense=False):
 	'''Define a new foreground/background pair, with optional intense color'''
-	global _COLORS
+	global _COLORS #pylint: disable=global-statement
 	pair = "\x1b[3"
 	if isinstance(fore, int):
 		pair += "8;5;%d" % fore
@@ -112,12 +114,12 @@ def def_color(fore, back="none", intense=False):
 		pair += ";4%d" % _COLOR_NAMES.index(back)
 	_COLORS.append(pair+"m")
 
-def def_effect(on, off):
-	'''Define a new effect, turned on with `on`, and off with `off`'''
+def def_effect(effect_on, effect_off):
+	'''Define a new effect, turned on and off with `effect_on`/`effect_off`'''
 	if not _CAN_DEFINE_EFFECTS:
 		raise DisplayException("cannot define effect; a Coloring object already exists")
-	global _EFFECTS, _EFFECTS_BITS
-	_EFFECTS.append((on, off))
+	global _EFFECTS, _EFFECTS_BITS #pylint: disable=global-statement
+	_EFFECTS.append((effect_on, effect_off))
 	_EFFECTS_BITS = (_EFFECTS_BITS << 1) | 1
 
 class _ColorManager:
@@ -217,7 +219,7 @@ def _continue_formatting(last_color, last_effect, next_effect):
 class Coloring:
 	'''Container for a string and coloring to be done'''
 	def __init__(self, string, remove_fractur=True):
-		global _CAN_DEFINE_EFFECTS
+		global _CAN_DEFINE_EFFECTS #pylint: disable=global-statement
 		_CAN_DEFINE_EFFECTS = False
 		if remove_fractur:
 			string = _parse_fractur(string)
@@ -334,10 +336,8 @@ class Coloring:
 		'''
 		if start < 0:
 			start = len(self._str) + start
-		if end < 0:
-			end = len(self._str) + end
-		if start > end and not end:
-			end = len(self._str) #shortcut
+		if not end or end <= 0:
+			end = len(self._str) + int(end)
 		if start >= end:
 			return
 
@@ -423,28 +423,21 @@ class Coloring:
 		for find in regex.finditer(self._str+' '):
 			self.effect_range(find.start(group), find.end(group), effect)
 
-	def breaklines(self, length, outdent="", keep_empty=True):
+	def breaklines(self, length, outdent="", keep_empty=True): #pylint: disable=too-many-locals
 		'''
-		Break string (courteous of spaces) into a list of strings spanning
-		up to `length` columns
+		Break string (courteous of spaces) into a list of strings spanning up
+		to `length` columns
 		If there are empty lines (i.e. two newlines in a row), `keep_empty`
 		preserves them as such, which is the default behavior
 		'''
-		outdent_len = collen(outdent)
-		TABSPACE = length - outdent_len	#the number of columns sans the outdent
-		THRESHOLD = length >> 1	#number of columns before we break on a nice
-								#character rather than slicing a word in half
-		broken = []		#array of broken lines with formatting
+		broken, line_buffer = [], ""  #list to return, last pre-broken line
+		outdent_len = collen(outdent) #cache the length of the outdent
 
-		start = 0			#start at 0
-		space = length		#number of columns left
-		line_buffer = ""	#broken line with formatting; emptied into `broken`
+		start = 0	#last index to append from
+		lastcol, space = 0, length	#remaining column: at "good" position, total
 
-		format_pos = 0	#self.formatting iterator
-		get_format = bool(len(self._positions))	#is there a next color?
-		last_color = 0	#last color used; used to continue it after line breaks
-		last_effect = 0	#last effect used; //
-		lastcol = 0		#last possible breaking character position
+		format_pos, get_format = 0, bool(self._positions) #formatting iterators
+		last_color, last_effect = 0, 0	#last color/effect; continue after break
 		for pos, j in enumerate(self._str):	#character by character, the old fashioned way
 			lenj = wcwidth(j)
 			#if we have a 'next color', and we're at that position
@@ -464,23 +457,21 @@ class Coloring:
 				#effects are turned off and on by the same bit
 				last_effect ^= next_effect
 			if j == '\t':
-				#tabs are the length of outdents
+				#tabs are the length of outdents; pad out spaces
 				lenj = outdent_len
-				#add in a space to preserve string position
-				line_buffer += self._str[start:pos] + ' '
-				start = pos+1 #skip over tab
-				line_buffer += ' '*min(lenj, space)
+				line_buffer += self._str[start:pos] + ' '*min(lenj, space)
+				start = pos+1
 			elif j == '\n':
-				#add the new line; see above reason for ' '
-				line_buffer += self._str[start:pos] + ' '
-				if (line_buffer.rstrip() != outdent.rstrip()) or keep_empty:
-					broken.append(line_buffer + CLEAR_FORMATTING)
+				if keep_empty or line_buffer.rstrip() != outdent.rstrip():
+					#add in a space to preserve string position
+					broken.append(line_buffer + self._str[start:pos] + ' ' + \
+						CLEAR_FORMATTING)
 				#refresh variables
-				line_buffer = outdent
-				line_buffer += _continue_formatting(last_color, 0, last_effect)
-				start = pos+1 #skip over newline
-				lastcol = 0
-				space = TABSPACE
+				line_buffer = outdent + \
+					_continue_formatting(last_color, 0, last_effect)
+				start = pos+1
+				#remove outdent from space left
+				lastcol, space = 0, length - outdent_len
 				continue
 			elif ord(j) < 32:		#other non printing
 				continue
@@ -494,7 +485,7 @@ class Coloring:
 				lastcol = space
 			if space <= 0:			#time to break
 				#do we have a 'last space (breaking char)' recent enough to split after?
-				if 0 < lastcol < THRESHOLD:
+				if 0 < lastcol < (length >> 1):
 					broken.append(line_buffer + CLEAR_FORMATTING)
 					line_buffer = outdent + _continue_formatting(last_color
 						, 0, last_effect)
@@ -507,7 +498,8 @@ class Coloring:
 						, 0, last_effect)
 					start = pos
 				lastcol = 0
-				space = TABSPACE - lenj
+				#tab space minus this next cahracter
+				space = length - outdent_len - lenj
 
 		#empty the buffer one last time
 		line_buffer += self._str[start:]
@@ -515,9 +507,6 @@ class Coloring:
 			broken.append(line_buffer+CLEAR_FORMATTING)
 
 		#guarantee that a broken empty string is a singleton of an empty string
-		if not broken:
-			broken = [""]
-
 		return broken
 
 class JustifiedColoring(Coloring):
@@ -560,17 +549,17 @@ class JustifiedColoring(Coloring):
 			pass
 		self._indicator = (sub, formatting)
 
-	def _justify(self, length):
+	def _justify(self, half_width):
 		'''
 		Backend for justify that does the parsing of `positions` and `formatting`
 		Adds the ellipsis and or leaves the string alone
 		'''
 		if not self._str:
-			return "", length
+			return "", 0
 
-		max_width = length//2
 		#try slicing the right half of the string short enough
-		right = len(self._str) + 1 - columnslice(reversed(self._str), max_width)
+		right = len(self._str) + 1 - \
+			columnslice(reversed(self._str), floor(half_width))
 		places = list(zip(self._positions, self._formatting))
 
 		#test if we have a suitably short string and just put them out of range
@@ -580,19 +569,16 @@ class JustifiedColoring(Coloring):
 		#furthest slice index of the left half of the string
 		#if we don't have an odd split which we can insert the ellipsis into
 		else:
-			#ensure we have room for the ellipsis
-			if not length-max_width:
-				max_width -= 1
-			left = columnslice(self._str, max_width)
-			i, last_form = 0, 0
+			left = columnslice(self._str, ceil(half_width))
+			i, form = 0, 0
 			while i < len(self._positions) and self._positions[i] < left:
 				self._formatting = places[i]
 				i += 1
 			places.insert(i, (left, None))
 			while i < len(self._positions) and self._positions[i] < right:
-				last_form = places[i]
+				form = places[i]
 				i += 1
-			places.insert(i+1, (right, last_form))
+			places.insert(i+1, (right, form))
 
 		#slightly altered format-style loop
 		ret = ""
@@ -610,30 +596,29 @@ class JustifiedColoring(Coloring):
 			elif left < pos < right:
 				continue
 
-			color = form >> len(_EFFECTS)
 			next_effect = form & _EFFECTS_BITS
-			formatting = _continue_formatting(color, last_effect, next_effect)
 			#but if we're back out of the woods
-			if tracker < right == pos:
-				ret += formatting
-			else:
+			if not tracker < right == pos:
 				temp = self._str[tracker:pos]
 				running_length += collen(temp)
-				ret += temp + formatting
+				ret += temp
+			ret += _continue_formatting(form >> len(_EFFECTS)
+				, last_effect, next_effect)
 
 			tracker = pos
 			last_effect ^= next_effect
 
 		temp = self._str[tracker:]
 		#the string and the unused length
-		return ret + temp, length - (collen(temp) + running_length)
+		return ret + temp, collen(temp) + running_length
 
 	def justify(self, length, justchar=' ', ensure_indicator=2):
 		'''
 		Split string in two, joined with an ellipsis character and add indicator
 		'''
 		#quick memoization
-		if self._memoargs == (length, justchar, ensure_indicator):
+		new_hash = hash((length, justchar, ensure_indicator))
+		if self._memoargs == new_hash:
 			return self._rendered
 
 		sub, color, columns = None, None, 0
@@ -643,9 +628,9 @@ class JustifiedColoring(Coloring):
 			sub, color = self._indicator
 			columns = collen(sub)
 			ensure_indicator = min(ensure_indicator, columns)
-		display, room = self._justify(length - ensure_indicator)
+		display, room = self._justify((length - ensure_indicator) / 2)
 		#number of columns allowed to the indicator
-		room += ensure_indicator
+		room = length - room + ensure_indicator
 
 		indicator = ""
 		if ensure_indicator:
@@ -662,7 +647,7 @@ class JustifiedColoring(Coloring):
 			#room indicates how many spaces to add; so this should be accurate
 			room -= columns
 
-		self._memoargs = (length, justchar, ensure_indicator)
+		self._memoargs = new_hash
 		self._rendered = display + (justchar * room) + indicator + CLEAR_FORMATTING
 		return self._rendered
 
@@ -917,7 +902,7 @@ class Scrollable:
 		#TODO populate a list of changes since some interval or after pressing space
 		pass
 
-class ScrollSuggest(Scrollable):
+class ScrollSuggest(Scrollable): #pylint: disable=too-many-instance-attributes
 	'''
 	A Scrollable extension with suggestion built in
 	If you need to extend a Scrollable, it's probably this one
