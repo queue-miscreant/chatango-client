@@ -6,7 +6,7 @@ import asyncio
 import traceback
 from collections import deque
 
-from .display import SELECT_AND_MOVE, collen, numdrawing, raw_num, Coloring
+from .display import SELECT_AND_MOVE, collen, numdrawing, colors, Coloring
 from .util import LazyIterList, History
 from .base import staticize, quitlambda, override \
 	, Box, KeyContainer, OverlayBase, TextOverlay
@@ -247,7 +247,7 @@ class Message(Coloring):
 class SystemMessage(Message):
 	'''System messages that are colored red-on-white'''
 	def colorize(self):
-		self.insert_color(0, raw_num(1))
+		self.insert_color(0, colors.raw_num(1))
 
 class Messages: #pylint: disable=too-many-instance-attributes
 	'''Container object for Message objects'''
@@ -515,8 +515,9 @@ class Messages: #pylint: disable=too-many-instance-attributes
 
 		self._selector = index
 		self._start_message = index-1
-		self._start_inner = max(self.selected.height - height, 0)
-		self._height_up = min(self.selected.height, height)
+		if index:
+			self._start_inner = max(self.selected.height - height, 0)
+			self._height_up = min(self.selected.height, height)
 		self._lazy_bounds = [index, index]
 		self._lazy_offset = 0
 
@@ -535,7 +536,6 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		select = 1
 		while select <= len(self._all_messages):
 			message = self._all_messages[-select]
-			select += 1
 			try:
 				ret = callback(message)
 			except Exception: #pylint: disable=broad-except
@@ -543,11 +543,12 @@ class Messages: #pylint: disable=too-many-instance-attributes
 				continue
 			if ret:
 				yield message, select
+			select += 1
 
 	#REAPPLY METHODS-----------------------------------------------------------
-	def recolor_lines(self, update=True):
+	def redo_lines(self, recolor=True):
 		'''Re-apply Message coloring and redraw all visible lines'''
-		if update:
+		if recolor:
 			self._last_recolor = time.time()
 		self._lazy_bounds = [self._start_message, self._start_message]
 
@@ -694,8 +695,8 @@ class ChatOverlay(TextOverlay):
 		'''Clear all messages'''
 		self.messages.clear()
 
-	def recolor_lines(self):
-		self.messages.recolor_lines()
+	def redo_lines(self, recolor=True):
+		self.messages.redo_lines(recolor)
 		self.parent.schedule_display()
 
 	#MESSAGE ADDITION----------------------------------------------------------

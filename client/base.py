@@ -32,7 +32,7 @@ def staticize(func, *args, doc=None, **kwargs):
 	ret.__doc__ = doc or func.__doc__ or "(no documentation)"
 	return ret
 
-class override:
+class override: #pylint: disable=invalid-name,too-few-public-methods
 	'''
 	Create a new function that returns `ret`. Changes the value of a key's
 	return value to control redrawing/removing overlays
@@ -115,7 +115,7 @@ class KeyContainer:
 		'''
 		Run a key's callback. This expects a single argument: a list of numbers
 		terminated by -1. Subsequent arguments are passed to the key handler.
-		Returns singleton tuple if there is no handler, otherwise propagates 
+		Returns singleton tuple if there is no handler, otherwise propagates
 		handler's return
 		'''
 		try:
@@ -480,7 +480,7 @@ class OverlayBase:
 		key_overlay = ListOverlay(self.parent, keys_list)
 
 		@key_overlay.key_handler("enter")
-		def get_help(me):
+		def get_help(me): #pylint: disable=unused-variable
 			docstring = me.list[me.it]
 			help_display = DisplayOverlay(me.parent, docstring)
 			help_display.add_key("enter", quitlambda)
@@ -544,7 +544,7 @@ class TextOverlay(OverlayBase):
 	def _on_sentinel(self):
 		'''Callback run when self._sentinel is typed and self.text is empty'''
 
-	def _transform_paste(self, string):
+	def _transform_paste(self, string): #pylint: disable=no-self-use
 		'''
 		Transform input before appending to self.text. Must return the
 		transformed string
@@ -627,7 +627,7 @@ class Blurb:
 		if self._refresh_task is not None:
 			self._refresh_task.cancel()
 
-class Screen:
+class Screen: #pylint: disable=too-many-instance-attributes
 	'''
 	Abstraction for interacting with the curses screen. Maintains overlays and
 	handles I/O. Initialization also acquires and prepares the curses screen.
@@ -682,6 +682,14 @@ class Screen:
 		self._screen.nodelay(1)	#don't wait for enter to get input
 		self._screen.getch() #the first getch clears the screen
 
+	mouse = property(lambda self: None)
+	@mouse.setter
+	def mouse(self, state):
+		'''Turn the mouse on or off'''
+		if not (self.active and self._candisplay):
+			return None
+		return curses.mousemask(state and KeyContainer.MOUSE_MASK)
+
 	def shutdown(self):
 		'''Remove all overlays and undo everything in enter'''
 		self.blurb.end_refresh()
@@ -689,7 +697,7 @@ class Screen:
 		try:
 			for i in reversed(self._ins):
 				i.remove()
-		except:
+		except: #pylint: disable=bare-except
 			print("Error occurred during shutdown:")
 			print(traceback.format_exc(), "\n")
 		finally:
@@ -706,12 +714,6 @@ class Screen:
 	def sound_bell(self):
 		'''Sound console bell.'''
 		self._displaybuffer.write('\a')
-
-	def toggle_mouse(self, state):
-		'''Turn the mouse on or off'''
-		if not (self.active and self._candisplay):
-			return None
-		return curses.mousemask(state and KeyContainer.MOUSE_MASK)
 
 	#Display Methods------------------------------------------------------------
 	async def resize(self):
@@ -978,8 +980,8 @@ class Manager:
 		instance has shut down
 		'''
 		if asyncio.iscoroutinefunction(func):
-			raise TypeError("Coroutine, not coroutine object, passed into on_done")
-		elif not asyncio.iscoroutine(func):
+			func = func(*args)
+		if not asyncio.iscoroutine(func):
 			func = asyncio.coroutine(func)(*args)
 		cls._on_exit.append(func)
 		return func

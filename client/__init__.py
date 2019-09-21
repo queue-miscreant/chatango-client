@@ -7,6 +7,9 @@ from .overlay import ListOverlay, VisualListOverlay \
 	, TabOverlay, InputOverlay, InputMux
 from .chat import CommandOverlay, ChatOverlay, Message, add_message_scroller
 from .util import Tokenize, tab_file
-from .display import Coloring, raw_num, def_color, num_defined_colors, two56
+from .display import Coloring, colors
+
 on_done = Manager.on_done
 command = CommandOverlay.command
+two56 = colors.two56
+grayscale = colors.grayscale

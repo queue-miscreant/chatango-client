@@ -40,7 +40,7 @@ def _write_init():
 		i.write(CUSTOM_INIT)
 
 #GLOBALS------------------------------------------------------------
-BEGIN_COLORS = client.num_defined_colors()
+BEGIN_COLORS = client.colors.defined
 _CLIENT = None
 
 class _Persistent:
@@ -159,8 +159,8 @@ def make_creds():
 
 def create_colors():
 	'''Create colors used by classes defined here'''
-	global BEGIN_COLORS
-	BEGIN_COLORS = client.num_defined_colors()
+	global BEGIN_COLORS #pylint: disable=global-statement
+	BEGIN_COLORS = client.colors.defined
 	ordering = (
 		  "blue"
 		, "cyan"
@@ -169,14 +169,14 @@ def create_colors():
 		, "yellow"
 	)
 	for i in range(10):
-		client.def_color(ordering[i%5], intense=i//5)	#0-10: legacy
-	client.def_color("green", intense=True)
-	client.def_color("green")				#11:	>
-	client.def_color("none")				#12:	blank channel
-	client.def_color("red", "red")			#13:	red channel
-	client.def_color("blue", "blue")		#14:	blue channel
-	client.def_color("magenta", "magenta")	#15:	both channel
-	client.def_color("white", "white")		#16:	blank channel, visible
+		client.colors.def_color(ordering[i%5], intense=i//5)	#0-10: legacy
+	client.colors.def_color("green", intense=True)
+	client.colors.def_color("green")				#11:	>
+	client.colors.def_color("none")					#12:	blank channel
+	client.colors.def_color("red", "red")			#13:	red channel
+	client.colors.def_color("blue", "blue")			#14:	blue channel
+	client.colors.def_color("magenta", "magenta")	#15:	both channel
+	client.colors.def_color("white", "white")		#16:	blank channel, visible
 
 #color by user's name
 def get_color(name, init=6, split=109, rot=6):
@@ -194,7 +194,7 @@ def get_color(name, init=6, split=109, rot=6):
 #ChatBot related functionality--------------------------------------------------
 def get_client():
 	'''Get the current client instance, or if none such exists, None'''
-	global _CLIENT
+	global _CLIENT #pylint: disable=global-statement
 	if isinstance(_CLIENT, ChatBot):
 		return _CLIENT
 	return None
@@ -207,7 +207,7 @@ class DequeSet(deque):
 		else:
 			super().__init__()
 
-	def appendleft(self, new):
+	def appendleft(self, new): #pylint: disable=arguments-differ
 		'''Add or promote an element to the left side of the deque'''
 		try:
 			self.remove(new)
@@ -215,7 +215,7 @@ class DequeSet(deque):
 			pass
 		super().appendleft(new)
 
-	def append(self, new):
+	def append(self, new): #pylint: disable=arguments-differ
 		'''Add or promote an element to the right side of the deque'''
 		try:
 			self.remove(new)
@@ -236,14 +236,10 @@ class ChatangoMessage(client.Message):
 	_LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
 	_QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
 
-	def __init__(self, post, bot, me, ishistory, alts=None):
+	def __init__(self, post, bot, me, ishistory, alts=None): #pylint: disable=too-many-arguments
 		#and is short-circuited
-		isreply = me is not None and (me in post.mentions)
-		if alts is not None:
-			for alt in alts:
-				if not alt:
-					continue
-				isreply = isreply or (alt in post.mentions)
+		isreply = (me is not None and (me in post.mentions)) or \
+			(alts and any(i in post.mentions for i in alts if i))
 
 		#remove egregiously large amounts of newlines (more than 2)
 		#also edit sections with right to left override
@@ -287,11 +283,11 @@ class ChatangoMessage(client.Message):
 			bot.overlay.parent.sound_bell()
 
 	def colorize(self):
-		raw_white = client.raw_num(0)
+		raw_white = client.colors.raw_num(0)
 		#these names are important
 		name_color = client.two56(self.post.n_color)
 		font_color = client.two56(self.post.f_color)
-		visited_link = client.two56.grayscale(12)
+		visited_link = client.grayscale(12)
 
 		#use name colors?
 		username = str(self.post.user)
@@ -338,7 +334,7 @@ class ChatangoMessage(client.Message):
 			, username.lower() in self.bot.ignores
 		))
 
-class ChatBot(pytango.Manager):
+class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, too-many-public-methods
 	'''Bot for interacting with the chat'''
 	members = DequeSet()
 	def __init__(self, parent, creds):
@@ -389,7 +385,7 @@ class ChatBot(pytango.Manager):
 		self.overlay.clear()
 		await self.connect()
 
-	async def join_group(self, group_name):
+	async def join_group(self, group_name): #pylint: disable=arguments-differ
 		await self.leave_group(self.joined_group)
 		self.creds["room"] = group_name
 		self.overlay.clear()
@@ -475,7 +471,7 @@ class ChatBot(pytango.Manager):
 	async def on_participants(self, group):
 		'''On received joined members.'''
 		self.members.extend(map(lambda x: x.name.lower(), group.users))
-		self.overlay.recolor_lines()
+		self.overlay.redo_lines()
 
 	async def on_usercount(self, group):
 		'''On user count changed.'''
@@ -555,7 +551,7 @@ class LinkOverlay(client.VisualListOverlay):
 				linkopen.open_link(parent, i, opener)
 			#don't recolor if the list is empty
 			if links and isinstance(redraw, client.ChatOverlay):
-				redraw.recolor_lines()
+				redraw.redo_lines()
 
 		if len(links) >= warning_links:
 			msg = "Really open {} links? (y/n)".format(len(links))
@@ -578,11 +574,11 @@ class LinkOverlay(client.VisualListOverlay):
 		line.setstr(str(line).replace("https://", "").replace("http://", ""))
 		#draw whether this link is visited
 		if linkopen.open_link.is_visited(self[number]):
-			line.insert_color(0, client.two56.grayscale(12))
+			line.insert_color(0, client.grayscale(12))
 		super()._draw_line(line, number)
 
 #Formatting InputMux------------------------------------------------------------
-Formatting = client.InputMux()	#formatting mux
+Formatting = client.InputMux()	#pylint: disable=invalid-name
 @Formatting.listel("color")
 def fontcolor(context):
 	"Font Color"
@@ -626,7 +622,7 @@ def _(context, value):
 	context.bot.set_formatting()
 
 #Options InputMux---------------------------------------------------------------
-Options = client.InputMux()	#options mux
+Options = client.InputMux()	#pylint: disable=invalid-name
 @Options.listel("bool")
 def mouse(context):
 	"Mouse:"
@@ -676,8 +672,8 @@ def two56(context):
 @two56.setter
 def _(context, value):
 	context.bot.options["256color"] = value
-	client.two56.toggle(value)
-	context.recolor_lines()
+	client.colors.two56on = value
+	context.redo_lines()
 
 @Options.listel("bool")
 def htmlcolor(context):
@@ -686,14 +682,14 @@ def htmlcolor(context):
 @htmlcolor.setter
 def _(context, value):
 	context.bot.options["htmlcolor"] = value
-	context.recolor_lines()
+	context.redo_lines()
 @htmlcolor.drawer
 def _(mux, value, coloring):
 	'''Gray out if invalid due to 256 colors being off'''
 	htmlcolor.draw_bool(mux, value, coloring)
 	if not two56.get(mux.context):
 		coloring.clear()
-		coloring.insert_color(0, client.two56.grayscale(12))
+		coloring.insert_color(0, client.grayscale(12))
 
 @Options.listel("bool")
 def anoncolor(context):
@@ -702,14 +698,14 @@ def anoncolor(context):
 @anoncolor.setter
 def _(context, value):
 	context.bot.options["anoncolor"] = value
-	context.recolor_lines()
+	context.redo_lines()
 @anoncolor.drawer
 def _(mux, value, coloring):
 	'''Gray out if invalid due to 256 colors and HTML colors being off'''
 	anoncolor.draw_bool(mux, value, coloring)
 	if not (two56.get(mux.context) and htmlcolor.get(mux.context)):
 		coloring.clear()
-		coloring.insert_color(0, client.two56.grayscale(12))
+		coloring.insert_color(0, client.grayscale(12))
 
 #Extended overlay---------------------------------------------------------------
 @ChatangoMessage.key_handler("a-enter", 1)
@@ -761,7 +757,7 @@ def _click_link(message, overlay, pos):
 			link = i.group()
 	if link:
 		linkopen.open_link(overlay.parent, link)
-		overlay.recolor_lines()
+		overlay.redo_lines()
 	return 1
 
 class ChatangoOverlay(client.ChatOverlay):
@@ -826,7 +822,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		box = client.ListOverlay(self.parent, users)
 
 		@box.key_handler("enter")
-		def select(me):
+		def select(me): #pylint: disable=unused-variable
 			'''Reply to user'''
 			current = users[me.it].name
 			if current[0] in "!#":
@@ -836,20 +832,20 @@ class ChatangoOverlay(client.ChatOverlay):
 			return -1
 
 		@box.key_handler("a")
-		def get_avatar(me):
+		def get_avatar(me): #pylint: disable=unused-variable
 			'''Get avatar'''
 			current = users[me.it]
 			linkopen.open_link(self.parent, current.avatar)
 
 		@box.key_handler("tab")
-		def tab(me):
+		def tab(me): #pylint: disable=unused-variable
 			'''Ignore/unignore user'''
 			current = users[me.it].name.lower()
 			self.bot.ignores.symmetric_difference_update((current,))
 			self.redo_lines()
 
 		@box.line_drawer
-		def draw_ignored(me, string, i):
+		def draw_ignored(_, string, i): #pylint: disable=unused-variable
 			string.setstr(format(users[i]))
 			selected = users[i].name.lower()
 			if selected in self.bot.ignores:
@@ -867,20 +863,20 @@ class ChatangoOverlay(client.ChatOverlay):
 		box.it = self.bot.channel
 
 		@box.key_handler("enter")
-		def select(me):
+		def select(me): #pylint: disable=unused-variable
 			'''Set channel'''
 			self.bot.channel = me.it
 			return -1
 
 		@box.key_handler("tab")
-		def tab(me):
+		def tab(me): #pylint: disable=unused-variable
 			'''Ignore/unignore channel'''
 			self.bot.filtered_channels[me.it] = \
 				not self.bot.filtered_channels[me.it]
 			self.redo_lines()
 
 		@box.line_drawer
-		def draw_active(me, string, i):
+		def draw_active(_, string, i): #pylint: disable=unused-variable
 			if self.bot.filtered_channels[i]:
 				return
 			col = BEGIN_COLORS + (i and i+12 or 16)
@@ -908,7 +904,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		box.text.setnonscroll("^f: ")
 
 		@box.callback
-		def search(string):
+		def search(string): #pylint: disable=unused-variable
 			callback = lambda message: -1 != str(message).lower().find(string)
 			client.add_message_scroller(self, callback
 				, empty="No message containing `%s` found" % string
@@ -941,7 +937,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			return
 		last = links[-1]
 		linkopen.open_link(self.parent, last)
-		self.recolor_lines()
+		self.redo_lines()
 
 	#PARENT BOT RELATED--------------------------------------------------------
 	def reload_client(self):
@@ -959,7 +955,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		async def callback():
 			data = [None, None]
 			for i, j in enumerate(("Username", "Password")):
-				over = client.InputOverlay(self.parent, j, i==1)
+				over = client.InputOverlay(self.parent, j, i == 1)
 				over.add()
 
 				try:
@@ -975,7 +971,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 #COMMANDS-------------------------------------------------------------------
 @client.command("ignore")
-def _(parent, person, *args):
+def _(parent, person, *args): #pylint: disable=unused-argument
 	'''Ignore person or everyone'''
 	chatbot = get_client()
 	if not chatbot:
@@ -989,7 +985,7 @@ def _(parent, person, *args):
 	chatbot.overlay.redo_lines()
 
 @client.command("unignore")
-def _(parent, person, *args):
+def _(parent, person, *args): #pylint: disable=unused-argument
 	'''Unignore person or everyone'''
 	chatbot = get_client()
 	if not chatbot:
@@ -1007,7 +1003,7 @@ def _(parent, person, *args):
 	chatbot.main_overlay.redo_lines()
 
 @client.command("keys")
-def _(parent, *args):
+def _(parent, *args): #pylint: disable=unused-argument
 	'''Get list of the ChatangoOverlay's keys'''
 	#keys are instanced at runtime
 	chatbot = get_client()
@@ -1055,10 +1051,10 @@ async def start_client(manager, creds):
 	if creds["options"]["ignoresave"]:
 		creds.set_write("ignores")
 
-	client.two56.toggle(creds["options"]["256color"])
-	manager.screen.toggle_mouse(creds["options"]["mouse"])
+	client.colors.two56on = creds["options"]["256color"]
+	manager.screen.mouse = creds["options"]["mouse"]
 
-	global _CLIENT
+	global _CLIENT #pylint: disable=global-statement
 	_CLIENT = ChatBot(manager.screen, creds)
 
 def main():

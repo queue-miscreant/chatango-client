@@ -1,6 +1,5 @@
-#!/usr/bin/env python3 #pylint: disable=too-many-lines
+#!/usr/bin/env python3
 #client.display.py
-#TODO coalesce things under ColorManager; use import to expose bound methods
 '''
 Module for formatting; support for fitting strings to column
 widths and ANSI color escape string manipulations. Also contains
@@ -13,10 +12,9 @@ from .wcwidth import wcwidth
 from .util import Tokenize
 
 #all imports needed by overlay.py
-__all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "_COLORS"
-			, "SELECT_AND_MOVE", "two56", "get_color", "raw_num"
-			, "num_defined_colors", "collen", "numdrawing", "columnslice"
-			, "Coloring", "JustifiedColoring", "Scrollable", "ScrollSuggest"]
+__all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "SELECT_AND_MOVE"
+			, "colors", "collen", "numdrawing", "columnslice", "Coloring"
+			, "JustifiedColoring", "Scrollable", "ScrollSuggest"]
 
 BAD_CHARSETS = [
 	  (119964, 26, ord('A'))	#uppercase math
@@ -54,92 +52,123 @@ _NEXT_WORD_RE =	re.compile("([{0}]*[^{0}]+)".format(_SANE_TEXTBOX))
 _LINE_BREAKING = "- 　"
 
 #COLORING CONSTANTS------------------------------------------------------------
-#valid color names to add
-_COLOR_NAMES = [
-	  "black"
-	, "red"
-	, "green"
-	, "yellow"
-	, "blue"
-	, "magenta"
-	, "cyan"
-	, "white"
-	, ""
-	, "none"
-]
-
-#storage for defined pairs
-_COLORS = [
-	  "\x1b[39;22;49m"	#Normal/Normal			0
-	, "\x1b[31;22;47m"	#Red/White				1
-	, "\x1b[31;22;41m"	#red	(ColorSliders)	2
-	, "\x1b[32;22;42m"	#green	(ColorSliders)	3
-	, "\x1b[34;22;44m"	#blue	(ColorSliders)	4
-	, "\x1b[31;22;49m"	#red	(InputMux)		5
-	, "\x1b[32;22;49m"	#green	(InputMux)		6
-	, "\x1b[33;22;49m"	#yellow	(InputMux)		7
-]
-_NUM_PREDEFINED = len(_COLORS)
-
-#a tuple containing 'on' and 'off'
-_EFFECTS =	[
-	  ("\x1b[7m", "\x1b[27m")
-	, ("\x1b[4m", "\x1b[24m")
-]
-_EFFECTS_BITS = (1 << len(_EFFECTS))-1
-_CAN_DEFINE_EFFECTS = True
-
 CHAR_CURSOR = "\x1b[s"
-SELECT = _EFFECTS[0][0]
+SELECT = "\x1b[7m"
 SELECT_AND_MOVE = CHAR_CURSOR + SELECT
 CLEAR_FORMATTING = "\x1b[m"
-_TABLEN = 4
 
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
 	'''Exception for handling errors from Coloring or Scrollable manipulation'''
 
-def def_color(fore, back="none", intense=False):
-	'''Define a new foreground/background pair, with optional intense color'''
-	global _COLORS #pylint: disable=global-statement
-	pair = "\x1b[3"
-	if isinstance(fore, int):
-		pair += "8;5;%d" % fore
-	else:
-		pair += str(_COLOR_NAMES.index(fore))
-		pair += intense and ";1" or ";22"
-	if isinstance(back, int):
-		pair += ";48;5;%d" % back
-	else:
-		pair += ";4%d" % _COLOR_NAMES.index(back)
-	_COLORS.append(pair+"m")
-
-def def_effect(effect_on, effect_off):
-	'''Define a new effect, turned on and off with `effect_on`/`effect_off`'''
-	if not _CAN_DEFINE_EFFECTS:
-		raise DisplayException("cannot define effect; a Coloring object already exists")
-	global _EFFECTS, _EFFECTS_BITS #pylint: disable=global-statement
-	_EFFECTS.append((effect_on, effect_off))
-	_EFFECTS_BITS = (_EFFECTS_BITS << 1) | 1
-
-class _ColorManager:
+class _COLOR_MANAGER: #pylint: disable=invalid-name,too-many-instance-attributes
 	'''
-	Abstraction for printing 256 color terminal output. When `.toggle`'d to
-	True, calling will return a color number for use with Coloring.
-	Otherwise, returns the `uncolored` color
+	Container class for defining terminal colors.
+	Includes support for 256-colors terminal output.
 	'''
+	#valid color names to add
+	COLOR_NAMES = ["black", "red", "green", "yellow", "blue", "magenta", "cyan"
+		, "white", "", "none"]
+	CAN_DEFINE_EFFECTS = True
+
+	RGB_COLUMNS = ["\x1b[31;22;41m"		#red
+				 , "\x1b[32;22;42m"		#green
+				 , "\x1b[34;22;44m"]	#blue
+
 	def __init__(self):
 		self._two56 = False
 		self._two56_start = None
 
-	def __call__(self, color, green=None, blue=None):
+		#storage for defined pairs
+		self.colors = [
+			  "\x1b[39;22;49m"	#Normal/Normal			0
+			, "\x1b[31;22;47m"	#Red/White				1
+			, "\x1b[31;22;49m"	#red	(InputMux)		2
+			, "\x1b[32;22;49m"	#green	(InputMux)		3
+			, "\x1b[33;22;49m"	#yellow	(InputMux)		4
+		]
+		self._predefined = len(self.colors)
+		#names
+		self.default = self.raw_num(0)
+		self.system = self.raw_num(1)
+		self.red_text = self.raw_num(2)
+		self.green_text = self.raw_num(3)
+		self.yellow_text = self.raw_num(4)
+
+		#a tuple containing 'on' and 'off'
+		self.effects =	[
+			  (SELECT, "\x1b[27m")
+			, ("\x1b[4m", "\x1b[24m")
+		]
+		self._effects_bits = (1 << len(self.effects))-1
+
+	predefined = property(lambda self: self._predefined)
+	effects_bits = property(lambda self: self._effects_bits)
+	defined = property(lambda self: len(self.colors) - self._predefined
+		, doc="The number of defined colors (discluding predefined ones)")
+
+	two56on = property(lambda self: self._two56
+		, doc='''Turn 256 colors on (and if undefined, define colors) or off''')
+	@two56on.setter
+	def two56on(self, state):
+		self._two56 = state
+		if state and self._two56_start is None: #not defined on startup
+			self._two56_start = self.defined
+			for i in range(256):
+				self.def_color(i)
+
+	def _continue_formatting(self, last_color, last_effect, next_effect):
+		'''Used internally to build a ANSI formatting string'''
+		formatting = self.colors[last_color-1] if last_color > 0 else ""
+		return formatting + "".join(effect[bool((1 << i) & last_effect)] \
+			for i, effect in enumerate(self.effects) if (1 << i) & next_effect)
+
+	def def_color(self, fore, back="none", intense=False):
+		'''Define a new foreground/background pair, optionally intense'''
+		pair = "\x1b[3"
+		if isinstance(fore, int):
+			pair += "8;5;%d" % fore
+		else:
+			pair += str(self.COLOR_NAMES.index(fore))
+			pair += intense and ";1" or ";22"
+		if isinstance(back, int):
+			pair += ";48;5;%d" % back
+		else:
+			pair += ";4%d" % self.COLOR_NAMES.index(back)
+		self.colors.append(pair+"m")
+
+	def def_effect(self, effect_on, effect_off):
+		'''Define a new effect, turned on and off with `effect_on`/`effect_off`'''
+		if not self.CAN_DEFINE_EFFECTS:
+			raise DisplayException("cannot define effect; a Coloring object already exists")
+		self.effects.append((effect_on, effect_off))
+		self._effects_bits = (self._effects_bits << 1) | 1
+
+	def get_color(self, color):
+		'''insertColor without position or coloring object'''
+		try:
+			return self.colors[color + self.predefined]
+		except IndexError:
+			raise DisplayException("Color definition %d not found" % color)
+
+	def raw_num(self, pair_number):
+		'''
+		Get raw pair number, without respect to number of predefined ones.
+		Use in conjunction with getColor or Coloring.insertColor to use
+		predefined colors
+		'''
+		if pair_number < 0:
+			raise DisplayException("raw numbers may not be below 0")
+		return pair_number - self.predefined
+
+	def two56(self, color, green=None, blue=None):
 		'''
 		Convert a hex string to 256 color variant or get
 		color as a pre-caluclated number from `color`
 		Returns raw_num(0) if not running in 256 color mode
 		'''
 		if not self._two56:
-			return raw_num(0)
+			return self.raw_num(0)
 
 		if isinstance(color, int):
 			return self._two56_start + color
@@ -149,7 +178,8 @@ class _ColorManager:
 		if color is not None and green is not None and blue is not None:
 			color = (color, green, blue)
 		elif not color:			#empty string
-			return raw_num(0)
+			#return -self.predefined
+			return self.raw_num(0)
 
 		try:
 			if isinstance(color, str):
@@ -161,66 +191,25 @@ class _ColorManager:
 
 			#too white or too black
 			if sum(in216) < 2 or sum(in216) > 34:
-				return raw_num(0)
+				#return -self.predefined
+				return self.raw_num(0)
 			return self._two56_start + 16 + \
 				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
 		except (AttributeError, TypeError):
-			return raw_num(0)
-
-	def __bool__(self):
-		return self._two56
+			return self.raw_num(0)
+			#return -self.predefined
 
 	def grayscale(self, color):
-		'''
-		Gets a grayscale color.
-		`color` can be from 0 (black) to 24 (white)
-		'''
+		'''Gets a grayscale `color` from 0 (black) to 24 (white)'''
 		color = min(max(color, 0), 24)
-		return self(color + 232)
+		return self.two56(color + 232) #magic, but whatever
 
-	def toggle(self, state):
-		'''Turn 256 colors on (and if undefined, define colors) or off'''
-		self._two56 = state
-		if state and self._two56_start is None: #not defined on startup
-			self._two56_start = num_defined_colors()
-			for i in range(256):
-				def_color(i)
-two56 = _ColorManager() #pylint: disable=invalid-name
-
-def get_color(color):
-	'''insertColor without position or coloring object'''
-	try:
-		return _COLORS[color + _NUM_PREDEFINED]
-	except IndexError:
-		raise DisplayException("Color definition %d not found" % color)
-
-def raw_num(pair_number):
-	'''
-	Get raw pair number, without respect to number of predefined ones.
-	Use in conjunction with getColor or Coloring.insertColor to use
-	predefined colors
-	'''
-	if pair_number < 0:
-		raise DisplayException("raw numbers may not be below 0")
-	return pair_number - _NUM_PREDEFINED
-
-def num_defined_colors():
-	'''
-	Get the beginning index in _COLORS (adjusted for _NUM_PREDEFINED) before
-	more colors are defined. Used in toggle256.
-	'''
-	return len(_COLORS) - _NUM_PREDEFINED
-
-def _continue_formatting(last_color, last_effect, next_effect):
-	formatting = _COLORS[last_color-1] if last_color > 0 else ""
-	return formatting + "".join(effect[bool((1 << i) & last_effect)] \
-		for i, effect in enumerate(_EFFECTS) if (1 << i) & next_effect)
+colors = _COLOR_MANAGER() #pylint: disable=invalid-name
 
 class Coloring:
 	'''Container for a string and coloring to be done'''
 	def __init__(self, string, remove_fractur=True):
-		global _CAN_DEFINE_EFFECTS #pylint: disable=global-statement
-		_CAN_DEFINE_EFFECTS = False
+		colors.CAN_DEFINE_EFFECTS = False #pylint: disable=invalid-name
 		if remove_fractur:
 			string = _parse_fractur(string)
 		self._str = string
@@ -262,10 +251,10 @@ class Coloring:
 		tracker = 0
 		last_effect = 0
 		for pos, form in zip(self._positions, self._formatting):
-			color = form >> len(_EFFECTS)
-			next_effect = form & _EFFECTS_BITS
+			color = form >> len(colors.effects)
+			next_effect = form & colors._effects_bits
 			ret += self._str[tracker:pos] + \
-				_continue_formatting(color, last_effect, next_effect)
+				colors._continue_formatting(color, last_effect, next_effect)
 			tracker = pos
 			last_effect ^= next_effect
 		ret += self._str[tracker:]
@@ -291,7 +280,7 @@ class Coloring:
 			for pos, i in enumerate(self._positions):
 				if i > start:
 					self._positions[pos] = i + len(sub)
-			last = self.find_color(start) or raw_num(0)
+			last = self.find_color(start) or colors.raw_num(0)
 			self._insert_color(end, last)
 			self._str = self._str[:start] + sub + self._str[end:]
 			return
@@ -312,7 +301,7 @@ class Coloring:
 		while position > self._positions[i]:
 			i += 1
 		if self._positions[i] == position:		#position already used
-			effect = self._formatting[i] & _EFFECTS_BITS
+			effect = self._formatting[i] & colors.effects_bits
 			self._formatting[i] = formatting | effect
 		else:
 			self._positions.insert(i, position)
@@ -325,8 +314,8 @@ class Coloring:
 		'''
 		if position < 0:
 			position = max(position+len(self._str), 0)
-		formatting += _NUM_PREDEFINED + 1
-		formatting <<= len(_EFFECTS)
+		formatting += colors.predefined + 1
+		formatting <<= len(colors.effects)
 		self._insert_color(position, formatting)
 
 	def effect_range(self, start, end, formatting):
@@ -445,14 +434,14 @@ class Coloring:
 				line_buffer += self._str[start:pos]
 				start = pos
 				#decode the color/effect
-				last_color = (self._formatting[format_pos] >> len(_EFFECTS)) \
+				last_color = (self._formatting[format_pos] >> len(colors.effects)) \
 					or last_color
-				next_effect = self._formatting[format_pos] & _EFFECTS_BITS
+				next_effect = self._formatting[format_pos] & colors._effects_bits
 				format_pos += 1
 				get_format = format_pos != len(self._positions)
 				#do we even need to draw this?
 				if space > 0:
-					line_buffer += _continue_formatting(last_color
+					line_buffer += colors._continue_formatting(last_color
 						, last_effect, next_effect)
 				#effects are turned off and on by the same bit
 				last_effect ^= next_effect
@@ -468,7 +457,7 @@ class Coloring:
 						CLEAR_FORMATTING)
 				#refresh variables
 				line_buffer = outdent + \
-					_continue_formatting(last_color, 0, last_effect)
+					colors._continue_formatting(last_color, 0, last_effect)
 				start = pos+1
 				#remove outdent from space left
 				lastcol, space = 0, length - outdent_len
@@ -487,14 +476,14 @@ class Coloring:
 				#do we have a 'last space (breaking char)' recent enough to split after?
 				if 0 < lastcol < (length >> 1):
 					broken.append(line_buffer + CLEAR_FORMATTING)
-					line_buffer = outdent + _continue_formatting(last_color
+					line_buffer = outdent + colors._continue_formatting(last_color
 						, 0, last_effect)
 					lenj += lastcol
 				#split on a long word
 				else:
 					broken.append(line_buffer + self._str[start:pos] + \
 						CLEAR_FORMATTING)
-					line_buffer = outdent + _continue_formatting(last_color
+					line_buffer = outdent + colors._continue_formatting(last_color
 						, 0, last_effect)
 					start = pos
 				lastcol = 0
@@ -540,11 +529,11 @@ class JustifiedColoring(Coloring):
 			return
 		formatting = ""
 		try:
-			formatting += _COLORS[color + _NUM_PREDEFINED]
+			formatting += colors.colors[color + colors.predefined]
 		except (TypeError, IndexError):
 			pass
 		try:
-			formatting += _EFFECTS[effect][0]
+			formatting += colors.effects[effect][0]
 		except (TypeError, IndexError):
 			pass
 		self._indicator = (sub, formatting)
@@ -596,13 +585,13 @@ class JustifiedColoring(Coloring):
 			elif left < pos < right:
 				continue
 
-			next_effect = form & _EFFECTS_BITS
+			next_effect = form & colors.effects_bits
 			#but if we're back out of the woods
 			if not tracker < right == pos:
 				temp = self._str[tracker:pos]
 				running_length += collen(temp)
 				ret += temp
-			ret += _continue_formatting(form >> len(_EFFECTS)
+			ret += colors._continue_formatting(form >> len(colors.effects)
 				, last_effect, next_effect)
 
 			tracker = pos
@@ -711,11 +700,12 @@ class Scrollable:
 	'''Scrollable text input'''
 	#arbitrary number of characters a scrollable can have and not scroll
 	MAX_NONSCROLL_WIDTH = 5
+	_TABLEN = 4
 
 	def __init__(self, width, string=""):
-		if width <= _TABLEN:
+		if width <= self._TABLEN:
 			raise DisplayException("Cannot create Scrollable smaller "\
-				" or equal to tab width %d"%_TABLEN)
+				" or equal to tab width %d"%self._TABLEN)
 		self._str = string.replace('\x7f', "")
 		self._width = width
 		#position of the cursor and display column of the cursor
@@ -735,9 +725,8 @@ class Scrollable:
 
 	def __format__(self, *args):
 		'''Display text contained with cursor'''
-                #sometimes our self._disp gets off
-		if self._disp > len(self._str):
-		    self._disp = len(self._str)
+		#sometimes our self._disp gets off
+		self._disp = min(self._disp, len(self._str))
 		#iteration variables
 		start, end, width = self._disp, self._disp, self._nonscroll_width
 		#handle the first test already, +1 for truth values
@@ -747,7 +736,7 @@ class Scrollable:
 		while not endwidth or (width < self._width and end < lentext):
 			char = self._str[end]
 			if char == '\t':
-				width += _TABLEN
+				width += self._TABLEN
 			elif char in ('\n', '\r'):
 				width += 2	#for r'\n'
 			elif ord(char) >= 32:
@@ -759,7 +748,7 @@ class Scrollable:
 		while width >= self._width:
 			char = self._str[start]
 			if char == '\t':
-				width -= _TABLEN
+				width -= self._TABLEN
 			elif char in ('\n', '\r'):
 				width -= 2	#for \n
 			elif ord(char) >= 32:
@@ -776,7 +765,7 @@ class Scrollable:
 			CHAR_CURSOR+self._str[self._pos:end]
 		#actually replace the lengths I asserted earlier
 		return text.replace('\n', '\\n').replace('\r',
-			'\\r').replace('\t', ' '*_TABLEN)
+			'\\r').replace('\t', ' '*self._TABLEN)
 	#SET METHODS----------------------------------------------------------------
 	def _onchanged(self):
 		'''Useful callback to retreive a new 'good' slice of a string'''

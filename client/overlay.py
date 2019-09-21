@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 #client.overlay.py
-#TODO clicking in listoverlays
 '''
 Overlays that allow multiple input formats. Also includes InputMux, which
 provides a nice interface for modifying variables within a context.
 '''
 import asyncio
-from .display import SELECT, CLEAR_FORMATTING, raw_num, get_color \
-	, two56, Coloring, JustifiedColoring, DisplayException
+from .display import SELECT, CLEAR_FORMATTING, colors \
+	, Coloring, JustifiedColoring, DisplayException
 from .base import staticize, override, quitlambda \
 	, Box, OverlayBase, TextOverlay, SizeException
 
@@ -23,16 +22,16 @@ def _search_cache(keys, value):
 			return i
 	return value
 
-#DISPLAY CLASSES----------------------------------------------------------
-class ListOverlay(OverlayBase, Box):
+#DISPLAY CLASSES----------------------------------------------------------------
+class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attributes
 	'''
-	Allows user to select an entry from a list.
-	By default, the list is cloned, but any other callable returning a list can
-	be specified with the `builder` argument
+	Allows user to select an entry from a list. By default, the list is cloned,
+	but a callable with signature (`out_list`) that returns a `list` can be
+	specified with `builder`.
 	The display of each entry can be altered with the `line_drawer` decorator.
 	'''
 	replace = True
-	def __init__(self, parent, out_list, modes=None, builder=list, refresh_on_input=False):
+	def __init__(self, parent, out_list, modes=None, builder=list):
 		super().__init__(parent)
 		self._it = 0
 		self.mode = 0
@@ -54,13 +53,6 @@ class ListOverlay(OverlayBase, Box):
 		left =	staticize(self.chmode, -1,
 			doc=("Go to previous mode" if modes is not None else None))
 
-		def try_enter():
-			'''Run enter (if it exists)'''
-			enter_fun = self.keys["enter"]
-			if callable(enter_fun):
-				return enter_fun()
-			return None
-
 		def click(_, y):
 			'''Run enter on the element of the list that was clicked'''
 			#Manipulate self.it and try_enter
@@ -72,8 +64,11 @@ class ListOverlay(OverlayBase, Box):
 			newit = (self.it//size)*size + (y - 1)
 			if newit >= len(self.list):
 				return None
-			self.it = newit
-			return try_enter()
+			self.it = newit #pylint: disable=invalid-name
+			enter_fun = self.keys["enter"]
+			if callable(enter_fun):
+				return enter_fun()
+			return None
 
 		self.add_keys({
 			  "^r":		self.regen_list
@@ -96,7 +91,6 @@ class ListOverlay(OverlayBase, Box):
 			, "left":	left
 			, "mouse-left":			click
 			, "mouse-right":		override(click)
-			, "mouse-middle":		try_enter
 			, "mouse-wheel-up":		up
 			, "mouse-wheel-down":	down
 		})
@@ -104,7 +98,7 @@ class ListOverlay(OverlayBase, Box):
 	it = property(lambda self: self._it
 		, doc="Currently selected list index")
 	@it.setter
-	def it(self, dest):
+	def it(self, dest): #pylint: disable=invalid-name
 		self._do_move(dest)
 
 	search = property(lambda self: self._search
@@ -388,19 +382,19 @@ class ColorOverlay(ListOverlay, Box):
 		'''
 		self._callback = callback
 
-	def _draw_line(self, string, i):
+	def _draw_line(self, line, number):
 		'''Add color samples to the end of lines'''
-		super()._draw_line(string, i)
+		super()._draw_line(line, number)
 		#reserved for color sliders
-		if i == len(self._COLOR_LIST)-1 or not two56:
+		if number == len(self._COLOR_LIST)-1 or not colors.two56on:
 			return
-		which = self._spectrum[self.mode][i]
+		which = self._spectrum[self.mode][number]
 		if self.mode == 3: #grayscale
-			color = two56.grayscale(i * 2)
+			color = colors.grayscale(number * 2)
 		else:
-			color = two56([i*255/5 for i in which])
+			color = colors.two56([i*255/5 for i in which])
 		try:
-			string.add_indicator(' ', color, 0)
+			line.add_indicator(' ', color, 0)
 		except DisplayException:
 			pass
 
@@ -495,7 +489,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 			#draw on this line (ratio of space = ratio of value to 255)
 			for j in range(3):
 				if (space-i)*255 < (self.color[j]*space):
-					string += get_color(raw_num(j+2))
+					string += colors.RGB_COLUMNS[j]
 				string += ' ' * wide + CLEAR_FORMATTING + ' '
 			#justify (including escape sequence length)
 			lines[i+1] = self.box_noform(self.box_just(string))
@@ -533,7 +527,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 
 	def _update_text(self):
 		self._colored_text = Coloring(self.to_hex(self.color))
-		self._colored_text.insert_color(0, two56(self.color))
+		self._colored_text.insert_color(0, colors.two56(self.color))
 
 	@staticmethod
 	def to_hex(color):
@@ -647,7 +641,7 @@ class DisplayOverlay(OverlayBase, Box):
 		i = 0
 		lines[begin] = self.box_top()
 		for i in range(min(len(self._formatted), len(lines)-2)):
-			lines[begin+i+1] = self.box_part(self._formatted[self.begin+i])
+			lines[begin+i+1] = self.box_part(self._formatted[self._begin+i])
 		if self.replace:
 			while i < len(lines)-3:
 				lines[begin+i+2] = self.box_part("")
@@ -674,7 +668,7 @@ class DisplayOverlay(OverlayBase, Box):
 		#bigger than the box holding it
 		self.replace = len(self._formatted) > self.height-2
 
-		self.begin = 0	#begin from this prompt
+		self._begin = 0	#begin from this prompt
 
 	def set_outdent(self, outdent):
 		self._outdent = outdent
@@ -683,33 +677,34 @@ class DisplayOverlay(OverlayBase, Box):
 		maxlines = self.height-2
 		if len(self._formatted) <= maxlines:
 			return
-		self.begin = min(max(0, self.begin+amount), maxlines-len(self._formatted))
+		self._begin = min(max(0, self.begin+amount), maxlines-len(self._formatted))
 
 class TabOverlay(OverlayBase):
 	'''
 	Overlay for 'tabbing' through things.
 	Displays options on lines nearest to the input scrollable
 	'''
-	def __init__(self, parent, lis, callback=None, start=0, rows=5):
+	def __init__(self, parent, lis, start=0, rows=5): #pylint: disable=too-many-arguments
 		super().__init__(parent)
 		self.list = lis
-		self.it = min(start, len(self.list)-1)
+		self._it = min(start, len(self.list)-1) #pylint: disable=invalid-name
 		self._rows = min(len(self.list), rows, self.height)
+		self._callback = None
 		self.replace = self._rows == self.height
-		self.callback = callback
 
 		self.add_keys({
 			 -1:		self.remove
 			, "tab":	staticize(self.move_it, 1)
 			, "btab":	staticize(self.move_it, -1)
 		})
+	it = property(lambda self: self._it)
 
 	def __call__(self, lines):
 		'''Display message'''
 		line_offset = 1
-		for i, entry in zip(range(self._rows), (self.list + self.list)[self.it:]):
+		for i, entry in zip(range(self._rows), (self.list + self.list)[self._it:]):
 			entry = Coloring(entry)
-			#entry.insert_color(0, raw_num(7))
+			#entry.insert_color(0, colors.raw_num(7))
 			entry.add_global_effect(1)
 			if i == 0:
 				entry.add_global_effect(0)
@@ -721,15 +716,19 @@ class TabOverlay(OverlayBase):
 	def add(self):
 		'''If list is too small, exit early. Run callback on nonempty list'''
 		if self.list:
-			self.callback(self.list[self.it])
+			self._callback(self.list[self._it])
 		if len(self.list) < 2:
 			return
 		super().add()
 
+	def callback(self, callback):
+		'''Add callback when tab or shift-tab was clicked.'''
+		self._callback = callback
+
 	def move_it(self, direction):
-		self.it = (self.it + direction) % len(self.list)
-		if callable(self.callback):
-			self.callback(self.list[self.it])
+		self._it = (self._it + direction) % len(self.list)
+		if callable(self._callback):
+			self._callback(self.list[self._it])
 
 class ConfirmOverlay(OverlayBase):
 	'''Overlay to confirm selection y/n (no slash)'''
@@ -780,13 +779,12 @@ class InputMux:
 		self.parent = parent
 		overlay = ListOverlay(parent
 			, [self.indices[i].doc for i in self.ordering])
-	
 		overlay.line_drawer(self._drawing)
 
 		@overlay.key_handler("tab", True)
 		@overlay.key_handler("enter", True)
 		@overlay.key_handler(' ', True)
-		def select_sub(me):
+		def _(me):
 			"Change value"
 			return self.indices[self.ordering[me.it]].select()
 
@@ -874,7 +872,7 @@ class InputMux:
 				further_input = ColorOverlay(self.parent.parent
 					, self.get(self.parent.context))			#initial color
 				@further_input.callback
-				def callback(rgb):
+				def callback(rgb): #pylint: disable=unused-variable
 					self._set(self.parent.context, rgb)
 					return -1
 
@@ -883,7 +881,7 @@ class InputMux:
 					, self.doc								#input window text
 					, default=str(self.get(self.parent.context)))
 				@further_input.callback
-				def callback(string):
+				def _(string):
 					self._set(self.parent.context, string)
 
 			elif self._type == "enum":
@@ -911,17 +909,18 @@ class InputMux:
 			self.parent.warn_exit = self.parent.has_button
 			if further_input:
 				further_input.add()
+			return None
 
 		@staticmethod
-		def draw_color(mux, value, coloring):
+		def draw_color(_, value, coloring):
 			'''Default color drawer'''
-			coloring.add_indicator(' ', two56(value), 0)
+			coloring.add_indicator(' ', colors.two56(value), 0)
 
 		@staticmethod
 		def draw_string(_, value, coloring):
 			'''Default string drawer'''
 			val = str(value)
-			coloring.add_indicator(val, raw_num(7))	#yellow
+			coloring.add_indicator(val, colors.yellow_text)
 
 		@classmethod
 		def draw_enum(cls, mux, value, coloring):
@@ -933,7 +932,7 @@ class InputMux:
 		def draw_bool(_, value, coloring):
 			'''Default bool drawer'''
 			coloring.add_indicator('y' if value else 'n'
-				, raw_num(6) if value else raw_num(5))
+				, colors.green_text if value else colors.red_text)
 
 	def listel(self, data_type):
 		'''
