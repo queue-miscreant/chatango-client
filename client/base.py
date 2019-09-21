@@ -466,6 +466,7 @@ class OverlayBase:
 
 	@classmethod
 	def add_keydoc(cls, keys, predicate=""):
+		'''Add in some new documentation from another KeyContainer instance'''
 		if not hasattr(cls, "_more_help"):
 			cls._more_help = []
 		cls._more_help.extend([predicate + i for i in dir(keys)])

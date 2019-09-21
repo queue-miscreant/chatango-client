@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 #client/input.py
-#TODO generic callback overlay
+#TODO add callback overlay; if callbackOverlay.future is ever set/cancelled
+#the overlay is removed. This removes the swap in ColorOverlay
 '''
 Overlays that allow multiple input formats. Also includes InputMux, which
 provides a nice interface for modifying variables within a context.
@@ -203,7 +204,7 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		'''Move to the beginning or end of the list'''
 		self.it = int(is_end and (len(self.list)-1))
 
-	def _goto_lambda(self, func, direction, loop=False):
+	def _goto_lambda(self, func, direction, loop):
 		'''
 		Backend for goto_lambda.
 		`direction` = 0 for closer to the top, 1 for closer to the bottom.
@@ -223,12 +224,13 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		else:
 			self.it = int(direction and (len(self.list)-1))
 
-	def goto_lambda(self, func):
+	def goto_lambda(self, func, loop=False):
 		'''
 		Move to a list entry for which `func` returns True.
 		`func`'s signature should be (self.list index)
 		'''
-		return tuple(staticize(self._goto_lambda, func, i) for i in range(2))
+		return tuple(staticize(self._goto_lambda, func, i, loop)
+			for i in range(2))
 
 	def regen_list(self):
 		'''Regenerate list based on raw list reference'''
