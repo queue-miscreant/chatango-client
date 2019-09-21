@@ -105,6 +105,7 @@ class KeyContainer:
 		self._mouse = {}
 
 	def screen_keys(self, screen):
+		'''Bind control keys to a screen ^l, resize'''
 		self._keys.update({
 			12:	screen.redraw_all							#^l
 			, curses.KEY_RESIZE:	screen.schedule_resize
@@ -127,13 +128,18 @@ class KeyContainer:
 		fun, other_keys = None, None
 		if (char in self._keys) and (char == 27 or len(chars) <= 2 or char > 255):
 			fun, other_keys = self._keys[char], chars[1:] or [-1]
-		elif -1 in self._keys and (char in (9, 10, 13) or char in range(32, 255)):
+		elif -1 in self._keys and (char in range(32, 255) or char in (9, 10)):
 			fun, other_keys = self._keys[-1], chars[:-1]
 		if fun is not None and other_keys is not None:
 			if isinstance(fun, KeyMethod):
 				return fun(other_keys, *args)
 			return fun(*args)
 		return tuple()
+
+	def __getitem__(self, other):
+		'''Retrieve handler for a particular keyname'''
+		list_ref, name = self._get_key(other)
+		return list_ref[name]
 
 	def __dir__(self):
 		'''Get a list of keynames and their documentation'''
@@ -201,41 +207,38 @@ class KeyContainer:
 		KeyContainer._last_mouse = (x, y, state)
 		return self._callmouse([-1], *args)
 
+	def _get_key(self, key_name):
+		'''Retrieve list reference and equivalent value'''
+		#straight integers
+		if isinstance(key_name, int):
+			return self._keys, key_name
+		if key_name.lower() == "mouse":
+			return self._mouse, -1
+
+		ret_list = self._keys
+		true_name = key_name
+		lookup = self._VALID_KEYNAMES
+		#alt buttons
+		if key_name.startswith("a-"):
+			ret_list = self._altkeys
+			true_name = key_name[2:]
+		#mouse buttons
+		elif key_name.startswith("mouse-"):
+			ret_list = self._mouse
+			true_name = key_name[6:]
+			lookup = self._MOUSE_BUTTONS
+		try:
+			true_name = lookup[true_name]
+		except KeyError:
+			raise ValueError("key '%s' invalid" % key_name)
+		return ret_list, true_name
+
 	def add_key(self, key_name, handler, method_self=None):
 		'''Key addition that supports some nicer names than ASCII numbers'''
 		if not inspect.ismethod(handler) and method_self is not None:
 			handler = staticize(handler, method_self)
-
-		if isinstance(key_name, int):
-			self._keys[key_name] = handler
-			return
-
-		#alt buttons
-		if key_name.lower().startswith("a-"):
-			try:
-				true_name = self._VALID_KEYNAMES[key_name[2:]]
-				self._altkeys[true_name] = handler
-			except KeyError:
-				raise ValueError("key '%s' invalid" % key_name)
-			return
-		#mouse buttons
-		if key_name.lower().startswith("mouse-"):
-			try:
-				true_name = self._MOUSE_BUTTONS[key_name[6:]]
-				self._mouse[true_name] = handler
-			except KeyError:
-				raise ValueError("key '%s' invalid" % key_name)
-			return
-		if key_name.lower() == "mouse":
-			self._mouse[-1] = handler
-			return
-
-		#everything else
-		try:
-			true_name = self._VALID_KEYNAMES[key_name]
-			self._keys[true_name] = handler
-		except:
-			raise ValueError("key '%s' invalid" % key_name)
+		list_ref, name = self._get_key(key_name)
+		list_ref[name] = handler
 
 	def input(self, handler):
 		'''

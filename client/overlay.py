@@ -56,7 +56,7 @@ class ListOverlay(OverlayBase, Box):
 
 		def try_enter():
 			'''Run enter (if it exists)'''
-			enter_fun = self._keys.get(10)
+			enter_fun = self.keys["enter"]
 			if callable(enter_fun):
 				return enter_fun()
 			return None
