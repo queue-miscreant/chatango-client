@@ -624,7 +624,7 @@ class ChatOverlay(TextOverlay):
 	def resize(self, newx, newy):
 		'''Resize scrollable and maybe draw lines again if width changed'''
 		super().resize(newx, newy)
-		self.messages.recolor_lines(False)
+		self.messages.redo_lines(False)
 		return 1
 
 	def run_key(self, chars):

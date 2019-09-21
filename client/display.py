@@ -619,7 +619,7 @@ class JustifiedColoring(Coloring):
 			ensure_indicator = min(ensure_indicator, columns)
 		display, room = self._justify((length - ensure_indicator) / 2)
 		#number of columns allowed to the indicator
-		room = length - room + ensure_indicator
+		room = length - room
 
 		indicator = ""
 		if ensure_indicator:
