@@ -2,7 +2,7 @@
 '''Client package with customizable display and link opening capabilities.'''
 
 from .base import override, Box, OverlayBase, Manager, KeyContainer
-from .overlay import ListOverlay, VisualListOverlay \
+from .input import ListOverlay, VisualListOverlay \
 	, ColorOverlay, ColorSliderOverlay, ConfirmOverlay, DisplayOverlay \
 	, TabOverlay, InputOverlay, InputMux
 from .chat import CommandOverlay, ChatOverlay, Message, add_message_scroller

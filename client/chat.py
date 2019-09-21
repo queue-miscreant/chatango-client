@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#chat.py
+#client/chat.py
 '''Overlays that provide chatroom-like interfaces.'''
 import time
 import asyncio
@@ -10,7 +10,7 @@ from .display import SELECT_AND_MOVE, collen, numdrawing, colors, Coloring
 from .util import LazyIterList, History
 from .base import staticize, quitlambda, override \
 	, Box, KeyContainer, OverlayBase, TextOverlay
-from .overlay import ListOverlay, DisplayOverlay
+from .input import ListOverlay, DisplayOverlay
 __all__ = ["CommandOverlay", "ChatOverlay", "add_message_scroller"]
 
 class CommandOverlay(TextOverlay):
@@ -247,7 +247,7 @@ class Message(Coloring):
 class SystemMessage(Message):
 	'''System messages that are colored red-on-white'''
 	def colorize(self):
-		self.insert_color(0, colors.raw_num(1))
+		self.insert_color(0, colors.system)
 
 class Messages: #pylint: disable=too-many-instance-attributes
 	'''Container object for Message objects'''
@@ -298,6 +298,11 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		selected, or a Message object (or subclass)
 		'''
 		return self._all_messages[-self._selector] if self._selector else None
+
+	@property
+	def has_hidden(self):
+		'''Retrieve whether there are hidden messages (have scrolled upward)'''
+		return bool(self._start_message)
 
 	def display(self, lines):
 		'''Using cached data in the messages, display to lines'''
@@ -595,7 +600,9 @@ class ChatOverlay(TextOverlay):
 	def __call__(self, lines):
 		'''Display messages'''
 		self.messages.display(lines)
-		lines[-1] = Box.CHAR_HSPACE * self.parent.width
+		separator = Box.CHAR_HSPACE * (self.parent.width - 1)
+		separator += '^' if self.messages.has_hidden else Box.CHAR_HSPACE
+		lines[-1] = separator
 
 	def _on_sentinel(self):
 		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''

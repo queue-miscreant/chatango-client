@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-#client.display.py
+#client/display.py
 '''
-Module for formatting; support for fitting strings to column
-widths and ANSI color escape string manipulations. Also contains
-generic string containers.
+Module for formatting; support for fitting strings to column widths and ANSI
+color escape string manipulations. Also contains generic string containers.
 '''
 import re
 from shlex import shlex
@@ -13,7 +12,7 @@ from .util import Tokenize
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "SELECT_AND_MOVE"
-			, "colors", "collen", "numdrawing", "columnslice", "Coloring"
+			, "collen", "numdrawing", "columnslice", "colors", "Coloring"
 			, "JustifiedColoring", "Scrollable", "ScrollSuggest"]
 
 BAD_CHARSETS = [
@@ -57,11 +56,67 @@ SELECT = "\x1b[7m"
 SELECT_AND_MOVE = CHAR_CURSOR + SELECT
 CLEAR_FORMATTING = "\x1b[m"
 
+#COLUMN WIDTH FUNCTIONS--------------------------------------------------------
+def collen(string):
+	'''Column width of a string'''
+	escape = False
+	ret = 0
+	for i in string:
+		temp = (i == '\x1b') or escape
+		#not escaped and not transitioning to escape
+		if not temp:
+			ret += max(0, wcwidth(i))
+		elif i.isalpha(): #is escaped and i is alpha
+			escape = False
+			continue
+		escape = temp
+	return ret
+
+def numdrawing(string, width=-1):
+	'''
+	Number of drawing characters in the string (up to width).
+	Ostensibly the number of non-escape sequence characters
+	'''
+	if not width:
+		return 0
+	escape = False
+	ret = 0
+	for i in string:
+		temp = (i == '\x1b') or escape
+		#not escaped and not transitioning to escape
+		if not temp:
+			ret += 1
+			if ret == width:
+				return ret
+		elif i.isalpha(): #is escaped and i is alpha
+			escape = False
+			continue
+		escape = temp
+	return ret
+
+def columnslice(string, width):
+	'''Fit string to column width'''
+	escape = False
+	#number of columns passed, number of chars passed
+	trace, lentr = 0, 0
+	for lentr, i in enumerate(string):
+		temp = (i == '\x1b') or escape
+		#escapes (FSM-style)
+		if not temp:
+			trace += max(0, wcwidth(i))
+			if trace > width:
+				return lentr
+		elif i.isalpha(): #is escaped and i is alpha
+			escape = False
+			continue
+		escape = temp
+	return lentr + 1
+
 #COLORING STUFF-----------------------------------------------------------------
 class DisplayException(Exception):
 	'''Exception for handling errors from Coloring or Scrollable manipulation'''
 
-class _COLOR_MANAGER: #pylint: disable=invalid-name,too-many-instance-attributes
+class _ColorManager: #pylint: disable=too-many-instance-attributes
 	'''
 	Container class for defining terminal colors.
 	Includes support for 256-colors terminal output.
@@ -70,7 +125,6 @@ class _COLOR_MANAGER: #pylint: disable=invalid-name,too-many-instance-attributes
 	COLOR_NAMES = ["black", "red", "green", "yellow", "blue", "magenta", "cyan"
 		, "white", "", "none"]
 	CAN_DEFINE_EFFECTS = True
-
 	RGB_COLUMNS = ["\x1b[31;22;41m"		#red
 				 , "\x1b[32;22;42m"		#green
 				 , "\x1b[34;22;44m"]	#blue
@@ -154,32 +208,28 @@ class _COLOR_MANAGER: #pylint: disable=invalid-name,too-many-instance-attributes
 	def raw_num(self, pair_number):
 		'''
 		Get raw pair number, without respect to number of predefined ones.
-		Use in conjunction with getColor or Coloring.insertColor to use
+		Use in conjunction with getColor or Coloring.insert_color to use
 		predefined colors
 		'''
 		if pair_number < 0:
 			raise DisplayException("raw numbers may not be below 0")
 		return pair_number - self.predefined
 
-	def two56(self, color, green=None, blue=None):
+	def two56(self, color, too_black=2, too_white=34):
 		'''
-		Convert a hex string to 256 color variant or get
-		color as a pre-caluclated number from `color`
-		Returns raw_num(0) if not running in 256 color mode
+		Convert a hex string, 3-tuple, or pre-calculated int to 256 color
+		Returns `colors.default` if not running in 256 color mode
 		'''
 		if not self._two56:
-			return self.raw_num(0)
+			return self.default
 
 		if isinstance(color, int):
 			return self._two56_start + color
 		if isinstance(color, float):
 			raise TypeError("cannot interpret float as color number")
 
-		if color is not None and green is not None and blue is not None:
-			color = (color, green, blue)
-		elif not color:			#empty string
-			#return -self.predefined
-			return self.raw_num(0)
+		if not color: #empty string
+			return self.default
 
 		try:
 			if isinstance(color, str):
@@ -190,21 +240,19 @@ class _COLOR_MANAGER: #pylint: disable=invalid-name,too-many-instance-attributes
 				in216 = [int(color[i]*5/255) for i in range(3)]
 
 			#too white or too black
-			if sum(in216) < 2 or sum(in216) > 34:
-				#return -self.predefined
-				return self.raw_num(0)
+			if sum(in216) < too_black or sum(in216) > too_white:
+				return self.default
 			return self._two56_start + 16 + \
 				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
 		except (AttributeError, TypeError):
-			return self.raw_num(0)
-			#return -self.predefined
+			return self.default
 
 	def grayscale(self, color):
-		'''Gets a grayscale `color` from 0 (black) to 24 (white)'''
+		'''Gets a 256-color grayscale `color` from 0 (black) to 24 (white)'''
 		color = min(max(color, 0), 24)
 		return self.two56(color + 232) #magic, but whatever
 
-colors = _COLOR_MANAGER() #pylint: disable=invalid-name
+colors = _ColorManager() #pylint: disable=invalid-name
 
 class Coloring:
 	'''Container for a string and coloring to be done'''
@@ -239,7 +287,7 @@ class Coloring:
 
 	def __repr__(self):
 		return "<{} string = {}, positions = {}, formatting = {}>".format(
-			type(self), repr(self._str), self._positions, self._formatting)
+			str(type(self)), repr(self._str), self._positions, self._formatting)
 
 	def __str__(self):
 		'''Get the string contained'''
@@ -280,7 +328,7 @@ class Coloring:
 			for pos, i in enumerate(self._positions):
 				if i > start:
 					self._positions[pos] = i + len(sub)
-			last = self.find_color(start) or colors.raw_num(0)
+			last = self.find_color(start) or colors.default
 			self._insert_color(end, last)
 			self._str = self._str[:start] + sub + self._str[end:]
 			return
@@ -310,7 +358,7 @@ class Coloring:
 	def insert_color(self, position, formatting):
 		'''
 		Insert positions/formatting into color dictionary
-		formatting must be a proper color (in _COLORS, added with def_color)
+		formatting must be a proper color (in `colors`, added with `def_color`)
 		'''
 		if position < 0:
 			position = max(position+len(self._str), 0)
@@ -321,7 +369,7 @@ class Coloring:
 	def effect_range(self, start, end, formatting):
 		'''
 		Insert an effect at _str[start:end]
-		formatting must be a number corresponding to an effect
+		`formatting` must be a number corresponding to an `effect`
 		'''
 		if start < 0:
 			start = len(self._str) + start
@@ -415,9 +463,8 @@ class Coloring:
 	def breaklines(self, length, outdent="", keep_empty=True): #pylint: disable=too-many-locals
 		'''
 		Break string (courteous of spaces) into a list of strings spanning up
-		to `length` columns
-		If there are empty lines (i.e. two newlines in a row), `keep_empty`
-		preserves them as such, which is the default behavior
+		to `length` columns. If there are empty lines (i.e. two newlines in a
+		row), `keep_empty` preserves them as such (default True)
 		'''
 		broken, line_buffer = [], ""  #list to return, last pre-broken line
 		outdent_len = collen(outdent) #cache the length of the outdent
@@ -602,9 +649,7 @@ class JustifiedColoring(Coloring):
 		return ret + temp, collen(temp) + running_length
 
 	def justify(self, length, justchar=' ', ensure_indicator=2):
-		'''
-		Split string in two, joined with an ellipsis character and add indicator
-		'''
+		'''Justify string to `length` columns and add indicator'''
 		#quick memoization
 		new_hash = hash((length, justchar, ensure_indicator))
 		if self._memoargs == new_hash:
@@ -639,61 +684,6 @@ class JustifiedColoring(Coloring):
 		self._memoargs = new_hash
 		self._rendered = display + (justchar * room) + indicator + CLEAR_FORMATTING
 		return self._rendered
-
-def collen(string):
-	'''Column width of a string'''
-	escape = False
-	ret = 0
-	for i in string:
-		temp = (i == '\x1b') or escape
-		#not escaped and not transitioning to escape
-		if not temp:
-			ret += max(0, wcwidth(i))
-		elif i.isalpha(): #is escaped and i is alpha
-			escape = False
-			continue
-		escape = temp
-	return ret
-
-def numdrawing(string, width=-1):
-	'''
-	Number of drawing characters in the string (up to width).
-	Ostensibly the number of non-escape sequence characters
-	'''
-	if not width:
-		return 0
-	escape = False
-	ret = 0
-	for i in string:
-		temp = (i == '\x1b') or escape
-		#not escaped and not transitioning to escape
-		if not temp:
-			ret += 1
-			if ret == width:
-				return ret
-		elif i.isalpha(): #is escaped and i is alpha
-			escape = False
-			continue
-		escape = temp
-	return ret
-
-def columnslice(string, width):
-	'''Fit string to column width'''
-	escape = False
-	#number of columns passed, number of chars passed
-	trace, lentr = 0, 0
-	for lentr, i in enumerate(string):
-		temp = (i == '\x1b') or escape
-		#escapes (FSM-style)
-		if not temp:
-			trace += max(0, wcwidth(i))
-			if trace > width:
-				return lentr
-		elif i.isalpha(): #is escaped and i is alpha
-			escape = False
-			continue
-		escape = temp
-	return lentr + 1
 
 #SCROLLABLE CLASSES-------------------------------------------------------------
 class Scrollable:
@@ -822,9 +812,8 @@ class Scrollable:
 		'''Go back to the last word'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
 		if pos and not self.password:
-			#_UP_TO_WORD_RE captures a long series of words
-			#from the start. where it ends is how far we go.
-			#move backward, so subtract the larger position, offset of 1 b/c space
+			#`_UP_TO_WORD_RE`'s first group begins where the last word does
+			#use movepos to maintain display offset of 1 b/c space
 			self.movepos(pos.end(1)-self._pos-1)
 		else:
 			self.home()
@@ -833,8 +822,8 @@ class Scrollable:
 		'''Advance to the next word'''
 		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
 		if pos and not self.password:
-			span = (lambda x: x[1] - x[0])(pos.span(1))
-			self.movepos(span)
+			#move forward the length of the captured word
+			self.movepos((lambda x, y: y - x)(*pos.span(1)))
 		else:
 			self.end()
 
@@ -889,10 +878,6 @@ class Scrollable:
 		'''Clear cursor and string'''
 		self._str = ""
 		self.home()
-
-	def undo(self):
-		#TODO populate a list of changes since some interval or after pressing space
-		pass
 
 class ScrollSuggest(Scrollable): #pylint: disable=too-many-instance-attributes
 	'''

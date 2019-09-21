@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#base.py
+#client/base.py
 '''
 Base classes for overlays and curses screen abstractions.
 Screen implements a stack of overlays and sends byte-by-byte curses input to
@@ -11,14 +11,13 @@ try:
 	import curses
 except ImportError:
 	raise ImportError("Could not import curses; is this running on Windows cmd?")
-
 import sys
 import os
 import asyncio
 import traceback
 import inspect
 from functools import partial
-from signal import SIGTSTP, SIGINT #redirect ctrl-z and ctrl-c
+from signal import SIGINT #redirect ctrl-c
 
 from .display import CLEAR_FORMATTING, collen, ScrollSuggest, Coloring
 
@@ -473,7 +472,7 @@ class OverlayBase:
 
 	def _get_help_overlay(self):
 		'''Get list of this overlay's keys'''
-		from .overlay import ListOverlay, DisplayOverlay
+		from .input import ListOverlay, DisplayOverlay
 		keys_list = dir(self.keys)
 		if hasattr(self, "_more_help"):
 			keys_list.extend(self._more_help)
@@ -504,7 +503,6 @@ class TextOverlay(OverlayBase):
 		self.add_keys({
 			  "tab":		self.text.complete
 			, '^d':			self.text.clear
-			, "^z":			self.text.undo
 			, "backspace":	self.text.backspace
 			, "btab":		self.text.backcomplete
 			, "delete":		self.text.delchar
@@ -674,7 +672,6 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		os.environ.setdefault("ESCDELAY", "25")
 		#pass in the control chars for ctrl-c and ctrl-z
 		loop.add_signal_handler(SIGINT, lambda: curses.ungetch(3))
-		loop.add_signal_handler(SIGTSTP, lambda: curses.ungetch(26))
 
 		#curses input setup
 		self._screen = curses.initscr()		#init screen
@@ -709,7 +706,6 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			sys.stderr = sys.stdout
 
 			self.loop.remove_signal_handler(SIGINT)
-			self.loop.remove_signal_handler(SIGTSTP)
 
 	def sound_bell(self):
 		'''Sound console bell.'''
