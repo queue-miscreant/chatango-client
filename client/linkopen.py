@@ -11,9 +11,8 @@ All openers are made into coroutines so that create_subprocess_exec can be
 yielded from. open_link creates a task in the Screen instance's loop
 '''
 import re
-from time import time
-import os	#for stupid stdout/err hack
-import sys	#cygwin
+import os	#cygwin, stupid stdout/err hack
+import sys	#same
 import asyncio
 from http.client import HTTPException	#for catching IncompleteRead
 from urllib.error import HTTPError
@@ -32,7 +31,7 @@ if sys.platform == "cygwin":
 		os.environ["BROWSER"] = os.path.pathsep.join(["cygstart", "chrome",
 			"firefox", "waterfox", "palemoon"])
 
-import webbrowser
+import webbrowser #pylint: disable=wrong-import-position
 
 __all__ =	["LINK_RE", "get_defaults", "get_extension", "opener", "open_link"
 	, "images", "videos", "browser"]
@@ -91,7 +90,7 @@ async def get_opengraph(link, loop=None) -> dict:
 	return {i.decode(): j.decode() for i, j in meta}
 
 #---------------------------------------------------------------
-class open_link:
+class open_link: #pylint: disable=invalid-name
 	'''Open a link with the declared openers'''
 	#storage for openers
 	defaults = []
@@ -144,7 +143,7 @@ class open_link:
 	def is_visited(cls, link):
 		return link in cls._visited
 
-class opener:
+class opener: #pylint: disable=invalid-name,too-few-public-methods
 	'''
 	An opener for a link. With no arguments, sets a default opener.
 	Otherwise, the first argument must be "default", "extension", "pattern",
