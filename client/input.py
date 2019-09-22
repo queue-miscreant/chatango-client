@@ -784,9 +784,9 @@ class InputMux:
 			, [self.indices[i].doc for i in self.ordering])
 		overlay.line_drawer(self._drawing)
 
-		@overlay.key_handler("tab", True)
-		@overlay.key_handler("enter", True)
-		@overlay.key_handler(' ', True)
+		@overlay.key_handler("tab", make_method=True)
+		@overlay.key_handler("enter", make_method=True)
+		@overlay.key_handler(' ', make_method=True)
 		def _(me):
 			"Change value"
 			return self.indices[self.ordering[me.it]].select()
@@ -868,7 +868,7 @@ class InputMux:
 			self.draw = func
 			return self
 
-		def select(self):
+		def select(self, *args):
 			'''Open input overlay to modify value'''
 			further_input = None
 			if self._type == "color":
