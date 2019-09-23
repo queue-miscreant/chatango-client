@@ -13,7 +13,6 @@ from collections import deque
 import pytango
 import client
 from client import linkopen
-
 __all__ = ["ChatBot", "ChatangoMessage", "ChatangoOverlay"
 	, "get_color", "get_client"]
 
@@ -518,7 +517,7 @@ class LinkOverlay(client.VisualListOverlay):
 
 		self.add_keys({
 			  "enter":	self.select
-			, "tab": 	client.override(self.select)
+			, "tab": 	(self.select, 0)
 			, "i":		self.open_images
 			, "a-k":	prev_new
 			, "a-j":	next_new

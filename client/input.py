@@ -9,7 +9,7 @@ provides a nice interface for modifying variables within a context.
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, colors \
 	, Coloring, JustifiedColoring, DisplayException
-from .base import staticize, override, quitlambda \
+from .base import staticize, quitlambda, key_handler \
 	, Box, OverlayBase, TextOverlay, SizeException
 
 __all__ = [
@@ -17,8 +17,8 @@ __all__ = [
 	, "ColorSliderOverlay", "ConfirmOverlay", "DisplayOverlay", "InputMux"
 ]
 
-def _search_cache(keys, value):
-	'''Search through iterable for value that equals `value` and return key'''
+def _search_cache(keys: set, value):
+	'''Search through set for value that equals `value` and return'''
 	for i in keys:
 		if i == value:
 			return i
@@ -79,10 +79,6 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 			, 'l':		right
 			, 'h':		left
 			, 'H':		self.open_help
-			, 'g':		staticize(self.goto_edge, 0, doc="Go to list beginning")
-			, 'G':		staticize(self.goto_edge, 1, doc="Go to list end")
-			, '/':		self.open_search
-			, "^f":		self.open_search
 			, "n":		staticize(self.scroll_search, 1)
 			, "N":		staticize(self.scroll_search, 0)
 			, 'q':		quitlambda
@@ -92,7 +88,7 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 			, "right":	right
 			, "left":	left
 			, "mouse-left":			click
-			, "mouse-right":		override(click)
+			, "mouse-right":		(click, 0)
 			, "mouse-wheel-up":		up
 			, "mouse-wheel-down":	down
 		})
@@ -200,8 +196,9 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		'''Move to mode amt over, with looparound'''
 		self.mode = (self.mode + amt) % len(self._modes)
 
+	@key_handler("g", is_end=0, doc="Go to beginning of list")
+	@key_handler("G", is_end=1, doc="Go to end of list")
 	def goto_edge(self, is_end):
-		'''Move to the beginning or end of the list'''
 		self.it = int(is_end and (len(self.list)-1))
 
 	def _goto_lambda(self, func, direction, loop):
@@ -237,6 +234,8 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		if self.raw:
 			self.list = self._builder(self.raw)
 
+	@key_handler('/')
+	@key_handler("^f")
 	def open_search(self):
 		'''Open a search window'''
 		search = InputOverlay(self.parent)
@@ -653,6 +652,8 @@ class DisplayOverlay(OverlayBase, Box):
 
 	def resize(self, newx, newy):
 		'''Resize message'''
+		if self._rawlist is None:
+			return
 		self._formatted = [j for i in self._rawlist
 			for j in i.breaklines(newx-2, outdent=self._outdent)]
 		# if bigger than the box holding it, stop drawing the overlay behind it
@@ -750,7 +751,7 @@ class ConfirmOverlay(OverlayBase):
 
 		self.add_keys({			#run these in order
 			  'y':	call
-			, 'n':	override(self.parent.blurb.release, -1)
+			, 'n':	(self.parent.blurb.release, -1)
 		})
 		self.keys.nomouse()
 		self.keys.noalt()
@@ -784,9 +785,9 @@ class InputMux:
 			, [self.indices[i].doc for i in self.ordering])
 		overlay.line_drawer(self._drawing)
 
-		@overlay.key_handler("tab", make_method=True)
-		@overlay.key_handler("enter", make_method=True)
-		@overlay.key_handler(' ', make_method=True)
+		@overlay.key_handler("tab")
+		@overlay.key_handler("enter")
+		@overlay.key_handler(' ')
 		def _(me):
 			"Change value"
 			return self.indices[self.ordering[me.it]].select()
@@ -851,7 +852,8 @@ class InputMux:
 			self._set = None
 
 		def setter(self, func):
-			'''Decorator to set setter. Setters should have the signature:
+			'''
+			Decorator to set setter. Setters should have the signature:
 				(context:	the context supplied by the InputMux
 				,value:		the new value after input)
 			'''
@@ -868,7 +870,7 @@ class InputMux:
 			self.draw = func
 			return self
 
-		def select(self, *args):
+		def select(self):
 			'''Open input overlay to modify value'''
 			further_input = None
 			if self._type == "color":

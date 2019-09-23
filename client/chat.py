@@ -8,7 +8,7 @@ from collections import deque
 
 from .display import SELECT_AND_MOVE, collen, numdrawing, colors, Coloring
 from .util import LazyIterList, History
-from .base import staticize, quitlambda, override \
+from .base import staticize, quitlambda, key_handler \
 	, Box, KeyContainer, OverlayBase, TextOverlay
 from .input import ListOverlay, DisplayOverlay
 __all__ = ["CommandOverlay", "ChatOverlay", "add_message_scroller"]
@@ -31,11 +31,6 @@ class CommandOverlay(TextOverlay):
 		for i, j in self._command_complete.items():
 			self.text.add_command(i, j)
 		self.control_history(self.history)
-		self.add_keys({
-			  "enter":			self._run
-			, "backspace":		self._wrap_backspace
-			, "a-backspace":	quitlambda
-		})
 
 	def __call__(self, lines):
 		lines[-1] = "COMMAND"
@@ -46,12 +41,14 @@ class CommandOverlay(TextOverlay):
 			self.caller.text.append(self.CHAR_COMMAND)
 		return -1
 
+	@key_handler("backspace")
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text):
 			return -1
 		return self.text.backspace()
 
+	@key_handler("enter")
 	def _run(self):
 		'''Run command'''
 		#parse arguments like a command line: quotes enclose single args
@@ -237,10 +234,7 @@ class Message(Coloring):
 			#mouse callbacks don't work quite the same; they need an overlay
 			cls.keys.nomouse()
 		def ret(func):
-			cook = func
-			if override_val is not None:
-				cook = override(func, override_val)
-			cls.keys.add_key(key_name, cook)
+			cls.keys.add_key(key_name, func, return_val=override_val)
 			return func
 		return ret
 
