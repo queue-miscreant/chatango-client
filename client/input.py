@@ -46,51 +46,9 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		self._search = None
 		self._draw_cache = set()
 
-		up =	staticize(self.increment, -1,
-			doc="Up one list item")
-		down =	staticize(self.increment, 1,
-			doc="Down one list item")
-		right =	staticize(self.chmode, 1,
-			doc=("Go to next mode" if modes is not None else None))
-		left =	staticize(self.chmode, -1,
-			doc=("Go to previous mode" if modes is not None else None))
-
-		def click(_, y):
-			'''Run enter on the element of the list that was clicked'''
-			#Manipulate self.it and try_enter
-			#y in the list
-			size = self.height - 2
-			#borders
-			if not y in range(1, size+1):
-				return None
-			newit = (self.it//size)*size + (y - 1)
-			if newit >= len(self.list):
-				return None
-			self.it = newit #pylint: disable=invalid-name
-			enter_fun = self.keys["enter"]
-			if callable(enter_fun):
-				return enter_fun()
-			return None
-
 		self.add_keys({
-			  "^r":		self.regen_list
-			, 'j':		down	#V I M
-			, 'k':		up
-			, 'l':		right
-			, 'h':		left
-			, 'H':		self.open_help
-			, "n":		staticize(self.scroll_search, 1)
-			, "N":		staticize(self.scroll_search, 0)
+			 'H':		self.open_help
 			, 'q':		quitlambda
-			, "backspace":	self.clear_search
-			, "down":	down
-			, "up":		up
-			, "right":	right
-			, "left":	left
-			, "mouse-left":			click
-			, "mouse-right":		(click, 0)
-			, "mouse-wheel-up":		up
-			, "mouse-wheel-down":	down
 		})
 
 	it = property(lambda self: self._it
@@ -186,12 +144,22 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		self._it = dest
 
 	#predefined list iteration methods
+	@key_handler("down", amt=1, doc="Down one list item")
+	@key_handler("j", amt=1, doc="Down one list item")
+	@key_handler("mouse-wheel-down", amt=1, doc="Down one list item")
+	@key_handler("up", amt=-1, doc="Up one list item")
+	@key_handler("k", amt=-1, doc="Up one list item")
+	@key_handler("mouse-wheel-up", amt=-1, doc="Up one list item")
 	def increment(self, amt):
 		'''Move self.it by amt'''
 		if not self.list:
 			return
-		self.it = (self.it + amt) % len(self.list)
+		self.it = (self.it + amt) % len(self.list) #pylint: disable=invalid-name
 
+	@key_handler("l", amt=1, doc="Go to next mode")
+	@key_handler("h", amt=-1, doc="Go to previous mode")
+	@key_handler("right", amt=1, doc="Go to next mode")
+	@key_handler("left", amt=-1, doc="Go to previous mode")
 	def chmode(self, amt):
 		'''Move to mode amt over, with looparound'''
 		self.mode = (self.mode + amt) % len(self._modes)
@@ -200,6 +168,26 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 	@key_handler("G", is_end=1, doc="Go to end of list")
 	def goto_edge(self, is_end):
 		self.it = int(is_end and (len(self.list)-1))
+
+	@key_handler("mouse-left")
+	@key_handler("mouse-right", 0)
+	def try_mouse(self, _, y):
+		'''Run enter on the element of the list that was clicked'''
+		print(self)
+		#Manipulate self.it and try_enter
+		#y in the list
+		size = self.height - 2
+		#borders
+		if not y in range(1, size+1):
+			return None
+		newit = (self.it//size)*size + (y - 1)
+		if newit >= len(self.list):
+			return None
+		self.it = newit #pylint: disable=invalid-name
+		enter_fun = self.keys["enter"]
+		if callable(enter_fun):
+			return enter_fun()
+		return None
 
 	def _goto_lambda(self, func, direction, loop):
 		'''
@@ -229,6 +217,7 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		return tuple(staticize(self._goto_lambda, func, i, loop)
 			for i in range(2))
 
+	@key_handler("^r")
 	def regen_list(self):
 		'''Regenerate list based on raw list reference'''
 		if self.raw:
@@ -246,10 +235,13 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		search.callback(callback)
 		search.add()
 
+	@key_handler("backspace")
 	def clear_search(self):
 		'''Clear search'''
 		self.search = ""
 
+	@key_handler("n", direction=1)
+	@key_handler("N", direction=0)
 	def scroll_search(self, direction):
 		'''Scroll through search index'''
 		def goto(index):

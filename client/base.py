@@ -200,11 +200,8 @@ class KeyContainer:
 		return list_ref[name]
 
 	def __contains__(self, other):
-		try:
-			self._get_key(other)
-			return True
-		except KeyError:
-			return False
+		list_ref, key_name = self._get_key(other)
+		return key_name in list_ref
 
 	def mouse(self, x, y, state, *args):
 		'''Unget some mouse data and run the associated mouse callback'''
@@ -226,7 +223,6 @@ class KeyContainer:
 				self._altkeys[copy_alt] = handler
 		#the rest
 		for copy_key, handler in keys._keys.items():
-			print(f"adding {copy_key}, {handler}", (unbound and copy_key in self._keys))
 			if not (unbound and copy_key in self._keys):
 				self._keys[copy_key] = handler
 
@@ -275,6 +271,7 @@ class KeyContainer:
 
 		def __call__(self, keys, *args):
 			args = args if self._pass_args else tuple()
+			print(keys, args, self._pass_keys)
 			if self._pass_keys:
 				ret = self._func(keys, *args)
 			else:
@@ -314,12 +311,20 @@ class key_handler: #pylint: disable=invalid-name
 
 	def bind(self, keys: KeyContainer, input_partial=None):
 		for key_name, override, doc, keywords in self.keys:
-			if key_name == -1 and input_partial is not None:
-				keys.add_key(key_name, staticize(self.bound, input_partial
-					, **keywords), False, True, override, doc=doc)
-			else:
+			try:
+				#sanity regarding argument order (i.e., self first)
+				if input_partial is not None:
+					bind = staticize(self.bound, input_partial, **keywords)
+					if key_name == -1:
+						keys.add_key(key_name, bind, False, True, override, doc=doc)
+						return
+					if isinstance(key_name, str) and key_name.startswith("mouse"):
+						keys.add_key(key_name, bind, override, doc=doc)
+						return
 				keys.add_key(key_name, staticize(self.bound, **keywords)
 					, return_val=override, doc=doc)
+			except KeyError:
+				print("COULD NOT BIND KEY", key_name)
 
 quitlambda = KeyContainer._BoundKey(lambda: -1, False, doc="Close overlay") #pylint: disable=invalid-name
 

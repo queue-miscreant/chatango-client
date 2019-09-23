@@ -569,14 +569,6 @@ class ChatOverlay(TextOverlay):
 		self.control_history(self.history)
 
 		self.add_keys({
-			  '\\':		self._replace_back
-			, 'a-k':	self.select_up
-			, 'a-j':	self.select_down
-			, "ppage":	staticize(self.select_up, 5)
-			, "npage":	staticize(self.select_down, 5)
-			, "mouse":	self._mouse
-			, "mouse-wheel-up":		self.select_up
-			, "mouse-wheel-down":	self.select_down
 		})
 
 	can_select = property(lambda self: self.messages.can_select)
@@ -646,13 +638,16 @@ class ChatOverlay(TextOverlay):
 			self.remove()
 		return ret
 
+	@key_handler("mouse")
 	def _mouse(self, x, y, state):
 		'''Delegate mouse'''
+		print(self)
 		msg, pos = self.messages.from_position(x, y)
 		if hasattr(msg, "keys"):
 			return msg.keys.mouse(x, y, state, msg, self, pos)
 		return 1
 
+	@key_handler('\\')
 	def _replace_back(self):
 		'''Input escape sequences for \\n, \\t, \\\\'''
 		EscapeOverlay(self.parent, self.text).add()
@@ -662,6 +657,9 @@ class ChatOverlay(TextOverlay):
 		self.parent.sound_bell()
 		self.can_select = 0
 
+	@key_handler("ppage", amount=5)
+	@key_handler("a-k")
+	@key_handler("mouse-wheel-up")
 	def select_up(self, amount=1):
 		'''Select message up'''
 		if not self.can_select:
@@ -673,6 +671,9 @@ class ChatOverlay(TextOverlay):
 			self._max_select()
 		return 1
 
+	@key_handler("npage", amount=5)
+	@key_handler("a-j")
+	@key_handler("mouse-wheel-down")
 	def select_down(self, amount=1):
 		'''Select message down'''
 		if not self.can_select:
@@ -684,6 +685,7 @@ class ChatOverlay(TextOverlay):
 			self.parent.update_input()
 		return 1
 
+	@key_handler("a-g")
 	def select_top(self):
 		'''Select top message'''
 		if not self.can_select:
