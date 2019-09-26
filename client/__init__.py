@@ -13,3 +13,4 @@ on_done = Manager.on_done
 command = CommandOverlay.command
 two56 = colors.two56
 grayscale = colors.grayscale
+raw_num = colors.raw_num
