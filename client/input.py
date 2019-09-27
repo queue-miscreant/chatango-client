@@ -260,12 +260,6 @@ class VisualListOverlay(ListOverlay, Box):
 		self._select_buffer = set()
 		self._start_select = -1
 
-		self.add_keys({
-			  'q':	self.clear_quit
-			, 's':	self.toggle
-			, 'v':	self.toggle_select
-		})
-
 	@property
 	def current(self):
 		'''Sugar more similar to `ListOverlay.selected`'''
@@ -300,10 +294,16 @@ class VisualListOverlay(ListOverlay, Box):
 		self._select_buffer = set()
 		self._start_select = -1
 
+	def _selected_index(self):
+		'''Get list (set) of selected and buffered indices'''
+		return self._selected.symmetric_difference(self._select_buffer)
+
+	@key_handler('s')
 	def toggle(self):
 		'''Toggle the current line'''
 		self._selected.symmetric_difference_update((self.it,))
 
+	@key_handler('v')
 	def toggle_select(self):
 		'''Toggle visual mode selecting'''
 		if self._start_select + 1:	#already selecting
@@ -315,10 +315,7 @@ class VisualListOverlay(ListOverlay, Box):
 		self.toggle()
 		self._start_select = self.it
 
-	def _selected_index(self):
-		'''Get list (set) of selected and buffered indices'''
-		return self._selected.symmetric_difference(self._select_buffer)
-
+	@key_handler('q')
 	def clear_quit(self):
 		'''Clear the selection or quit the overlay'''
 		if self._select_buffer or self._selected:
@@ -357,12 +354,10 @@ class ColorOverlay(ListOverlay, Box):
 						pass
 			else:
 				self.it = len(self._COLOR_LIST)-1
-		self.add_keys({
-			  'tab':	self._select
-			, 'enter':	self._select
-			, ' ':	self._select
-		})
 
+	@key_handler('tab')
+	@key_handler('enter')
+	@key_handler(' ')
 	def _select(self):
 		'''Open the sliders or run the callback with the selected color'''
 		if self.it == 12:
@@ -448,28 +443,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 		self._rgb = 0
 		self._callback = None
 
-		increase = staticize(self.increment, 1)
-		decrease = staticize(self.increment, -1)
-
-		next_bar = staticize(self.chmode, 1)
-		prev_bar = staticize(self.chmode, -1)
-
-		self.add_keys({
-			  'enter':	self._select
-			, 'q':		quitlambda
-			, 'k':		increase
-			, 'j':		decrease
-			, 'l':		next_bar
-			, 'h':		prev_bar
-			, 'up':		increase
-			, 'down':	decrease
-			, 'ppage':	staticize(self.increment, 10)
-			, 'npage':	staticize(self.increment, -10)
-			, "home":	staticize(self.increment, 255)
-			, "end":	staticize(self.increment, -255)
-			, "right":	next_bar
-			, "left":	prev_bar
-		})
+		self.add_keys({'q':		quitlambda})
 
 	def __call__(self, lines):
 		'''Display 3 bars, their names, values, and string in hex'''
@@ -502,6 +476,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 		lines[-2] = self.box_part(format(self._colored_text).rjust(3*(wide+1)//2)) #1
 		lines[-1] = self.box_bottom() #last line
 
+	@key_handler('enter')
 	def _select(self):
 		'''Run callback'''
 		return self._callback(tuple(self.color))
@@ -510,11 +485,23 @@ class ColorSliderOverlay(OverlayBase, Box):
 		self._callback = callback
 
 	#predefined self-traversal methods
+	@key_handler('up', amt=1)
+	@key_handler('k', amt=1)
+	@key_handler('ppage', amt=10)
+	@key_handler('home', amt=255)
+	@key_handler('down', amt=-1)
+	@key_handler('j', amt=-1)
+	@key_handler('npage', amt=-10)
+	@key_handler('end', amt=-255)
 	def increment(self, amt):
 		'''Increase the selected color by amt'''
 		self.color[self._rgb] = max(0, min(255, self.color[self._rgb] + amt))
 		self._update_text()
 
+	@key_handler('h', amt=-1)
+	@key_handler('left', amt=-1)
+	@key_handler('l', amt=1)
+	@key_handler('right', amt=1)
 	def chmode(self, amt):
 		'''Go to the color amt to the right'''
 		self._rgb = (self._rgb + amt) % 3
@@ -548,12 +535,7 @@ class InputOverlay(TextOverlay, Box):
 
 		self.text.setstr(default)
 		self.text.password = password
-		self.add_keys({
-			  '^d':	quitlambda
-			, '^w':	quitlambda
-			, 10:	self._finish
-			, 127:	self._wrap_backspace
-		})
+		self.add_keys({'^w':	quitlambda})
 
 	result = property(lambda self: self._future)
 
@@ -578,12 +560,14 @@ class InputOverlay(TextOverlay, Box):
 		super().resize(newx, newy)
 		self._prompts = self._prompt.breaklines(self.width-2)
 
+	@key_handler("backspace")
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text):
 			return -1
 		return self.text.backspace()
 
+	@key_handler("enter")
 	def _finish(self):
 		'''Regular stop (i.e, with enter)'''
 		self._future.set_result(str(self.text))
@@ -618,16 +602,9 @@ class DisplayOverlay(OverlayBase, Box):
 		self._begin = 0
 		self.change_display(strings)
 
-		up = staticize(self.scroll, -1, doc="Scroll downward")
-		down = staticize(self.scroll, 1, doc="Scroll upward")
-
 		self.add_keys({
-			  'k':		up
-			, 'j':		down
-			, 'q':		quitlambda
+			 'q':		quitlambda
 			, 'H':		self.open_help
-			, "up":		up
-			, "down":	down
 		})
 
 	def __call__(self, lines):
@@ -671,11 +648,15 @@ class DisplayOverlay(OverlayBase, Box):
 	def set_outdent(self, outdent):
 		self._outdent = outdent
 
-	def scroll(self, amount):
+	@key_handler('k', amt=-1, doc="Scroll upward")
+	@key_handler('up', amt=-1, doc="Scroll upward")
+	@key_handler('j', amt=1, doc="Scroll downward")
+	@key_handler('down', amt=1, doc="Scroll downward")
+	def scroll(self, amt):
 		maxlines = self.height-2
 		if len(self._formatted) <= maxlines:
 			return
-		self._begin = min(max(0, self.begin+amount), maxlines-len(self._formatted))
+		self._begin = min(max(0, self.begin+amt), maxlines-len(self._formatted))
 
 class TabOverlay(OverlayBase):
 	'''
@@ -690,11 +671,7 @@ class TabOverlay(OverlayBase):
 		self._callback = None
 		self.replace = self._rows == self.height
 
-		self.add_keys({
-			 -1:		self.remove
-			, "tab":	staticize(self.move_it, 1)
-			, "btab":	staticize(self.move_it, -1)
-		})
+		self.add_keys({-1:		quitlambda})
 	it = property(lambda self: self._it)
 
 	def __call__(self, lines):
@@ -723,6 +700,8 @@ class TabOverlay(OverlayBase):
 		'''Add callback when tab or shift-tab was clicked.'''
 		self._callback = callback
 
+	@key_handler('tab', direction=1, doc="Tab forward")
+	@key_handler('btab', direction=-1, doc="Tab backward")
 	def move_it(self, direction):
 		self._it = (self._it + direction) % len(self.list)
 		if callable(self._callback):
@@ -788,7 +767,7 @@ class InputMux:
 
 		overlay.add_keys({
 			'q':	staticize(self.try_warn, parent, overlay
-				, doc=quitlambda.__doc__)
+				, doc=quitlambda.doc)
 		})
 
 		overlay.add()
@@ -799,6 +778,22 @@ class InputMux:
 		#needs a drawer and a getter
 		if element.draw and element.get:
 			element.draw(self, element.get(self.context), string)
+
+	def listel(self, data_type):
+		'''
+		Frontend decorator to create a _ListEl. Abstracts away the need to
+		supply `parent` and  transforms the decorator to be of the form
+		@listel(data_type) (=> _ListEl(self, data_type, __decorated_func__))
+		'''
+		return staticize(self._ListEl, self, data_type)
+
+	def try_warn(self, parent, overlay):
+		'''Exit, warning about unconfirmed values'''
+		if self.warn_exit:
+			ConfirmOverlay(parent, "Really close menu? (y/n)"
+				, overlay.remove).add()
+			return None
+		return -1
 
 	class _ListEl:
 		'''
@@ -932,19 +927,3 @@ class InputMux:
 			'''Default bool drawer'''
 			coloring.add_indicator('y' if value else 'n'
 				, colors.green_text if value else colors.red_text)
-
-	def listel(self, data_type):
-		'''
-		Frontend decorator to create a _ListEl. Abstracts away the need to
-		supply `parent` and  transforms the decorator to be of the form
-		@listel(data_type) (=> _ListEl(self, data_type, __decorated_func__))
-		'''
-		return staticize(self._ListEl, self, data_type)
-
-	def try_warn(self, parent, overlay):
-		'''Exit, warning about unconfirmed values'''
-		if self.warn_exit:
-			ConfirmOverlay(parent, "Really close menu? (y/n)"
-				, overlay.remove).add()
-			return None
-		return -1

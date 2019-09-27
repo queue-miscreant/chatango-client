@@ -736,28 +736,21 @@ class _MessageScrollOverlay(DisplayOverlay):
 	'''
 	def __init__(self, overlay, lazy_list, early, late):
 		self.lazy_list = lazy_list
-
-		self.msgno = lazy_list[0][1]
+		self.msgno = lazy_list[0].mid
 		self.early = early
 		self.late = late
+		super().__init__(overlay.parent, lazy_list[0], Message.INDENT)
 
-		super().__init__(overlay.parent, lazy_list[0][0]
-			, Message.INDENT)
-
-		scroll_down, scroll_up, scroll_to = \
-			  lambda: self.next(-1) \
-			, lambda: self.next(1) \
-			, lambda: overlay.messages.scroll_to(self.msgno) or -1
-
+		scroll_to = lambda: overlay.messages.scroll_to(self.msgno) or -1
 		self.add_keys({
 			  'tab':	scroll_to
 			, 'enter':	scroll_to
-			, 'N':		scroll_down
-			, 'n':		scroll_up
-			, 'a-j':	scroll_down
-			, 'a-k':	scroll_up
 		})
 
+	@key_handler('N', step=-1)
+	@key_handler('a-j', step=-1)
+	@key_handler('n', step=1)
+	@key_handler('a-k', step=1)
 	def next(self, step):
 		attempt = self.lazy_list.step(step)
 		if attempt:
