@@ -88,8 +88,8 @@ class KeyContainer:
 	def screen_keys(self, screen):
 		'''Bind control keys to a screen ^l, resize'''
 		self._keys.update({
-			12:						self._BoundKey(screen.redraw_all) #^l
-			, curses.KEY_RESIZE:	self._BoundKey(screen.schedule_resize)
+			12:						self._BoundKey(screen.redraw_all, False) #^l
+			, curses.KEY_RESIZE:	self._BoundKey(screen.schedule_resize, False)
 		})
 
 	def __call__(self, chars, *args):
