@@ -591,7 +591,7 @@ class ChatOverlay(TextOverlay):
 		lines[-1] = separator
 
 	def _on_sentinel(self):
-		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''
+		'''Enter CommandOverlay when CHAR_CURSOR typed'''
 		CommandOverlay(self.parent, self).add()
 
 	def add(self):
@@ -628,7 +628,7 @@ class ChatOverlay(TextOverlay):
 			#pass in the message and this overlay to the handler
 			ret = selected.keys(chars, selected, self)
 		if ret == tuple():
-			ret = self.keys(chars)
+			ret = self.keys(chars, self)
 
 		#stop selecting if False is returned
 		if not ret and self.messages.stop_select():

@@ -79,8 +79,8 @@ class KeyContainer:
 
 	def __init__(self):
 		self._keys = { #strange because these are the opposite of defaults, but these are special
-			27:						self._BoundKey(self._callalt, False, True)
-			, curses.KEY_MOUSE:		self._BoundKey(self._callmouse, False, True)
+			27:						self._BoundKey(self._callalt, True, True)
+			, curses.KEY_MOUSE:		self._BoundKey(self._callmouse, True, True)
 		}
 		self._altkeys = {}
 		self._mouse = {}
@@ -251,14 +251,14 @@ class KeyContainer:
 	class _BoundKey:
 		'''
 		Function wrapper for key handler. If a handler should receive extra
-		keypresses recorded, `pass_keys` is True. Similarly, extra arguments 
+		keypresses recorded, `pass_keys` is True. Similarly, extra arguments
 		`args` are passed into the wrapped function if _pass_args is True.
 		Return value is overridden if _return is set (not None).
 		'''
 		def __init__(self, func, pass_args=True, pass_keys=False, return_val=None, doc=None):
 			self._func = func
 			self._pass_keys = pass_keys
-			self._pass_args = pass_args and not inspect.ismethod(func)
+			self._pass_args = pass_args
 			self._return = return_val
 			self.doc = self._func.__doc__ if doc is None else doc
 			if self.doc is None:
@@ -271,11 +271,7 @@ class KeyContainer:
 
 		def __call__(self, keys, *args):
 			args = args if self._pass_args else tuple()
-			print(keys, args, self._pass_keys)
-			if self._pass_keys:
-				ret = self._func(keys, *args)
-			else:
-				ret = self._func(*args)
+			ret = self._func(keys, *args) if self._pass_keys else self._func(*args)
 			return ret if self._return is None else self._return
 
 		def __eq__(self, other):
@@ -312,15 +308,15 @@ class key_handler: #pylint: disable=invalid-name
 	def bind(self, keys: KeyContainer, input_partial=None):
 		for key_name, override, doc, keywords in self.keys:
 			try:
-				#sanity regarding argument order (i.e., self first)
+				#sanity regarding argument order (i.e., self first) TODO
 				if input_partial is not None:
 					bind = staticize(self.bound, input_partial, **keywords)
 					if key_name == -1:
 						keys.add_key(key_name, bind, False, True, override, doc=doc)
-						return
+						continue
 					if isinstance(key_name, str) and key_name.startswith("mouse"):
 						keys.add_key(key_name, bind, override, doc=doc)
-						return
+						continue
 				keys.add_key(key_name, staticize(self.bound, **keywords)
 					, return_val=override, doc=doc)
 			except KeyError:
@@ -957,8 +953,6 @@ class Manager:
 		finally:
 			for i in self._on_exit:
 				await i
-			self.screen.shutdown()
-			self.screen = None
 			self.exited.set()
 
 	@classmethod

@@ -573,6 +573,8 @@ class InputOverlay(TextOverlay, Box):
 
 	def resize(self, newx, newy):
 		'''Resize prompts'''
+		if self._prompt is None:
+			return
 		super().resize(newx, newy)
 		self._prompts = self._prompt.breaklines(self.width-2)
 
