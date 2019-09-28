@@ -199,6 +199,10 @@ class KeyContainer:
 		list_ref, name = self._get_key(other)
 		return list_ref[name]
 
+	def __delitem__(self, other):
+		list_ref, name = self._get_key(other)
+		del list_ref[name]
+
 	def __contains__(self, other):
 		list_ref, key_name = self._get_key(other)
 		return key_name in list_ref

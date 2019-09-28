@@ -823,18 +823,12 @@ class ChatangoOverlay(client.ChatOverlay):
 		@box.key_handler("enter")
 		def select(me): #pylint: disable=unused-variable
 			'''Reply to user'''
-			current = users[me.it].name
+			current = me.selected.name
 			if current[0] in "!#":
 				current = current[1:]
 			#reply
 			self.text.append("@%s " % current)
 			return -1
-
-		@box.key_handler("a")
-		def get_avatar(me): #pylint: disable=unused-variable
-			'''Get avatar'''
-			current = users[me.it]
-			linkopen.open_link(self.parent, current.avatar)
 
 		@box.key_handler("tab")
 		def tab(me): #pylint: disable=unused-variable
@@ -843,12 +837,18 @@ class ChatangoOverlay(client.ChatOverlay):
 			self.bot.ignores.symmetric_difference_update((current,))
 			self.redo_lines()
 
+		@box.key_handler("a")
+		def get_avatar(me): #pylint: disable=unused-variable
+			'''Get avatar'''
+			current = users[me.it]
+			linkopen.open_link(self.parent, current.avatar)
+
 		@box.line_drawer
 		def draw_ignored(_, string, i): #pylint: disable=unused-variable
 			string.setstr(format(users[i]))
 			selected = users[i].name.lower()
 			if selected in self.bot.ignores:
-				string.add_indicator('i', 3)
+				string.add_indicator('i', BEGIN_COLORS+3)
 
 		box.add()
 
