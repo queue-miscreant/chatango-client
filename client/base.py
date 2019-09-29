@@ -264,7 +264,7 @@ class KeyContainer:
 			self._pass_keys = pass_keys
 			self._pass_args = pass_args
 			self._return = return_val
-			self.doc = self._func.__doc__ if doc is None else doc
+			self.doc = inspect.getdoc(self._func) if doc is None else doc
 			if self.doc is None:
 				self.doc = "(no documentation)"
 			else:
@@ -462,7 +462,7 @@ class OverlayBase:
 		self.remove()
 		new.add()
 
-	def add_keys(self, new_functions, pass_args=False, redefine=False):
+	def add_keys(self, new_functions, pass_args=False, redefine=True):
 		'''
 		Add keys from preexisting functions. `new_functions` should be a dict
 		with either functions or (function, return value) tuples as values
@@ -472,6 +472,8 @@ class OverlayBase:
 			override = None
 			if isinstance(handler, tuple):
 				handler, override = handler
+			elif isinstance(handler, key_handler):
+				handler = handler.func
 			if redefine or key_name not in self.keys:
 				self.keys.add_key(key_name, handler, pass_args=pass_args
 					, return_val=override)
@@ -756,10 +758,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			self._candisplay = 0
 
 	async def display(self):
-		'''
-		Draws the highest overlays (with stack indices greater than
-		_last_replace)
-		'''
+		'''Draw all overlays above the most recent one with replace=True'''
 		if not (self.active and self._candisplay and self.height > 0):
 			if self.active:
 				self._displaybuffer.write("RESIZE TERMINAL")

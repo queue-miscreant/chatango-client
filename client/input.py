@@ -35,7 +35,8 @@ class FutureOverlay(OverlayBase):
 		super().__init__(parent)
 		self._future = parent.loop.create_future()
 		self._future.add_done_callback(self._new_callback)
-		self._callback = None
+		if not hasattr(self, "_callback"):
+			self._callback = None
 
 	@property
 	async def result(self):
@@ -52,9 +53,12 @@ class FutureOverlay(OverlayBase):
 	def _new_callback(self, fut):
 		'''When the future is done, we need to make a new future object'''
 		if self._callback is not None:
-			if self._callback(fut.result()):
-				self.remove()
-				return
+			try:
+				if self._callback(fut.result()):
+					self.remove()
+					return
+			except asyncio.CancelledError:
+				pass
 		self._future = self.parent.loop.create_future()
 		self._future.add_done_callback(self._new_callback)
 

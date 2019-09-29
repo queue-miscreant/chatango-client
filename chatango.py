@@ -516,23 +516,15 @@ class LinkOverlay(client.VisualListOverlay):
 		prev_new, next_new = self.goto_lambda(find_new)
 
 		self.add_keys({
-			  "enter":	self.select
-			, "tab": 	(self.select, 0)
-			, "i":		self.open_images
+			 "i":		self.open_images
 			, "a-k":	prev_new
 			, "a-j":	next_new
 		})
 
-	#enter key
-	def select(self):
+	def _callback(self, result): #pylint: disable=method-hidden
 		'''Open link with selected opener'''
-		if not self.list:
-			return None
-		#try to get selected links
-		all_links = self.selected
-		self._open_links(all_links, self.mode)
+		self._open_links(result, self.mode)
 		self.clear()
-		return -1
 
 	@staticmethod
 	def open_links(parent, links, opener=0, redraw=None):
@@ -559,7 +551,7 @@ class LinkOverlay(client.VisualListOverlay):
 			callback()
 
 	def _open_links(self, links, opener=0):
-		return self.open_links(self.parent, links, opener, self._redraw_overlay)
+		self.open_links(self.parent, links, opener, self._redraw_overlay)
 
 	def open_images(self):
 		'''Open all images that have not been visited'''
@@ -768,7 +760,6 @@ class ChatangoOverlay(client.ChatOverlay):
 		self.bot = bot
 		self.add_keys({
 			  "enter":		self._enter
-			, "a-g":		self.select_top
 			, "f2":			self._show_links
 			, "f3":			self._show_members
 			, "f4":			self._show_formatting
