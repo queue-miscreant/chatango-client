@@ -288,10 +288,10 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		'''Open a search window'''
 		search = InputOverlay(self.parent)
 		search.text.setnonscroll('/')
-		def callback(value):
+		@search.callback
+		def _(value):
 			self.search = str(value)
-			self.scroll_search(1)
-		search.callback(callback)
+			self.scroll_search.bound(self, 1)
 		search.add()
 
 	@key_handler("backspace")
