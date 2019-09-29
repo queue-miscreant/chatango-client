@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 #client/chat.py
 '''Overlays that provide chatroom-like interfaces.'''
+#TODO keys interface to messages. The current problem is where we want to pass
+#some arguments into a callback (self=Message instance, overlay=firing overlay),
+#but mouse and input make argument order troublesome
+#(i.e. self, keys, ...; self, x, y, ...)
+#Possibly split order of argument binding? But that relies on the len(args) > 0
+#Maybe bind certain expected argument names in a kwargs dict
 import time
 import asyncio
 import traceback
