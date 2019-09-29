@@ -211,7 +211,7 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		for i in range(len(self.list)-start-1 if direction else start):
 			i = (start+i+1) if direction else (start-i-1)
 			if func(i):
-				self.it = i
+				self.it = i #pylint: disable=invalid-name
 				return
 		if loop:
 			for i in range(start if direction else len(self.list)-start-1):
@@ -371,7 +371,7 @@ class VisualListOverlay(ListOverlay, Box):
 			self._select_buffer = set()
 			self._start_select = -1
 			return
-		self.toggle()
+		self._selected.symmetric_difference_update((self.it,))
 		self._start_select = self.it
 
 	@key_handler('q')
@@ -597,7 +597,7 @@ class InputOverlay(TextOverlay, FutureOverlay, Box):
 		super().resize(newx, newy)
 		self._prompts = self._prompt.breaklines(self.width-2)
 
-	@key_handler("backspace")
+	@key_handler("backspace") #TODO override add_keys in TextOverlay
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text):

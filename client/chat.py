@@ -742,12 +742,12 @@ class _MessageScrollOverlay(DisplayOverlay):
 	'''
 	def __init__(self, overlay, lazy_list, early, late):
 		self.lazy_list = lazy_list
-		self.msgno = lazy_list[0].mid
+		message, self.msg_index = lazy_list[0]
 		self.early = early
 		self.late = late
-		super().__init__(overlay.parent, lazy_list[0], Message.INDENT)
+		super().__init__(overlay.parent, message, Message.INDENT)
 
-		scroll_to = lambda: overlay.messages.scroll_to(self.msgno) or -1
+		scroll_to = lambda: overlay.messages.scroll_to(self.msg_index) or -1
 		self.add_keys({
 			  'tab':	scroll_to
 			, 'enter':	scroll_to
@@ -761,7 +761,7 @@ class _MessageScrollOverlay(DisplayOverlay):
 		attempt = self.lazy_list.step(step)
 		if attempt:
 			self.change_display(attempt[0])
-			self.msgno = attempt[1]
+			self.msg_index = attempt[1]
 		elif step == 1:
 			self.parent.blurb.push(self.early)
 		elif step == -1:
