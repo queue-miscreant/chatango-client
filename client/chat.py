@@ -645,12 +645,11 @@ class ChatOverlay(TextOverlay):
 		return ret
 
 	@key_handler("mouse")
-	def _mouse(self, x, y, state):
-		'''Delegate mouse'''
-		print(self)
+	def _mouse(self, state, x, y):
+		'''Delegate mouse to message clicked on'''
 		msg, pos = self.messages.from_position(x, y)
 		if hasattr(msg, "keys"):
-			return msg.keys.mouse(x, y, state, msg, self, pos)
+			return msg.keys.mouse(msg, self, pos, state=state, x=x, y=y)
 		return 1
 
 	@key_handler('\\')

@@ -1012,6 +1012,7 @@ async def start_client(manager, creds):
 	if creds["options"]["ignoresave"]:
 		creds.set_write("ignores")
 
+	linkopen.open_link.warning_count = creds["options"]["linkwarn"]
 	client.colors.two56on = creds["options"]["256color"]
 	manager.screen.mouse = creds["options"]["mouse"]
 

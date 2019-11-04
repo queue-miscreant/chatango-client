@@ -107,9 +107,9 @@ async def get_opengraph(link, *args, loop=None):
 			full[i] = [prev]
 		full[i].append(j)
 
+	if not args:
+		return full
 	try:
-		if not args:
-			return full
 		if len(args) == 1:
 			return full[args[0]]		#never try 1-tuple assignment
 		return [full[i] for i in args]	#tuple unpacking
@@ -136,7 +136,7 @@ class LinkDelegator: #pylint: disable=invalid-name
 		self._visit_redraw = []
 
 	def __call__(self, screen, links, default=0, force=False):
-		'''Open a link with the declared openers'''
+		'''Open a link (or list of links) with the declared openers'''
 		if screen is None:
 			screen = DummyScreen()
 		if not isinstance(links, list):
@@ -162,6 +162,7 @@ class LinkDelegator: #pylint: disable=invalid-name
 				func()
 
 	async def _open_safe(self, func, screen, link):
+		'''Safely open a link and catch exceptions'''
 		try:
 			await func(screen, link)
 		except Exception as exc: #pylint: disable=broad-except
@@ -169,12 +170,15 @@ class LinkDelegator: #pylint: disable=invalid-name
 			traceback.print_exc()
 
 	def is_visited(self, link):
+		'''Returns if a link has been visited'''
 		return link in self._visited
 
 	def add_redraw_method(self, func):
+		'''Add function `func` to call (with no arguments) on link visit'''
 		self._visit_redraw.append(func)
 
 	def del_redraw_method(self, func):
+		'''Delete redraw method `func` added with `add_redraw_method`'''
 		try:
 			index = self._visit_redraw.index(func)
 			del self._visit_redraw[index]

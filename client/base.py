@@ -51,8 +51,7 @@ class KeyContainer:
 		, "wheel-up":	curses.BUTTON4_PRESSED
 		, "wheel-down":	2**21
 	}
-	_MOUSE_ERROR = "mouse callback argument mismatch: expected signature "\
-		"(x, y, {0}) or ({0})"
+	_MOUSE_ERROR = "expected signature ({0}, x, y) or ({0}) from function '{1}'"
 	_last_mouse = None	#curses.ungetmouse but not broken
 
 	@classmethod
@@ -79,8 +78,8 @@ class KeyContainer:
 
 	def __init__(self):
 		self._keys = { #strange because these are the opposite of defaults, but these are special
-			27:						self._BoundKey(self._callalt, True, True)
-			, curses.KEY_MOUSE:		self._BoundKey(self._callmouse, True, True)
+			27:						self._BoundKey(self._callalt, True)
+			, curses.KEY_MOUSE:		self._BoundKey(self._callmouse, True)
 		}
 		self._altkeys = {}
 		self._mouse = {}
@@ -88,8 +87,8 @@ class KeyContainer:
 	def screen_keys(self, screen):
 		'''Bind control keys to a screen ^l, resize'''
 		self._keys.update({
-			12:						self._BoundKey(screen.redraw_all, False) #^l
-			, curses.KEY_RESIZE:	self._BoundKey(screen.schedule_resize, False)
+			12:						self._BoundKey(screen.redraw_all) #^l
+			, curses.KEY_RESIZE:	self._BoundKey(screen.schedule_resize)
 		})
 
 	def __call__(self, chars, *args):
@@ -112,14 +111,16 @@ class KeyContainer:
 			return self._keys[-1](chars[:-1], *args)
 		return tuple()
 
-	def _callalt(self, chars, *args):
+	def _callalt(self, *args):
 		'''Run a alt-key's callback'''
+		chars = args[-1]
 		return self._altkeys[chars[0]](chars, *args) \
 			if chars[0] in self._altkeys else tuple()
 
-	def _callmouse(self, chars, *args):
+	def _callmouse(self, *args):
 		'''Run a mouse's callback. Saves invalid mouse data for next call'''
-		chars = [i for i in chars if i != curses.KEY_MOUSE]
+		chars = [i for i in args[-1] if i != curses.KEY_MOUSE]
+		args = args[:-1]
 		if chars[0] != -1:
 			#control not returned to loop until later
 			asyncio.get_event_loop().call_soon(self, chars, *args)
@@ -134,17 +135,18 @@ class KeyContainer:
 				if -1 not in self._mouse:
 					KeyContainer._last_mouse = (x, y, state)
 					return tuple()
-				error_sig = "state, ..."
-				args = (state, *args)
+				error_sig = "..., state"
+				args = (*args, state)
 				state = -1
 			try:
-				return self._mouse[state](chars, x, y, *args)
+				return self._mouse[state](chars, *args, x, y)
 			except TypeError:
 				return self._mouse[state](chars, *args)
+		except TypeError as exc:
+			raise TypeError(self._MOUSE_ERROR.format(error_sig
+				, self._mouse[state])) from exc
 		except curses.error:
 			pass
-		except TypeError as exc:
-			raise TypeError(self._MOUSE_ERROR.format(error_sig)) from exc
 		return tuple()
 
 	def __dir__(self):
@@ -207,27 +209,27 @@ class KeyContainer:
 		list_ref, key_name = self._get_key(other)
 		return key_name in list_ref
 
-	def mouse(self, x, y, state, *args):
+	def mouse(self, *args, state, x=0, y=0):
 		'''Unget some mouse data and run the associated mouse callback'''
 		KeyContainer._last_mouse = (x, y, state)
-		return self._callmouse([-1], *args)
+		return self._callmouse(*args, [-1])
 
-	def copy_from(self, keys, unbound=True):
+	def copy_from(self, keys, redefine=False):
 		'''
-		Copy keys from another KeyContainer instance. If unbound is True, then
-		only keys without callbacks in this overlay are bound.
+		Copy keys from another KeyContainer instance.
+		Keys are only redefined if `redefine` is True
 		'''
 		#mouse
 		for copy_mouse, handler in keys._mouse.items():
-			if not (unbound and copy_mouse in self._mouse):
+			if redefine or copy_mouse not in self._mouse:
 				self._mouse[copy_mouse] = handler
 		#alt
 		for copy_alt, handler in keys._altkeys.items():
-			if not (unbound and copy_alt in self._altkeys):
+			if redefine or copy_alt not in self._altkeys:
 				self._altkeys[copy_alt] = handler
 		#the rest
 		for copy_key, handler in keys._keys.items():
-			if not (unbound and copy_key in self._keys):
+			if redefine or copy_key not in self._keys:
 				self._keys[copy_key] = handler
 
 	def nomouse(self):
@@ -255,14 +257,13 @@ class KeyContainer:
 	class _BoundKey:
 		'''
 		Function wrapper for key handler. If a handler should receive extra
-		keypresses recorded, `pass_keys` is True. Similarly, extra arguments
-		`args` are passed into the wrapped function if _pass_args is True.
-		Return value is overridden if _return is set (not None).
+		keypresses recorded, `pass_keys` is True. Return value is overridden if
+		`return_val` is not None. Documentation is overriden to `doc`
 		'''
-		def __init__(self, func, pass_args=True, pass_keys=False, return_val=None, doc=None):
+		def __init__(self, func, pass_keys=False, return_val=None, doc=None):
 			self._func = func
-			self._pass_keys = pass_keys
-			self._pass_args = pass_args
+			self._nullary = not inspect.signature(func).parameters
+			self._pass_keys = not self._nullary and pass_keys
 			self._return = return_val
 			self.doc = inspect.getdoc(self._func) if doc is None else doc
 			if self.doc is None:
@@ -274,17 +275,20 @@ class KeyContainer:
 					self.doc += " (and close overlay)"
 
 		def __call__(self, keys, *args):
-			args = args if self._pass_args else tuple()
-			ret = self._func(keys, *args) if self._pass_keys else self._func(*args)
+			args = tuple() if self._nullary else args
+			ret = self._func(*args, keys) if self._pass_keys else self._func(*args)
 			return ret if self._return is None else self._return
+
+		def __str__(self):
+			return str(self._func)
 
 		def __eq__(self, other):
 			return other == self._func
 
-	def add_key(self, key_name, func, pass_args=True, pass_keys=False, return_val=None, doc=None):
+	def add_key(self, key_name, func, pass_keys=False, return_val=None, doc=None):
 		'''Key addition that supports some nicer names than ASCII numbers'''
 		if not isinstance(func, self._BoundKey):
-			func = self._BoundKey(func, pass_args, pass_keys, return_val, doc)
+			func = self._BoundKey(func, pass_keys, return_val, doc)
 
 		list_ref, name = self._get_key(key_name)
 		list_ref[name] = func
@@ -292,11 +296,11 @@ KeyContainer.initialize_class()
 
 class key_handler: #pylint: disable=invalid-name
 	'''
-	Decorator to indicate that a function is a key handler. `key_name` must be
-	a raw character number, a valid keyname, a-[keyname] for Alt combination,
+	Function decorator for key handlers. `key_name` must be one of: a raw
+	character number, a valid keyname, a-[keyname] for Alt combination,
 	^[keyname] for Ctrl combination, or mouse-{right, left...} for mouse.
 	Valid keynames are found in KeyContainer._VALID_KEYNAMES; usually curses
-	KEY_* names, without KEY_, or the string of length 1 typed
+	KEY_* names, without KEY_, or the string of length 1 typed.
 	'''
 	def __init__(self, key_name, override=None, doc=None, **kwargs):
 		self.bound = None
@@ -309,24 +313,28 @@ class key_handler: #pylint: disable=invalid-name
 		self.bound = func
 		return self
 
-	def bind(self, keys: KeyContainer, input_partial=None):
+	def bind(self, keys: KeyContainer, redefine=True):
+		'''
+		Bind function to `keys`. Function is partially called with extra kwargs
+		specified, and if `override` is specified, returns that value instead
+		'''
 		for key_name, override, doc, keywords in self.keys:
+			if not redefine and key_name in keys:
+				continue
 			try:
-				#sanity regarding argument order (i.e., self first) TODO
-				if input_partial is not None:
-					bind = staticize(self.bound, input_partial, **keywords)
-					if key_name == -1:
-						keys.add_key(key_name, bind, False, True, override, doc=doc)
-						continue
-					if isinstance(key_name, str) and key_name.startswith("mouse"):
-						keys.add_key(key_name, bind, override, doc=doc)
-						continue
-				keys.add_key(key_name, staticize(self.bound, **keywords)
+				bind = staticize(self.bound, **keywords)
+				if key_name == -1:
+					keys.add_key(key_name, bind, True, override, doc=doc)
+					continue
+				if isinstance(key_name, str) and key_name.startswith("mouse"):
+					keys.add_key(key_name, bind, return_val=override, doc=doc)
+					continue
+				keys.add_key(key_name, bind
 					, return_val=override, doc=doc)
 			except KeyError:
-				print("COULD NOT BIND KEY", key_name)
+				print("Failed binding {} to {} ".format(key_name, self.bound))
 
-quitlambda = KeyContainer._BoundKey(lambda: -1, False, doc="Close overlay") #pylint: disable=invalid-name
+quitlambda = KeyContainer._BoundKey(lambda: -1, doc="Close overlay") #pylint: disable=invalid-name
 
 #DISPLAY CLASSES----------------------------------------------------------
 class SizeException(Exception):
@@ -377,10 +385,7 @@ class Box:
 			, self.CHAR_HSPACE)
 
 class _NScrollable(ScrollSuggest):
-	'''
-	A scrollable that expects a Screen as parent so that it
-	can run Screen.update_input()
-	'''
+	'''A scrollable that updates a Screen on changes'''
 	def __init__(self, parent):
 		super().__init__(parent.width)
 		self.parent = parent
@@ -402,11 +407,11 @@ class OverlayBase:
 		self._right = None			#same but on the right side of the screen
 		self.keys = KeyContainer()
 		self.keys.screen_keys(parent)
-		#bind keys
-		for _class in reversed(self.__class__.mro()):
-			for handler in _class.__dict__.values():
+		#bind remaining unbound keys across classes
+		for class_ in reversed(self.__class__.mro()):
+			for handler in class_.__dict__.values():
 				if isinstance(handler, key_handler):
-					handler.bind(self.keys, self)
+					handler.bind(self.keys, redefine=False)
 		setattr(self, "key_handler", staticize(self.key_handler, _bind_immed=self))
 
 	width = property(lambda self: self.parent.width)
@@ -462,7 +467,7 @@ class OverlayBase:
 		self.remove()
 		new.add()
 
-	def add_keys(self, new_functions, pass_args=False, redefine=True):
+	def add_keys(self, new_functions, redefine=True):
 		'''
 		Add keys from preexisting functions. `new_functions` should be a dict
 		with either functions or (function, return value) tuples as values
@@ -475,8 +480,11 @@ class OverlayBase:
 			elif isinstance(handler, key_handler):
 				handler = handler.func
 			if redefine or key_name not in self.keys:
-				self.keys.add_key(key_name, handler, pass_args=pass_args
-					, return_val=override)
+				self.keys.add_key(key_name, handler, return_val=override)
+
+		for handler in self.__class__.__dict__.values():
+			if isinstance(handler, key_handler):
+				handler.bind(self.keys)
 
 	@classmethod
 	def key_handler(cls, key_name, override=None, _bind_immed=None, **kwargs):
@@ -486,16 +494,16 @@ class OverlayBase:
 		'''
 		def ret(func):
 			if not isinstance(func, key_handler): #extract stacked
-				func = key_handler(key_name, override=override, **kwargs)(func)
+				handle = key_handler(key_name, override, **kwargs)(func)
 			#setattr to class
 			if _bind_immed is None:
-				name = func.bound.__name__
+				name = handle.bound.__name__
 				if hasattr(cls, name): #mangle name
-					name += str(id(func))
-				setattr(cls, name, func)
-				return func
-			func.bind(_bind_immed.keys, _bind_immed)
-			return func #return the function to re-bind handlers
+					name += str(id(handle))
+				setattr(cls, name, handle)
+				return handle
+			handle.bind(_bind_immed.keys)
+			return func	#return the function to re-bind handlers
 		return ret
 
 	@classmethod
@@ -571,8 +579,7 @@ class TextOverlay(OverlayBase):
 		if self._sentinel and not str(self.text) and len(chars) == 1 and \
 			chars[0] == self._sentinel:
 			return self._on_sentinel()
-		#allow unicode input with the bytes().decode()
-		#take out characters that can't be decoded (i.e., those used by curses)
+		#allow unicode input by decoding bytes, filtering out curses escapes
 		buffer = bytes(filter(lambda x: x < 256, chars))
 		if not buffer:
 			return None

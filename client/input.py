@@ -2,7 +2,7 @@
 #client/input.py
 '''
 Overlays that allow multiple input formats. Also includes InputMux, which
-provides a nice interface for modifying variables within a context.
+provides a nice interface for modifying values within a context.
 '''
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, colors \
@@ -14,13 +14,6 @@ __all__ = [
 	  "Box", "OverlayBase", "ListOverlay", "VisualListOverlay", "ColorOverlay"
 	, "ColorSliderOverlay", "ConfirmOverlay", "DisplayOverlay", "InputMux"
 ]
-
-def _search_cache(keys: set, value):
-	'''Search through set for value that equals `value` and return'''
-	for i in keys:
-		if i == value:
-			return i
-	return value
 
 #'enter' should set the future
 #'tab' should set the future, but close the overlay
@@ -103,7 +96,7 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		self._draw_other = None
 		self._modes = [""] if modes is None else modes
 		self._search = None
-		self._draw_cache = set()
+		self._draw_cache = {}
 
 		self.add_keys({
 			 'H':		self.open_help
@@ -171,11 +164,15 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 			#alter the string to be drawn
 			if i+partition < len(self.list):
 				self._draw_line(row, i+partition)
-			row = _search_cache(self._draw_cache, row)
+			#assuming that assembling and justifying the line is more intensive
+			if row in self._draw_cache:
+				justified = self._draw_cache[row]
+			else:
+				justified = self.box_noform(row.justify(maxx))
+				#cache the newly justified string
+				self._draw_cache[row] = justified
 			#draw the justified string
-			lines[i+1] = self.box_noform(row.justify(maxx))
-			#and cache it
-			self._draw_cache.add(row)
+			lines[i+1] = justified
 
 		lines[-1] = self.box_bottom(self._modes[self.mode])
 		return lines
@@ -258,7 +255,6 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 
 	@key_handler("mouse-left")
 	@key_handler("mouse-right", override=0)
-	#TODO
 	def try_mouse(self, _, y):
 		'''Run enter on the element of the list that was clicked'''
 		#Manipulate self.it and try_enter
@@ -597,7 +593,7 @@ class InputOverlay(TextOverlay, FutureOverlay, Box):
 			return
 		self._prompts = self._prompt.breaklines(newx-2)
 
-	@key_handler("backspace") #TODO override add_keys in TextOverlay
+	@key_handler("backspace") 
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text):
@@ -773,9 +769,9 @@ class InputMux:
 			, [self.indices[i].doc for i in self.ordering])
 		overlay.line_drawer(self._drawing)
 
-		@overlay.key_handler("tab")
 		@overlay.key_handler("enter")
 		@overlay.key_handler(' ')
+		@overlay.key_handler("tab")
 		def _(me):
 			"Change value"
 			return self.indices[self.ordering[me.it]].select()
