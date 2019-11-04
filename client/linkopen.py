@@ -146,6 +146,7 @@ class LinkDelegator: #pylint: disable=invalid-name
 		if not force and len(links) >= self.warning_count:
 			ConfirmOverlay(screen, "Really open %d links? (y/n)" % len(links)
 				, lambda: self(screen, links, default, True)).add()
+			return
 
 		do_redraw = False
 		for link in links:
