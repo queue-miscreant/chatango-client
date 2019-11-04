@@ -304,8 +304,8 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 	def scroll_search(self, direction):
 		'''Scroll through search index'''
 		def goto(index):
-			value = self.list[index]
-			if isinstance(value, str) and self.search is not None:
+			value = str(self.list[index])
+			if value and self.search is not None:
 				return value.lower().find(self.search.lower()) != -1
 			return False
 		self._goto_lambda(goto, direction, True)
@@ -592,10 +592,10 @@ class InputOverlay(TextOverlay, FutureOverlay, Box):
 
 	def resize(self, newx, newy):
 		'''Resize prompts'''
+		super().resize(newx, newy)
 		if self._prompt is None:
 			return
-		super().resize(newx, newy)
-		self._prompts = self._prompt.breaklines(self.width-2)
+		self._prompts = self._prompt.breaklines(newx-2)
 
 	@key_handler("backspace") #TODO override add_keys in TextOverlay
 	def _wrap_backspace(self):
@@ -677,14 +677,15 @@ class TabOverlay(OverlayBase):
 	Overlay for 'tabbing' through things.
 	Displays options on lines nearest to the input scrollable
 	'''
-	def __init__(self, parent, lis, start=0, rows=5): #pylint: disable=too-many-arguments
+	def __init__(self, parent, lis, *args, start=0, rows=5): #pylint: disable=too-many-arguments
 		super().__init__(parent)
 		self.list = lis
 		self._it = min(start, len(self.list)-1) #pylint: disable=invalid-name
 		self._rows = min(len(self.list), rows, self.height)
 		self._callback = None
 		self.replace = self._rows == self.height
-
+		for i, j in enumerate(args):
+			self.key_handler(j, direction=(1 - 2*(i % 2)))(self.move_it.bound)
 		self.add_keys({-1:		quitlambda})
 	it = property(lambda self: self._it)
 

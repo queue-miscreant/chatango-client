@@ -144,7 +144,7 @@ def make_creds():
 	])
 	creds.add_field("options", default={
 		  "mouse":		False
-		, "linkwarn":	2
+		, "linkwarn":	linkopen.open_link.warning_count
 		, "ignoresave":	False
 		, "bell":		True
 		, "256color":	False
@@ -499,14 +499,8 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 
 #List Overlay Extensions-------------------------------------------------------
 class LinkOverlay(client.VisualListOverlay):
-	'''
-	List accumulated links
-	Context is assumed to be a ChatangoOverlay with members `open_links` and
-	`last_links`
-	'''
-	def __init__(self, parent, last_links, redraw=None):
-		self._redraw_overlay = redraw
-
+	'''ListOverlay of links that renders whether they have been visited'''
+	def __init__(self, parent, last_links):
 		builder = lambda raw: list(reversed(raw))
 		super().__init__(parent, last_links
 			, modes=["default"] + linkopen.get_defaults(), builder=builder)
@@ -523,39 +517,12 @@ class LinkOverlay(client.VisualListOverlay):
 
 	def _callback(self, result): #pylint: disable=method-hidden
 		'''Open link with selected opener'''
-		self._open_links(result, self.mode)
+		linkopen.open_link(self.parent, result, self.mode)
 		self.clear()
-
-	@staticmethod
-	def open_links(parent, links, opener=0, redraw=None):
-		'''
-		Open a list of `links` with `opener`.
-		Optionally needs updates colors of chat_overlay
-		'''
-		try:
-			warning_links = get_client().options["linkwarn"]
-		except AttributeError:
-			warning_links = 2
-
-		def callback():
-			for i in links:
-				linkopen.open_link(parent, i, opener)
-			#don't recolor if the list is empty
-			if links and isinstance(redraw, client.ChatOverlay):
-				redraw.redo_lines()
-
-		if len(links) >= warning_links:
-			msg = "Really open {} links? (y/n)".format(len(links))
-			client.ConfirmOverlay(parent, msg, callback).add()
-		else:
-			callback()
-
-	def _open_links(self, links, opener=0):
-		self.open_links(self.parent, links, opener, self._redraw_overlay)
 
 	def open_images(self):
 		'''Open all images that have not been visited'''
-		self._open_links([link for link in self.list \
+		linkopen.open_link(self.parent, [link for link in self.list \
 			if (linkopen.get_extension(link).lower() in ("png", "jpg", "jpeg")) \
 			and (not linkopen.open_link.is_visited(link))], self.mode)
 
@@ -630,7 +597,9 @@ def linkwarn(context):
 @linkwarn.setter
 def _(context, value):
 	try:
+		#one for saving, one for function
 		context.bot.options["linkwarn"] = int(value)
+		linkopen.open_link.warning_count = int(value)
 	except ValueError:
 		pass
 
@@ -705,7 +674,7 @@ def open_selected_links(message, overlay):
 	'''Open links in selected message'''
 	msg = message.post.post
 	all_links = linkopen.LINK_RE.findall(msg)
-	LinkOverlay.open_links(overlay.parent, all_links, redraw=overlay)
+	linkopen.open_link(overlay.parent, all_links)
 
 @ChatangoMessage.key_handler("tab")
 def	reply_to_message(message, overlay):
@@ -774,6 +743,8 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "^r":			self.reload_client
 		})
 
+		linkopen.open_link.add_redraw_method(self.redo_lines)
+
 	def _max_select(self):
 		#when we've gotten too many messages
 		group = self.bot.joined_group
@@ -801,7 +772,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _show_links(self):
 		'''List accumulated links'''
-		LinkOverlay(self.parent, self.last_links, self).add()
+		LinkOverlay(self.parent, self.last_links).add()
 
 	def _show_members(self):
 		'''List members of current group'''

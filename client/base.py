@@ -479,23 +479,22 @@ class OverlayBase:
 					, return_val=override)
 
 	@classmethod
-	def key_handler(cls, key_name, override=None, _bind_immed=None):
+	def key_handler(cls, key_name, override=None, _bind_immed=None, **kwargs):
 		'''
 		Decorator for adding a key handler.
 		See `client.key_handler` documentation for valid values of `key_name`
 		'''
 		def ret(func):
-			handler = key_handler(key_name, override=override)(func)
+			if not isinstance(func, key_handler): #extract stacked
+				func = key_handler(key_name, override=override, **kwargs)(func)
 			#setattr to class
 			if _bind_immed is None:
-				name = func.__name__
+				name = func.bound.__name__
 				if hasattr(cls, name): #mangle name
-					name += str(id(handler))
-				setattr(cls, name, handler)
-				return handler
-			if isinstance(func, key_handler): #extract stacked
-				func = func.bound
-			handler(func).bind(_bind_immed.keys, _bind_immed)
+					name += str(id(func))
+				setattr(cls, name, func)
+				return func
+			func.bind(_bind_immed.keys, _bind_immed)
 			return func #return the function to re-bind handlers
 		return ret
 
@@ -553,6 +552,10 @@ class TextOverlay(OverlayBase):
 			, "a-l":		self.text.wordnext
 			, "a-backspace":	self.text.delword
 		})
+
+	def add(self):
+		self.text.setwidth(self.parent.width)
+		super().add()
 
 	def resize(self, newx, newy):
 		'''Adjust scrollable on resize'''
@@ -746,6 +749,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		newy -= self._RESERVE_LINES
 		try:
 			for i in self._ins:
+				print(i, i.resize)
 				i.resize(newx, newy)
 				await asyncio.sleep(self._INTERLEAVE_DELAY)
 			self.width, self.height = newx, newy
