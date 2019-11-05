@@ -922,7 +922,7 @@ class ChatangoOverlay(client.ChatOverlay):
 				try:
 					data[i] = await over.result
 				except asyncio.CancelledError:
-					self.blurb.push("Login aborted")
+					self.parent.blurb.push("Login aborted")
 					return
 			self.bot.username, self.bot.password = data
 			self.bot.creds["user"], self.bot.creds["passwd"] = data

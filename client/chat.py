@@ -170,7 +170,8 @@ class Message(Coloring):
 		self._mid = Message.msg_count
 		#memoization
 		self._cached_display = []
-		self._cached_hash = 0
+		self._cached_hash = -1 #hash of coloring
+		self._cached_width = 0 #screen width
 		self._last_recolor = -1
 		Message.msg_count += 1
 
@@ -198,19 +199,23 @@ class Message(Coloring):
 		'''
 		Break a message to `width` columns. Does nothing if matches last call.
 		'''
-		if self.filtered:
+		if self.filtered: #invalidate cache
 			self._cached_display.clear()
-			self._cached_hash = -1 #in CPython at least, this'll never be true
+			self._cached_hash = -1
+			self._cached_width = 0
 			return
+		self_hash = self._cached_hash
 		if self._last_recolor < recolor_count:
+			#recolor message in the same way
 			self.clear()
 			self.colorize()
 			self._last_recolor = recolor_count
-		new_hash = (hash(self), width)
-		if self._cached_hash == new_hash: #don't break lines again
+			self_hash = hash(self)
+		if self._cached_hash == self_hash and self._cached_width == width: #don't break lines again
 			return
 		self._cached_display = super().breaklines(width, self.INDENT)
-		self._cached_hash = new_hash
+		self._cached_hash = self_hash
+		self._cached_width = width
 
 	@classmethod
 	def examine(cls, func):
@@ -228,6 +233,7 @@ class Message(Coloring):
 		'''
 		Decorator for adding a key handler. Key handlers for Messages objects
 		expect signature (message, calling overlay)
+		Mouse handlers expect signature (message, calling overlay, position)
 		See OverlayBase.add_keys documentation for valid values of `key_name`
 		'''
 		if not hasattr(cls, "keys"):
@@ -348,7 +354,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 				break
 			if select - self._lazy_offset not in cached_range:
 				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[1] = max(self._lazy_bounds[1] - self._lazy_offset, select+1)
+				self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset, select+1)
 				self._lazy_offset = 0
 			addlines += self._all_messages[-select].height
 			select += 1
@@ -403,7 +409,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 				return 0
 			if select - self._lazy_offset not in cached_range:
 				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[0] = min(self._lazy_bounds[0] - self._lazy_offset, select)
+				self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, select)
 				self._lazy_offset = 0
 			last_height = self._all_messages[-select].height
 			addlines += last_height

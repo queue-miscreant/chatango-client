@@ -469,7 +469,7 @@ class OverlayBase:
 		Add keys from preexisting functions. `new_functions` should be a dict
 		with either functions or (function, return value) tuples as values
 		If redefine is True, then will redefine pre-existing key handlers
-		'''
+		''' #TODO function also binds class-level key handlers
 		for key_name, handler in new_functions.items():
 			override = None
 			if isinstance(handler, tuple):
