@@ -114,7 +114,7 @@ class KeyContainer:
 	def _callalt(self, *args):
 		'''Run a alt-key's callback'''
 		chars = args[-1]
-		return self._altkeys[chars[0]](chars, *args) \
+		return self._altkeys[chars[0]](chars, *args[:-1]) \
 			if chars[0] in self._altkeys else tuple()
 
 	def _callmouse(self, *args):
@@ -276,11 +276,9 @@ class KeyContainer:
 
 		def __call__(self, keys, *args):
 			args = tuple() if self._nullary else args
+			print("You hear the calling", self._func, args, keys)
 			ret = self._func(*args, keys) if self._pass_keys else self._func(*args)
 			return ret if self._return is None else self._return
-
-		def __str__(self):
-			return str(self._func)
 
 		def __eq__(self, other):
 			return other == self._func
