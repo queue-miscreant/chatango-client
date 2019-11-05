@@ -276,7 +276,6 @@ class KeyContainer:
 
 		def __call__(self, keys, *args):
 			args = tuple() if self._nullary else args
-			print("You hear the calling", self._func, args, keys)
 			ret = self._func(*args, keys) if self._pass_keys else self._func(*args)
 			return ret if self._return is None else self._return
 

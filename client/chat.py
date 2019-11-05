@@ -114,7 +114,7 @@ class CommandOverlay(TextOverlay):
 				result.add()
 		except Exception as exc: #pylint: disable=broad-except
 			param.blurb.push("%s occurred in command '%s'" % (exc, name))
-			print(traceback.format_exc(), "\n")
+			traceback.print_exc()
 
 	@classmethod
 	def command(cls, name, complete=None):
@@ -177,7 +177,7 @@ class Message(Coloring):
 		#memoization
 		self._cached_display = []
 		self._cached_hash = 0
-		self._recolor_time = -1
+		self._last_recolor = -1
 		Message.msg_count += 1
 
 	mid = property(lambda self: self._mid)
@@ -200,19 +200,20 @@ class Message(Coloring):
 		'''
 		return False
 
-	def cache_display(self, width, recolor_time):
+	def cache_display(self, width, recolor_count):
 		'''
 		Break a message to `width` columns. Does nothing if matches last call.
 		'''
 		if self.filtered:
 			self._cached_display.clear()
 			self._cached_hash = -1 #in CPython at least, this'll never be true
-		if self._recolor_time < recolor_time:
+			return
+		if self._last_recolor < recolor_count:
 			self.clear()
 			self.colorize()
-			self._recolor_time = recolor_time
+			self._last_recolor = recolor_count
 		new_hash = (hash(self), width)
-		if self._cached_hash == new_hash:
+		if self._cached_hash == new_hash: #don't break lines again
 			return
 		self._cached_display = super().breaklines(width, self.INDENT)
 		self._cached_hash = new_hash
@@ -262,7 +263,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._start_inner = 0	#ignore drawing this many lines in start_message
 		self._height_up = 0		#lines between start_message and the selector
 		#lazy storage
-		self._lazy_bounds = [1, 1]	#latest/earliest messages to recolor
+		self._lazy_bounds = [0, 0]	#latest/earliest messages to recolor
 		self._lazy_offset = 0		#lines added since last lazy_bounds
 		self._last_recolor = 0
 
@@ -274,9 +275,9 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._start_message = 0
 		self._start_inner = 0
 		self._height_up = 0
-		self._lazy_bounds = [1, 1]
+		self._lazy_bounds = [0, 0]
 		self._lazy_offset = 0
-		self._last_recolor = 0
+		self._last_recolor += 1
 
 	def stop_select(self):
 		'''Stop selecting'''
@@ -286,7 +287,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			self._start_message = 0
 			self._start_inner = 0
 			self._height_up = 0
-			self._lazy_bounds = [1, 1]
+			self._lazy_bounds = [0, 0]
 			self._lazy_offset = 0
 			return True
 		return False
@@ -312,27 +313,25 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		msg_number = self._start_message + 1
 		ignore = self._start_inner
 		cached_range = range(*self._lazy_bounds)
-		self._lazy_bounds[0] = min(self._lazy_bounds[0] - self._lazy_offset, msg_number)
+		self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, msg_number)
 		#traverse list of lines
-		while msg_number <= len(self._all_messages):
+		while line_number <= len(lines) and msg_number <= len(self._all_messages):
 			reverse = SELECT_AND_MOVE if msg_number == self._selector else ""
 			msg = self._all_messages[-msg_number]
-			if msg_number - self._lazy_offset not in cached_range:
+			bound = msg_number - self._lazy_offset
+			if bound not in cached_range:
 				msg.cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[1] = max(self._lazy_bounds[1] - self._lazy_offset, msg_number)
-				self._lazy_offset = 0
 			#if a message is ignored, then msg.display is []
 			for line_count, line in enumerate(reversed(msg.display)):
 				if ignore > line_count:
 					continue
 				if line_number > len(lines):
-					msg_number = len(self._all_messages) + 1
 					break
 				ignore = 0
 				lines[-line_number] = reverse + line
 				line_number += 1
 			msg_number += 1
-		self._lazy_bounds[1] = max(self._lazy_bounds[1] - self._lazy_offset, msg_number)
+		self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset, msg_number)
 		self._lazy_offset = 0
 
 	def up(self, amount=1):
@@ -544,7 +543,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			try:
 				ret = callback(message)
 			except Exception: #pylint: disable=broad-except
-				print(traceback.format_exc(), "\n")
+				traceback.print_exc()
 				continue
 			if ret:
 				yield message, select
@@ -554,7 +553,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 	def redo_lines(self, recolor=True):
 		'''Re-apply Message coloring and redraw all visible lines'''
 		if recolor:
-			self._last_recolor = time.time()
+			self._last_recolor += 1
 		self._lazy_bounds = [self._start_message, self._start_message]
 
 class ChatOverlay(TextOverlay):
@@ -573,9 +572,6 @@ class ChatOverlay(TextOverlay):
 		self.messages = Messages(self)
 		self.history = History()
 		self.control_history(self.history)
-
-		self.add_keys({
-		})
 
 	can_select = property(lambda self: self.messages.can_select)
 	@can_select.setter
