@@ -235,6 +235,7 @@ class ChatangoMessage(client.Message):
 	_LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
 	_QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
 
+	#self.overlay.msg_append(ChatangoMessage(post, self, self.me, False
 	def __init__(self, post, bot, me, ishistory, alts=None): #pylint: disable=too-many-arguments
 		#and is short-circuited
 		isreply = (me is not None and (me in post.mentions)) or \
@@ -315,6 +316,7 @@ class ChatangoMessage(client.Message):
 		if not self.colored_at(msg_start):
 			self.insert_color(msg_start, font_color)
 		if self.reply:
+			print("COLORING REPLY", self._last_recolor)
 			self.add_global_effect(0, 1)
 		if self.history:
 			self.add_global_effect(1, 1)

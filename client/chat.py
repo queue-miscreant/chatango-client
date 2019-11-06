@@ -9,7 +9,7 @@ from collections import deque
 from .display import SELECT_AND_MOVE, collen, numdrawing, colors, Coloring
 from .util import LazyIterList, History
 from .base import staticize, quitlambda, key_handler \
-	, Box, KeyContainer, OverlayBase, TextOverlay
+	, Box, KeyException, KeyContainer, OverlayBase, TextOverlay
 from .input import ListOverlay, DisplayOverlay
 __all__ = ["CommandOverlay", "ChatOverlay", "add_message_scroller"]
 
@@ -264,7 +264,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._height_up = 0		#lines between start_message and the selector
 		#lazy storage
 		self._lazy_bounds = [0, 0]	#latest/earliest messages to recolor
-		self._lazy_offset = 0		#lines added since last lazy_bounds
+		self._lazy_offset = 0		#lines added since last lazy_bounds modification
 		self._last_recolor = 0
 
 	def clear(self):
@@ -282,12 +282,15 @@ class Messages: #pylint: disable=too-many-instance-attributes
 	def stop_select(self):
 		'''Stop selecting'''
 		if self._selector:
+			#only change the lazy bounds if our range isn't a continuous run
+			if self._start_message - self._lazy_offset \
+			 not in range(*self._lazy_bounds):
+				self._lazy_bounds = [0, 0]
 			self.can_select = True
 			self._selector = 0
 			self._start_message = 0
 			self._start_inner = 0
 			self._height_up = 0
-			self._lazy_bounds = [0, 0]
 			self._lazy_offset = 0
 			return True
 		return False
@@ -318,8 +321,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		while line_number <= len(lines) and msg_number <= len(self._all_messages):
 			reverse = SELECT_AND_MOVE if msg_number == self._selector else ""
 			msg = self._all_messages[-msg_number]
-			bound = msg_number - self._lazy_offset
-			if bound not in cached_range:
+			if msg_number - self._lazy_offset not in cached_range:
 				msg.cache_display(self.parent.width, self._last_recolor)
 			#if a message is ignored, then msg.display is []
 			for line_count, line in enumerate(reversed(msg.display)):
@@ -353,11 +355,12 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			if select > len(self._all_messages):
 				break
 			if select - self._lazy_offset not in cached_range:
+				#recache to get the correct message height
 				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset, select+1)
-				self._lazy_offset = 0
 			addlines += self._all_messages[-select].height
 			select += 1
+		self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset, select)
+		self._lazy_offset = 0
 		self._selector = select-1
 
 		#so at this point we're moving up `addlines` lines
@@ -409,13 +412,14 @@ class Messages: #pylint: disable=too-many-instance-attributes
 				return 0
 			if select - self._lazy_offset not in cached_range:
 				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, select)
-				self._lazy_offset = 0
 			last_height = self._all_messages[-select].height
 			addlines += last_height
 			select -= 1
 
+		self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, select+1)
+		self._lazy_offset = 0
 		self._selector = select+1
+
 		#so at this point we're moving down `addlines` lines
 		self._height_up -= addlines - last_height
 		if self._height_up < last_height:
@@ -625,11 +629,14 @@ class ChatOverlay(TextOverlay):
 	def run_key(self, chars):
 		'''Delegate running characters to a selected message that supports it'''
 		selected = self.messages.selected
-		ret = tuple()
-		if selected is not None and hasattr(selected, "keys"):
-			#pass in the message and this overlay to the handler
-			ret = selected.keys(chars, selected, self)
-		if ret == tuple():
+		ret = None
+		try:
+			if selected is not None and hasattr(selected, "keys"):
+				#pass in the message and this overlay to the handler
+				ret = selected.keys(chars, selected, self)
+			else:
+				raise KeyException
+		except KeyException:
 			ret = self.keys(chars, self)
 
 		#stop selecting if False is returned

@@ -28,6 +28,9 @@ def staticize(func, *args, doc=None, **kwargs):
 	ret.__doc__ = doc or func.__doc__
 	return ret
 
+class KeyException(Exception):
+	'''Exception caught in `Screen.input` to capture failed keypresses'''
+
 #Key setup
 class KeyContainer:
 	'''Object for parsing key sequences and passing them onto handlers'''
@@ -109,13 +112,14 @@ class KeyContainer:
 		#capture the rest of inputs, as long as they begin printable
 		if -1 in self._keys and (char in range(32, 255) or char in (9, 10)):
 			return self._keys[-1](chars[:-1], *args)
-		return tuple()
+		raise KeyException
 
 	def _callalt(self, *args):
 		'''Run a alt-key's callback'''
 		chars = args[-1]
-		return self._altkeys[chars[0]](chars, *args[:-1]) \
-			if chars[0] in self._altkeys else tuple()
+		if not chars[0] in self._altkeys:
+			raise KeyException
+		return self._altkeys[chars[0]](chars, *args[:-1])
 
 	def _callmouse(self, *args):
 		'''Run a mouse's callback. Saves invalid mouse data for next call'''
@@ -134,7 +138,7 @@ class KeyContainer:
 			if state not in self._mouse:
 				if -1 not in self._mouse:
 					KeyContainer._last_mouse = (x, y, state)
-					return tuple()
+					raise KeyException
 				error_sig = "..., state"
 				args = (*args, state)
 				state = -1
@@ -147,7 +151,7 @@ class KeyContainer:
 				, self._mouse[state])) from exc
 		except curses.error:
 			pass
-		return tuple()
+		raise KeyException
 
 	def __dir__(self):
 		'''Get a list of key handlers and their documentation'''
@@ -753,7 +757,6 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		newy -= self._RESERVE_LINES
 		try:
 			for i in self._ins:
-				print(i, i.resize)
 				i.resize(newx, newy)
 				await asyncio.sleep(self._INTERLEAVE_DELAY)
 			self.width, self.height = newx, newy
@@ -921,15 +924,13 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		while nextch != -1:
 			nextch = self._screen.getch()
 			chars.append(nextch)
-		try:
-			ret = self._ins[-1].run_key(chars)
-		except Exception: #pylint: disable=broad-except
-			self.blurb.push("Error occurred in key callback")
-			print(traceback.format_exc(), f"Occurred in overlay {self._ins[-1]}")
-			return
-
-		if ret:
-			await self.display()
+		for i in range(len(self._ins) - self._last_replace):
+			try: #shoot up the hierarchy of overlays to try to handle
+				if self._ins[-i-1].run_key(chars):
+					await self.display()
+				break
+			except KeyException:
+				pass
 
 	def stop(self):
 		self.active = False
@@ -954,11 +955,15 @@ class Manager:
 			self.screen = Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop)
 			await self.screen.resize()
 			#done for now; call coroutines waiting for preparation
-			if prepared_coroutine is not None:
+			if asyncio.is_coroutine(prepared_coroutine):
 				await prepared_coroutine
 			#keep running key callbacks
 			while self.screen.active:
-				await self.screen.input()
+				try:
+					await self.screen.input()
+				except Exception: #pylint: disable=broad-except
+					self.screen.blurb.push("Error occurred in key callback")
+					traceback.print_exc()
 		except asyncio.CancelledError:
 			pass	#catch cancellations
 		finally:
