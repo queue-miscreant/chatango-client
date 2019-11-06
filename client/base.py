@@ -17,7 +17,8 @@ import traceback	#error handling without breaking stopping the client
 import inspect		#needed for binding key callbacks
 from signal import SIGINT #redirect ctrl-c
 from functools import partial
-from .display import CLEAR_FORMATTING, collen, ScrollSuggest, Coloring
+from .display import CLEAR_FORMATTING, collen, ScrollSuggest \
+	, Coloring, JustifiedColoring
 __all__ = ["quitlambda", "Box", "OverlayBase", "TextOverlay", "Manager"]
 
 _REDIRECTED_OUTPUT = "/tmp/client.log"
@@ -404,8 +405,8 @@ class OverlayBase:
 	def __init__(self, parent):
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
-		self._left = None			#text to draw in reverse video
-		self._right = None			#same but on the right side of the screen
+		self._reverse = JustifiedColoring("")	#text to draw in reverse video
+		self._ensure = 2			#number of columns reserved to the RHS in _reverse
 		self.keys = KeyContainer()
 		self.keys.screen_keys(parent)
 		#bind remaining unbound keys across classes
@@ -418,16 +419,24 @@ class OverlayBase:
 	width = property(lambda self: self.parent.width)
 	height = property(lambda self: self.parent.height)
 
-	left = property(lambda self: self._left, doc="Left side display")
+	left = property(lambda self: str(self._reverse), doc="Left side display")
 	@left.setter
 	def left(self, new):
-		self._left = new
+		color = None
+		if isinstance(new, tuple):
+			new, color = new #extract a color
+		self._reverse.setstr(new)
+		if color is not None:
+			self._reverse.insert_color(0, color)
 		self.parent.update_status()
 
-	right = property(lambda self: self._right, doc="Right side display")
+	right = property(lambda self: self._reverse.indicator, doc="Right side display")
 	@right.setter
 	def right(self, new):
-		self._right = new
+		color = None
+		if isinstance(new, tuple):
+			new, color = new #extract a color
+		self._reverse.add_indicator(new, color)
 		self.parent.update_status()
 
 	def __call__(self, lines):
@@ -808,20 +817,12 @@ class Screen: #pylint: disable=too-many-instance-attributes
 
 	def update_status(self):
 		'''Look for the highest blurb for which status has been set'''
-		room = self.width
-		left = ""
-		right = ""
 		for i in reversed(self._ins):
-			if i.left is not None or i.right is not None:
-				left = i.left or left
-				right = i.right or right
-				room -= collen(left) + collen(right)
-				if room < 1:
-					#don't even bother. update_status is run from places that might not tolerate an exception
-					return
+			reverse = i._reverse
+			if reverse:
+				just = reverse.justify(self.width, ensure_indicator=i._ensure)
+				self.write_status("\x1b[7m" + just, 3)
 				break
-		self.write_status("\x1b[7m{}{}{}\x1b[m".format(left,
-			' '*room, right), 3)
 
 	def write_status(self, string, height):
 		if not (self.active and self._candisplay):
@@ -955,7 +956,7 @@ class Manager:
 			self.screen = Screen(self, refresh_blurbs=refresh_blurbs, loop=self.loop)
 			await self.screen.resize()
 			#done for now; call coroutines waiting for preparation
-			if asyncio.is_coroutine(prepared_coroutine):
+			if asyncio.iscoroutine(prepared_coroutine):
 				await prepared_coroutine
 			#keep running key callbacks
 			while self.screen.active:

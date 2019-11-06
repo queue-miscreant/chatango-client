@@ -190,6 +190,7 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 		else:
 			pair += ";4%d" % self.COLOR_NAMES.index(back)
 		self.colors.append(pair+"m")
+		return self.defined-1
 
 	def def_effect(self, effect_on, effect_off):
 		'''Define a new effect, turned on and off with `effect_on`/`effect_off`'''
@@ -197,6 +198,7 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 			raise DisplayException("cannot define effect; a Coloring object already exists")
 		self.effects.append((effect_on, effect_off))
 		self._effects_bits = (self._effects_bits << 1) | 1
+		return len(self.effects)-1
 
 	def get_color(self, color):
 		'''insertColor without position or coloring object'''
@@ -558,6 +560,9 @@ class JustifiedColoring(Coloring):
 		self._memoargs = None
 		self._rendered = None
 
+	indicator = property(lambda self: self._indicator[0] \
+		if self._indicator is not None else "")
+
 	def __hash__(self):
 		'''Include indicator in memoize hash'''
 		return hash((self._str, self._indicator
@@ -566,6 +571,10 @@ class JustifiedColoring(Coloring):
 	def __eq__(self, other):
 		return isinstance(other, JustifiedColoring) \
 			and (hash(self) == hash(other))
+
+	def __bool__(self):
+		'''Test for emptiness'''
+		return bool(self._indicator or self._str)
 
 	def add_indicator(self, sub: str, color=None, effect=None):
 		'''
@@ -651,7 +660,7 @@ class JustifiedColoring(Coloring):
 	def justify(self, length, justchar=' ', ensure_indicator=2):
 		'''Justify string to `length` columns and add indicator'''
 		#quick memoization
-		new_hash = hash((length, justchar, ensure_indicator))
+		new_hash = hash((self, length, justchar, ensure_indicator))
 		if self._memoargs == new_hash:
 			return self._rendered
 
