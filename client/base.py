@@ -462,14 +462,12 @@ class OverlayBase:
 	#frontend methods----------------------------
 	def add(self):
 		'''Finalize setup and add overlay'''
-		#insensitive to being added again
-		if self.index is None:
+		if self.index is None:	#idempotence
 			self.parent.add_overlay(self)
 
 	def remove(self):
 		'''Finalize overlay and pop'''
-		#insensitive to being removed again
-		if self.index is not None:
+		if self.index is not None:	#idempotence
 			self.parent.pop_overlay(self)
 
 	def swap(self, new):
@@ -481,8 +479,9 @@ class OverlayBase:
 		'''
 		Add keys from preexisting functions. `new_functions` should be a dict
 		with either functions or (function, return value) tuples as values
-		If redefine is True, then will redefine pre-existing key handlers
-		''' #TODO function also binds class-level key handlers
+		If redefine is True, then will redefine pre-existing key handlers.
+		Also prioritizes binding all class-level key handlers to instance
+		'''
 		for key_name, handler in new_functions.items():
 			override = None
 			if isinstance(handler, tuple):
@@ -515,13 +514,6 @@ class OverlayBase:
 			handle.bind(_bind_immed.keys)
 			return func	#return the function to re-bind handlers
 		return ret
-
-	@classmethod
-	def add_keydoc(cls, keys, predicate=""):
-		'''Add in some new documentation from another KeyContainer instance'''
-		if not hasattr(cls, "_more_help"):
-			cls._more_help = []
-		cls._more_help.extend([predicate + i for i in dir(keys)])
 
 	def _get_help_overlay(self):
 		'''Get list of this overlay's keys'''
@@ -624,8 +616,6 @@ class Blurb:
 		self._refresh_task = None
 		self.last = 0
 		self.queue = []
-		self.left = ""
-		self.right = ""
 
 	def _push(self, blurb, timestamp):
 		'''Helper method to push blurbs and timestamp them'''
@@ -718,7 +708,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		if sys.stderr.isatty():
 			sys.stderr = sys.stdout
 
-		#pass in the control chars for ctrl-c and ctrl-z
+		#pass in the control chars for ctrl-c
 		loop.add_signal_handler(SIGINT, lambda: curses.ungetch(3))
 
 		#curses input setup
@@ -743,7 +733,8 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			for i in reversed(self._ins):
 				i.remove()
 		except: #pylint: disable=bare-except
-			print("Error occurred during shutdown:\n", traceback.format_exc())
+			print("Error occurred during shutdown:")
+			traceback.print_exc()
 		finally:
 			#return to sane mode
 			curses.echo(); curses.nocbreak(); self._screen.keypad(0)
@@ -882,14 +873,11 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			return self._ins[index]
 		return None
 
-	def get_overlays_by_class_name(self, name, highest=0):
+	def get_overlays_by_class(self, class_, highest=0):
 		'''
 		Like getElementsByClassName in a browser.
-		Returns a list of Overlays with the class name `name`
+		Returns a list of Overlays that are instances of `class_`
 		'''
-		#use string __name__s in case scripts can't get access to the method
-		if isinstance(name, type):
-			name = name.__name__
 		#limit the highest index
 		if not highest:
 			highest = len(self._ins)
@@ -897,8 +885,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		ret = []
 		for i in range(highest):
 			overlay = self._ins[i]
-			#respect inheritence
-			if name in [j.__name__ for j in type(overlay).mro()]:
+			if class_ in type(overlay).mro():	#respect inheritence
 				ret.append(overlay)
 		return ret
 
