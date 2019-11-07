@@ -237,9 +237,8 @@ class ChatangoMessage(client.Message):
 
 	#self.overlay.msg_append(ChatangoMessage(post, self, self.me, False
 	def __init__(self, post, bot, me, ishistory, alts=None): #pylint: disable=too-many-arguments
-		#and is short-circuited
-		isreply = (me is not None and (me in post.mentions)) or \
-			(alts and any(i in post.mentions for i in alts if i))
+		isreply = (me is not None and me in post.mentions) or \
+			(alts is not None and any(i in post.mentions for i in alts if i))
 
 		#remove egregiously large amounts of newlines (more than 2)
 		#also edit sections with right to left override
@@ -316,7 +315,6 @@ class ChatangoMessage(client.Message):
 		if not self.colored_at(msg_start):
 			self.insert_color(msg_start, font_color)
 		if self.reply:
-			print("COLORING REPLY", self._last_recolor)
 			self.add_global_effect(0, 1)
 		if self.history:
 			self.add_global_effect(1, 1)

@@ -200,13 +200,6 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 		self._effects_bits = (self._effects_bits << 1) | 1
 		return len(self.effects)-1
 
-	def get_color(self, color):
-		'''insertColor without position or coloring object'''
-		try:
-			return self.colors[color + self.predefined]
-		except IndexError:
-			raise DisplayException("Color definition %d not found" % color)
-
 	def raw_num(self, pair_number):
 		'''
 		Get raw pair number, without respect to number of predefined ones.
@@ -253,7 +246,6 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 		'''Gets a 256-color grayscale `color` from 0 (black) to 24 (white)'''
 		color = min(max(color, 0), 24)
 		return self.two56(color + 232) #magic, but whatever
-
 colors = _ColorManager() #pylint: disable=invalid-name
 
 class Coloring:
@@ -280,8 +272,8 @@ class Coloring:
 
 	def setstr(self, new, clear=True):
 		'''
-		Set contained string to something new. By default, also clears the
-		contained formatting.
+		Set contained string to something new.
+		By default, also clears the contained formatting.
 		'''
 		if clear:
 			self.clear()

@@ -170,8 +170,8 @@ class Message(Coloring):
 		self._mid = Message.msg_count
 		#memoization
 		self._cached_display = []
-		self._cached_hash = -1 #hash of coloring
-		self._cached_width = 0 #screen width
+		self._cached_hash = -1	#hash of coloring
+		self._cached_width = 0	#screen width
 		self._last_recolor = -1
 		Message.msg_count += 1
 
@@ -201,6 +201,7 @@ class Message(Coloring):
 		'''
 		if self.filtered: #invalidate cache
 			self._cached_display.clear()
+			self._last_recolor = -1
 			self._cached_hash = -1
 			self._cached_width = 0
 			return
@@ -216,6 +217,15 @@ class Message(Coloring):
 		self._cached_display = super().breaklines(width, self.INDENT)
 		self._cached_hash = self_hash
 		self._cached_width = width
+
+	def dump(self, prefix, coloring=False):
+		'''Dump public variables associated with the message'''
+		publics = {i: j for i, j in self.__dict__.items() \
+			if not i.startswith('_')}
+		if coloring:
+			print(repr(self), prefix, publics)
+		else:
+			print(prefix, publics)
 
 	@classmethod
 	def examine(cls, func):
