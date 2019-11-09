@@ -10,11 +10,11 @@ open_link expects an instance of base.Screen as its first argument.
 All openers are made into coroutines so that create_subprocess_exec can be
 yielded from. open_link creates a task in the Screen instance's loop
 '''
-import re
 import os	#cygwin, stupid stdout/err hack
 import sys	#same
-import asyncio
-import traceback
+import re	#link patterns, link pattern openers
+import asyncio		#subprocess spawning
+import traceback	#link opening failures
 from http.client import HTTPException	#for catching IncompleteRead
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -25,15 +25,13 @@ from .input import ConfirmOverlay
 
 IMG_ARGS = ["feh"]
 MPV_ARGS = ["mpv", "--pause"]
-if sys.platform == "cygwin":
-	#from what I can tell, there are no good command line image viewers
-	#that can handle links in windows, so I'm defaulting images to browser
-	#vlc and mpv exist for windows though, so just change client.linkopen.MPV_ARGS
-	IMG_ARGS = []
+if sys.platform in ("win32", "cygwin"):
+	#by default, BROWSER does not include `cygstart`, which is a cygwin program
+	#that will (for links) open things in the default system browser
 	if os.getenv("BROWSER") is None:
 		#prioritize cygstart for windows users
-		os.environ["BROWSER"] = os.path.pathsep.join(["cygstart", "chrome",
-			"firefox", "waterfox", "palemoon"])
+		os.environ["BROWSER"] = os.path.pathsep.join(["cygstart", "chrome"
+			, "firefox", "waterfox", "palemoon"])
 
 import webbrowser #pylint: disable=wrong-import-position, wrong-import-order
 
@@ -125,7 +123,7 @@ class DummyScreen: #pylint: disable=too-few-public-methods
 		release = lambda _: None
 
 #---------------------------------------------------------------
-class LinkDelegator: #pylint: disable=invalid-name
+class _LinkDelegator: #pylint: disable=invalid-name
 	'''
 	Class that delegates opening links to the openers, keeps track of which
 	links have been visited, and issues redraws when that updates
@@ -184,8 +182,7 @@ class LinkDelegator: #pylint: disable=invalid-name
 			del self._visit_redraw[index]
 		except ValueError:
 			pass
-
-open_link = LinkDelegator() #pylint: disable=invalid-name
+open_link = _LinkDelegator() #pylint: disable=invalid-name
 
 class opener: #pylint: disable=invalid-name
 	'''
