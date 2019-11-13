@@ -634,9 +634,7 @@ class Blurb:
 
 	def push(self, blurb=""):
 		'''Pushes blurb to the queue and timestamps the transaction.'''
-		ret = self._push(blurb, self.parent.loop.time())
-		if ret is not None:
-			self.parent.write_status(ret, 2)
+		self.parent.write_status(self._push(blurb, self.parent.loop.time()), 2)
 
 	def hold(self, blurb):
 		'''Holds blurb, preempting all `push`s until `release`'''
@@ -816,7 +814,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 				break
 
 	def write_status(self, string, height):
-		if not (self.active and self._candisplay):
+		if not (self.active and self._candisplay) or string is None:
 			return
 		self._displaybuffer.write(self._SINGLE_LINE %
 			(self.height+height, string))

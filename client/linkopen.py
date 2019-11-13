@@ -93,6 +93,9 @@ async def get_opengraph(link, *args, loop=None):
 	`value1[, value2] = get_opengraph(..., key1[, key2])` formats correctly.
 	'''
 	html = await urlopen_async(link, loop=loop)
+	if not html:
+		raise Exception(f"Curl failed for {repr(link)}")
+
 	full = {}
 	for i, j in OG_RE.findall(html.read()):
 		i = i.decode()
@@ -112,7 +115,7 @@ async def get_opengraph(link, *args, loop=None):
 			return full[args[0]]		#never try 1-tuple assignment
 		return [full[i] for i in args]	#tuple unpacking
 	except KeyError as exc:
-		raise Exception("Requested OpenGraph tags not found") from exc
+		raise ValueError("Requested OpenGraph tags not found") from exc
 
 class DummyScreen: #pylint: disable=too-few-public-methods
 	'''Dummy class for base.Screen'''
