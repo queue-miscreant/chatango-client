@@ -13,7 +13,6 @@ from collections import deque
 import pytango
 import client
 from client import linkopen
-
 __all__ = ["ChatBot", "ChatangoMessage", "ChatangoOverlay"
 	, "get_color", "get_client"]
 
@@ -145,7 +144,7 @@ def make_creds():
 	])
 	creds.add_field("options", default={
 		  "mouse":		False
-		, "linkwarn":	2
+		, "linkwarn":	linkopen.open_link.warning_count
 		, "ignoresave":	False
 		, "bell":		True
 		, "256color":	False
@@ -236,10 +235,10 @@ class ChatangoMessage(client.Message):
 	_LINE_RE = re.compile(r"^( [!#]?\w+?: (@\w* )*)?(.+)$", re.MULTILINE)
 	_QUOTE_RE = re.compile(r"@\w+?: `[^`]+`")
 
+	#self.overlay.msg_append(ChatangoMessage(post, self, self.me, False
 	def __init__(self, post, bot, me, ishistory, alts=None): #pylint: disable=too-many-arguments
-		#and is short-circuited
-		isreply = (me is not None and (me in post.mentions)) or \
-			(alts and any(i in post.mentions for i in alts if i))
+		isreply = (me is not None and me in post.mentions) or \
+			(alts is not None and any(i in post.mentions for i in alts if i))
 
 		#remove egregiously large amounts of newlines (more than 2)
 		#also edit sections with right to left override
@@ -500,14 +499,8 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 
 #List Overlay Extensions-------------------------------------------------------
 class LinkOverlay(client.VisualListOverlay):
-	'''
-	List accumulated links
-	Context is assumed to be a ChatangoOverlay with members `open_links` and
-	`last_links`
-	'''
-	def __init__(self, parent, last_links, redraw=None):
-		self._redraw_overlay = redraw
-
+	'''ListOverlay of links that renders whether they have been visited'''
+	def __init__(self, parent, last_links):
 		builder = lambda raw: list(reversed(raw))
 		super().__init__(parent, last_links
 			, modes=["default"] + linkopen.get_defaults(), builder=builder)
@@ -517,54 +510,19 @@ class LinkOverlay(client.VisualListOverlay):
 		prev_new, next_new = self.goto_lambda(find_new)
 
 		self.add_keys({
-			  "enter":	self.select
-			, "tab": 	client.override(self.select)
-			, "i":		self.open_images
+			 "i":		self.open_images
 			, "a-k":	prev_new
 			, "a-j":	next_new
 		})
 
-	#enter key
-	def select(self):
+	def _callback(self, result): #pylint: disable=method-hidden
 		'''Open link with selected opener'''
-		if not self.list:
-			return None
-		#try to get selected links
-		all_links = self.selected
-		self._open_links(all_links, self.mode)
+		linkopen.open_link(self.parent, result, self.mode)
 		self.clear()
-		return -1
-
-	@staticmethod
-	def open_links(parent, links, opener=0, redraw=None):
-		'''
-		Open a list of `links` with `opener`.
-		Optionally needs updates colors of chat_overlay
-		'''
-		try:
-			warning_links = get_client().options["linkwarn"]
-		except AttributeError:
-			warning_links = 2
-
-		def callback():
-			for i in links:
-				linkopen.open_link(parent, i, opener)
-			#don't recolor if the list is empty
-			if links and isinstance(redraw, client.ChatOverlay):
-				redraw.redo_lines()
-
-		if len(links) >= warning_links:
-			msg = "Really open {} links? (y/n)".format(len(links))
-			client.ConfirmOverlay(parent, msg, callback).add()
-		else:
-			callback()
-
-	def _open_links(self, links, opener=0):
-		return self.open_links(self.parent, links, opener, self._redraw_overlay)
 
 	def open_images(self):
 		'''Open all images that have not been visited'''
-		self._open_links([link for link in self.list \
+		linkopen.open_link(self.parent, [link for link in self.list \
 			if (linkopen.get_extension(link).lower() in ("png", "jpg", "jpeg")) \
 			and (not linkopen.open_link.is_visited(link))], self.mode)
 
@@ -639,7 +597,9 @@ def linkwarn(context):
 @linkwarn.setter
 def _(context, value):
 	try:
+		#one for saving, one for function
 		context.bot.options["linkwarn"] = int(value)
+		linkopen.open_link.warning_count = int(value)
 	except ValueError:
 		pass
 
@@ -714,7 +674,7 @@ def open_selected_links(message, overlay):
 	'''Open links in selected message'''
 	msg = message.post.post
 	all_links = linkopen.LINK_RE.findall(msg)
-	LinkOverlay.open_links(overlay.parent, all_links, redraw=overlay)
+	linkopen.open_link(overlay.parent, all_links)
 
 @ChatangoMessage.key_handler("tab")
 def	reply_to_message(message, overlay):
@@ -769,7 +729,6 @@ class ChatangoOverlay(client.ChatOverlay):
 		self.bot = bot
 		self.add_keys({
 			  "enter":		self._enter
-			, "a-g":		self.select_top
 			, "f2":			self._show_links
 			, "f3":			self._show_members
 			, "f4":			self._show_formatting
@@ -783,6 +742,8 @@ class ChatangoOverlay(client.ChatOverlay):
 			, "^g":			self.open_last_link
 			, "^r":			self.reload_client
 		})
+
+		linkopen.open_link.add_redraw_method(self.redo_lines)
 
 	def _max_select(self):
 		#when we've gotten too many messages
@@ -811,7 +772,7 @@ class ChatangoOverlay(client.ChatOverlay):
 
 	def _show_links(self):
 		'''List accumulated links'''
-		LinkOverlay(self.parent, self.last_links, self).add()
+		LinkOverlay(self.parent, self.last_links).add()
 
 	def _show_members(self):
 		'''List members of current group'''
@@ -824,18 +785,12 @@ class ChatangoOverlay(client.ChatOverlay):
 		@box.key_handler("enter")
 		def select(me): #pylint: disable=unused-variable
 			'''Reply to user'''
-			current = users[me.it].name
+			current = me.selected.name
 			if current[0] in "!#":
 				current = current[1:]
 			#reply
 			self.text.append("@%s " % current)
 			return -1
-
-		@box.key_handler("a")
-		def get_avatar(me): #pylint: disable=unused-variable
-			'''Get avatar'''
-			current = users[me.it]
-			linkopen.open_link(self.parent, current.avatar)
 
 		@box.key_handler("tab")
 		def tab(me): #pylint: disable=unused-variable
@@ -844,12 +799,18 @@ class ChatangoOverlay(client.ChatOverlay):
 			self.bot.ignores.symmetric_difference_update((current,))
 			self.redo_lines()
 
+		@box.key_handler("a")
+		def get_avatar(me): #pylint: disable=unused-variable
+			'''Get avatar'''
+			current = users[me.it]
+			linkopen.open_link(self.parent, current.avatar)
+
 		@box.line_drawer
 		def draw_ignored(_, string, i): #pylint: disable=unused-variable
 			string.setstr(format(users[i]))
 			selected = users[i].name.lower()
 			if selected in self.bot.ignores:
-				string.add_indicator('i', 3)
+				string.add_indicator('i', BEGIN_COLORS+3)
 
 		box.add()
 
@@ -961,7 +922,7 @@ class ChatangoOverlay(client.ChatOverlay):
 				try:
 					data[i] = await over.result
 				except asyncio.CancelledError:
-					self.blurb.push("Login aborted")
+					self.parent.blurb.push("Login aborted")
 					return
 			self.bot.username, self.bot.password = data
 			self.bot.creds["user"], self.bot.creds["passwd"] = data
@@ -1051,6 +1012,7 @@ async def start_client(manager, creds):
 	if creds["options"]["ignoresave"]:
 		creds.set_write("ignores")
 
+	linkopen.open_link.warning_count = creds["options"]["linkwarn"]
 	client.colors.two56on = creds["options"]["256color"]
 	manager.screen.mouse = creds["options"]["mouse"]
 

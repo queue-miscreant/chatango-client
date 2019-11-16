@@ -8,8 +8,8 @@ from collections import deque
 
 from .display import SELECT_AND_MOVE, collen, numdrawing, colors, Coloring
 from .util import LazyIterList, History
-from .base import staticize, quitlambda, override \
-	, Box, KeyContainer, OverlayBase, TextOverlay
+from .base import staticize, quitlambda, key_handler \
+	, Box, KeyException, KeyContainer, OverlayBase, TextOverlay
 from .input import ListOverlay, DisplayOverlay
 __all__ = ["CommandOverlay", "ChatOverlay", "add_message_scroller"]
 
@@ -31,11 +31,6 @@ class CommandOverlay(TextOverlay):
 		for i, j in self._command_complete.items():
 			self.text.add_command(i, j)
 		self.control_history(self.history)
-		self.add_keys({
-			  "enter":			self._run
-			, "backspace":		self._wrap_backspace
-			, "a-backspace":	quitlambda
-		})
 
 	def __call__(self, lines):
 		lines[-1] = "COMMAND"
@@ -46,12 +41,14 @@ class CommandOverlay(TextOverlay):
 			self.caller.text.append(self.CHAR_COMMAND)
 		return -1
 
+	@key_handler("backspace")
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text):
 			return -1
 		return self.text.backspace()
 
+	@key_handler("enter")
 	def _run(self):
 		'''Run command'''
 		#parse arguments like a command line: quotes enclose single args
@@ -111,7 +108,7 @@ class CommandOverlay(TextOverlay):
 				result.add()
 		except Exception as exc: #pylint: disable=broad-except
 			param.blurb.push("%s occurred in command '%s'" % (exc, name))
-			print(traceback.format_exc(), "\n")
+			traceback.print_exc()
 
 	@classmethod
 	def command(cls, name, complete=None):
@@ -128,31 +125,6 @@ class CommandOverlay(TextOverlay):
 			return func
 
 		return wrapper
-
-class EscapeOverlay(OverlayBase):
-	'''Overlay for redirecting input after \\ is pressed'''
-	replace = False
-	def __init__(self, parent, scroll):
-		super().__init__(parent)
-		add_tab = staticize(self._add_char, scroll, '\t')
-		add_newline = staticize(self._add_char, scroll, '\n')
-		add_slash = staticize(self._add_char, scroll, '\\')
-
-		self.add_keys({
-			  -1:		quitlambda
-			, 'tab':	add_tab
-			, 'enter':	add_newline
-			, 'n':		add_newline
-			, '\\':		add_slash
-			, 't':		add_tab
-		})
-		self.keys.nomouse()
-		self.keys.noalt()
-
-	@staticmethod
-	def _add_char(scroll, char):
-		scroll.append(char)
-		return -1
 
 class Message(Coloring):
 	'''
@@ -173,8 +145,9 @@ class Message(Coloring):
 		self._mid = Message.msg_count
 		#memoization
 		self._cached_display = []
-		self._cached_hash = 0
-		self._recolor_time = -1
+		self._cached_hash = -1	#hash of coloring
+		self._cached_width = 0	#screen width
+		self._last_recolor = -1
 		Message.msg_count += 1
 
 	mid = property(lambda self: self._mid)
@@ -197,22 +170,37 @@ class Message(Coloring):
 		'''
 		return False
 
-	def cache_display(self, width, recolor_time):
+	def cache_display(self, width, recolor_count):
 		'''
 		Break a message to `width` columns. Does nothing if matches last call.
 		'''
-		if self.filtered:
+		if self.filtered: #invalidate cache
 			self._cached_display.clear()
-			self._cached_hash = -1 #in CPython at least, this'll never be true
-		if self._recolor_time < recolor_time:
+			self._last_recolor = -1
+			self._cached_hash = -1
+			self._cached_width = 0
+			return
+		self_hash = self._cached_hash
+		if self._last_recolor < recolor_count:
+			#recolor message in the same way
 			self.clear()
 			self.colorize()
-			self._recolor_time = recolor_time
-		new_hash = (hash(self), width)
-		if self._cached_hash == new_hash:
+			self._last_recolor = recolor_count
+			self_hash = hash(self)
+		if self._cached_hash == self_hash and self._cached_width == width: #don't break lines again
 			return
 		self._cached_display = super().breaklines(width, self.INDENT)
-		self._cached_hash = new_hash
+		self._cached_hash = self_hash
+		self._cached_width = width
+
+	def dump(self, prefix, coloring=False):
+		'''Dump public variables associated with the message'''
+		publics = {i: j for i, j in self.__dict__.items() \
+			if not i.startswith('_')}
+		if coloring:
+			print(repr(self), prefix, publics)
+		else:
+			print(prefix, publics)
 
 	@classmethod
 	def examine(cls, func):
@@ -230,6 +218,7 @@ class Message(Coloring):
 		'''
 		Decorator for adding a key handler. Key handlers for Messages objects
 		expect signature (message, calling overlay)
+		Mouse handlers expect signature (message, calling overlay, position)
 		See OverlayBase.add_keys documentation for valid values of `key_name`
 		'''
 		if not hasattr(cls, "keys"):
@@ -237,10 +226,7 @@ class Message(Coloring):
 			#mouse callbacks don't work quite the same; they need an overlay
 			cls.keys.nomouse()
 		def ret(func):
-			cook = func
-			if override_val is not None:
-				cook = override(func, override_val)
-			cls.keys.add_key(key_name, cook)
+			cls.keys.add_key(key_name, func, return_val=override_val)
 			return func
 		return ret
 
@@ -262,8 +248,8 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._start_inner = 0	#ignore drawing this many lines in start_message
 		self._height_up = 0		#lines between start_message and the selector
 		#lazy storage
-		self._lazy_bounds = [1, 1]	#latest/earliest messages to recolor
-		self._lazy_offset = 0		#lines added since last lazy_bounds
+		self._lazy_bounds = [0, 0]	#latest/earliest messages to recolor
+		self._lazy_offset = 0		#lines added since last lazy_bounds modification
 		self._last_recolor = 0
 
 	def clear(self):
@@ -274,19 +260,22 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._start_message = 0
 		self._start_inner = 0
 		self._height_up = 0
-		self._lazy_bounds = [1, 1]
+		self._lazy_bounds = [0, 0]
 		self._lazy_offset = 0
-		self._last_recolor = 0
+		self._last_recolor += 1
 
 	def stop_select(self):
 		'''Stop selecting'''
 		if self._selector:
+			#only change the lazy bounds if our range isn't a continuous run
+			if self._start_message - self._lazy_offset \
+			 not in range(*self._lazy_bounds):
+				self._lazy_bounds = [0, 0]
 			self.can_select = True
 			self._selector = 0
 			self._start_message = 0
 			self._start_inner = 0
 			self._height_up = 0
-			self._lazy_bounds = [1, 1]
 			self._lazy_offset = 0
 			return True
 		return False
@@ -312,27 +301,24 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		msg_number = self._start_message + 1
 		ignore = self._start_inner
 		cached_range = range(*self._lazy_bounds)
-		self._lazy_bounds[0] = min(self._lazy_bounds[0] - self._lazy_offset, msg_number)
+		self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, msg_number)
 		#traverse list of lines
-		while msg_number <= len(self._all_messages):
+		while line_number <= len(lines) and msg_number <= len(self._all_messages):
 			reverse = SELECT_AND_MOVE if msg_number == self._selector else ""
 			msg = self._all_messages[-msg_number]
 			if msg_number - self._lazy_offset not in cached_range:
 				msg.cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[1] = max(self._lazy_bounds[1] - self._lazy_offset, msg_number)
-				self._lazy_offset = 0
 			#if a message is ignored, then msg.display is []
 			for line_count, line in enumerate(reversed(msg.display)):
 				if ignore > line_count:
 					continue
 				if line_number > len(lines):
-					msg_number = len(self._all_messages) + 1
 					break
 				ignore = 0
 				lines[-line_number] = reverse + line
 				line_number += 1
 			msg_number += 1
-		self._lazy_bounds[1] = max(self._lazy_bounds[1] - self._lazy_offset, msg_number)
+		self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset, msg_number)
 		self._lazy_offset = 0
 
 	def up(self, amount=1):
@@ -354,11 +340,12 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			if select > len(self._all_messages):
 				break
 			if select - self._lazy_offset not in cached_range:
+				#recache to get the correct message height
 				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[1] = max(self._lazy_bounds[1] - self._lazy_offset, select+1)
-				self._lazy_offset = 0
 			addlines += self._all_messages[-select].height
 			select += 1
+		self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset, select)
+		self._lazy_offset = 0
 		self._selector = select-1
 
 		#so at this point we're moving up `addlines` lines
@@ -410,13 +397,14 @@ class Messages: #pylint: disable=too-many-instance-attributes
 				return 0
 			if select - self._lazy_offset not in cached_range:
 				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
-				self._lazy_bounds[0] = min(self._lazy_bounds[0] - self._lazy_offset, select)
-				self._lazy_offset = 0
 			last_height = self._all_messages[-select].height
 			addlines += last_height
 			select -= 1
 
+		self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, select+1)
+		self._lazy_offset = 0
 		self._selector = select+1
+
 		#so at this point we're moving down `addlines` lines
 		self._height_up -= addlines - last_height
 		if self._height_up < last_height:
@@ -544,7 +532,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			try:
 				ret = callback(message)
 			except Exception: #pylint: disable=broad-except
-				print(traceback.format_exc(), "\n")
+				traceback.print_exc()
 				continue
 			if ret:
 				yield message, select
@@ -554,7 +542,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 	def redo_lines(self, recolor=True):
 		'''Re-apply Message coloring and redraw all visible lines'''
 		if recolor:
-			self._last_recolor = time.time()
+			self._last_recolor += 1
 		self._lazy_bounds = [self._start_message, self._start_message]
 
 class ChatOverlay(TextOverlay):
@@ -573,17 +561,6 @@ class ChatOverlay(TextOverlay):
 		self.messages = Messages(self)
 		self.history = History()
 		self.control_history(self.history)
-
-		self.add_keys({
-			  '\\':		self._replace_back
-			, 'a-k':	self.select_up
-			, 'a-j':	self.select_down
-			, "ppage":	staticize(self.select_up, 5)
-			, "npage":	staticize(self.select_down, 5)
-			, "mouse":	self._mouse
-			, "mouse-wheel-up":		self.select_up
-			, "mouse-wheel-down":	self.select_down
-		})
 
 	can_select = property(lambda self: self.messages.can_select)
 	@can_select.setter
@@ -605,7 +582,7 @@ class ChatOverlay(TextOverlay):
 		lines[-1] = separator
 
 	def _on_sentinel(self):
-		'''Input some text, or enter CommandOverlay when CHAR_CURSOR typed'''
+		'''Enter CommandOverlay when CHAR_CURSOR typed'''
 		CommandOverlay(self.parent, self).add()
 
 	def add(self):
@@ -637,12 +614,15 @@ class ChatOverlay(TextOverlay):
 	def run_key(self, chars):
 		'''Delegate running characters to a selected message that supports it'''
 		selected = self.messages.selected
-		ret = tuple()
-		if selected is not None and hasattr(selected, "keys"):
-			#pass in the message and this overlay to the handler
-			ret = selected.keys(chars, selected, self)
-		if ret == tuple():
-			ret = self.keys(chars)
+		ret = None
+		try:
+			if selected is not None and hasattr(selected, "keys"):
+				#pass in the message and this overlay to the handler
+				ret = selected.keys(chars, selected, self)
+			else:
+				raise KeyException
+		except KeyException:
+			ret = self.keys(chars, self)
 
 		#stop selecting if False is returned
 		if not ret and self.messages.stop_select():
@@ -652,22 +632,22 @@ class ChatOverlay(TextOverlay):
 			self.remove()
 		return ret
 
-	def _mouse(self, x, y, state):
-		'''Delegate mouse'''
+	@key_handler("mouse")
+	def _mouse(self, state, x, y):
+		'''Delegate mouse to message clicked on'''
 		msg, pos = self.messages.from_position(x, y)
 		if hasattr(msg, "keys"):
-			return msg.keys.mouse(x, y, state, msg, self, pos)
+			return msg.keys.mouse(msg, self, pos, state=state, x=x, y=y)
 		return 1
-
-	def _replace_back(self):
-		'''Input escape sequences for \\n, \\t, \\\\'''
-		EscapeOverlay(self.parent, self.text).add()
 
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _max_select(self):
 		self.parent.sound_bell()
 		self.can_select = 0
 
+	@key_handler("ppage", amount=5)
+	@key_handler("a-k")
+	@key_handler("mouse-wheel-up")
 	def select_up(self, amount=1):
 		'''Select message up'''
 		if not self.can_select:
@@ -679,6 +659,9 @@ class ChatOverlay(TextOverlay):
 			self._max_select()
 		return 1
 
+	@key_handler("npage", amount=5)
+	@key_handler("a-j")
+	@key_handler("mouse-wheel-down")
 	def select_down(self, amount=1):
 		'''Select message down'''
 		if not self.can_select:
@@ -690,6 +673,7 @@ class ChatOverlay(TextOverlay):
 			self.parent.update_input()
 		return 1
 
+	@key_handler("a-g")
 	def select_top(self):
 		'''Select top message'''
 		if not self.can_select:
@@ -740,33 +724,26 @@ class _MessageScrollOverlay(DisplayOverlay):
 	'''
 	def __init__(self, overlay, lazy_list, early, late):
 		self.lazy_list = lazy_list
-
-		self.msgno = lazy_list[0][1]
+		message, self.msg_index = lazy_list[0]
 		self.early = early
 		self.late = late
+		super().__init__(overlay.parent, message, Message.INDENT)
 
-		super().__init__(overlay.parent, lazy_list[0][0]
-			, Message.INDENT)
-
-		scroll_down, scroll_up, scroll_to = \
-			  lambda: self.next(-1) \
-			, lambda: self.next(1) \
-			, lambda: overlay.messages.scroll_to(self.msgno) or -1
-
+		scroll_to = lambda: overlay.messages.scroll_to(self.msg_index) or -1
 		self.add_keys({
 			  'tab':	scroll_to
 			, 'enter':	scroll_to
-			, 'N':		scroll_down
-			, 'n':		scroll_up
-			, 'a-j':	scroll_down
-			, 'a-k':	scroll_up
 		})
 
+	@key_handler('N', step=-1)
+	@key_handler('a-j', step=-1)
+	@key_handler('n', step=1)
+	@key_handler('a-k', step=1)
 	def next(self, step):
 		attempt = self.lazy_list.step(step)
 		if attempt:
 			self.change_display(attempt[0])
-			self.msgno = attempt[1]
+			self.msg_index = attempt[1]
 		elif step == 1:
 			self.parent.blurb.push(self.early)
 		elif step == -1:

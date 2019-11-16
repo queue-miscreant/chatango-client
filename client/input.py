@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 #client/input.py
-#TODO add callback overlay; if callbackOverlay.future is ever set/cancelled
-#the overlay is removed. This removes the swap in ColorOverlay
 '''
 Overlays that allow multiple input formats. Also includes InputMux, which
-provides a nice interface for modifying variables within a context.
+provides a nice interface for modifying values within a context.
 '''
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, colors \
 	, Coloring, JustifiedColoring, DisplayException
-from .base import staticize, override, quitlambda \
+from .base import staticize, quitlambda, key_handler \
 	, Box, OverlayBase, TextOverlay, SizeException
 
 __all__ = [
@@ -17,15 +15,69 @@ __all__ = [
 	, "ColorSliderOverlay", "ConfirmOverlay", "DisplayOverlay", "InputMux"
 ]
 
-def _search_cache(keys, value):
-	'''Search through iterable for value that equals `value` and return key'''
-	for i in keys:
-		if i == value:
-			return i
-	return value
+#'enter' should set the future
+#'tab' should set the future, but close the overlay
+class FutureOverlay(OverlayBase):
+	'''
+	Overlay extension that can create recurring futures and set callbacks
+	If a callback returns value other than boolean False, the overlay is removed
+	Alternatively, the "result" property can be awaited multiple times, while
+	the "exit" property will remove the overlay after the future is set
+	'''
+	def __init__(self, parent):
+		super().__init__(parent)
+		self._future = parent.loop.create_future()
+		self._future.add_done_callback(self._new_callback)
+		if not hasattr(self, "_callback"):
+			self._callback = None
+
+	@property
+	async def result(self):
+		return await self._future
+	@property
+	async def exit(self):
+		try: #await; make sure that the callback doesn't run while cancelled
+			ret = await self._future
+			self._future.remove_done_callback(self._new_callback)
+		finally:
+			self.remove()
+		return ret
+
+	def _new_callback(self, fut):
+		'''When the future is done, we need to make a new future object'''
+		if self._callback is not None:
+			try:
+				if self._callback(fut.result()):
+					self.remove()
+					return
+			except asyncio.CancelledError:
+				pass
+		self._future = self.parent.loop.create_future()
+		self._future.add_done_callback(self._new_callback)
+
+	def callback(self, func):
+		'''Decorator for a function with a single argument: the future result'''
+		if not callable(func):
+			raise TypeError(f"Callback expected callable, got {type(func)}")
+		self._callback = func
+		return func
+
+	def remove(self):
+		if not self._future.done():
+			self._future.cancel()
+		super().remove()
+
+	@key_handler("enter")
+	@key_handler("tab", override=0)
+	def set_result(self):
+		try:
+			self._future.set_result(self.selected)
+		except: #pylint: disable=bare-except
+			pass
+		return -1
 
 #DISPLAY CLASSES----------------------------------------------------------------
-class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attributes
+class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attributes
 	'''
 	Allows user to select an entry from a list. By default, the list is cloned,
 	but a callable with signature (`out_list`) that returns a `list` can be
@@ -35,8 +87,8 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 	replace = True
 	def __init__(self, parent, out_list, modes=None, builder=list):
 		super().__init__(parent)
-		self._it = 0
-		self.mode = 0
+		self._it = 0	#current list selector
+		self.mode = 0	#current 'mode'; adds some dimensionality to callback
 
 		self.raw, self._builder = out_list, builder
 		self.list = builder(self.raw)
@@ -44,57 +96,11 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		self._draw_other = None
 		self._modes = [""] if modes is None else modes
 		self._search = None
-		self._draw_cache = set()
-
-		up =	staticize(self.increment, -1,
-			doc="Up one list item")
-		down =	staticize(self.increment, 1,
-			doc="Down one list item")
-		right =	staticize(self.chmode, 1,
-			doc=("Go to next mode" if modes is not None else None))
-		left =	staticize(self.chmode, -1,
-			doc=("Go to previous mode" if modes is not None else None))
-
-		def click(_, y):
-			'''Run enter on the element of the list that was clicked'''
-			#Manipulate self.it and try_enter
-			#y in the list
-			size = self.height - 2
-			#borders
-			if not y in range(1, size+1):
-				return None
-			newit = (self.it//size)*size + (y - 1)
-			if newit >= len(self.list):
-				return None
-			self.it = newit #pylint: disable=invalid-name
-			enter_fun = self.keys["enter"]
-			if callable(enter_fun):
-				return enter_fun()
-			return None
+		self._draw_cache = {}
 
 		self.add_keys({
-			  "^r":		self.regen_list
-			, 'j':		down	#V I M
-			, 'k':		up
-			, 'l':		right
-			, 'h':		left
-			, 'H':		self.open_help
-			, 'g':		staticize(self.goto_edge, 0, doc="Go to list beginning")
-			, 'G':		staticize(self.goto_edge, 1, doc="Go to list end")
-			, '/':		self.open_search
-			, "^f":		self.open_search
-			, "n":		staticize(self.scroll_search, 1)
-			, "N":		staticize(self.scroll_search, 0)
+			 'H':		self.open_help
 			, 'q':		quitlambda
-			, "backspace":	self.clear_search
-			, "down":	down
-			, "up":		up
-			, "right":	right
-			, "left":	left
-			, "mouse-left":			click
-			, "mouse-right":		override(click)
-			, "mouse-wheel-up":		up
-			, "mouse-wheel-down":	down
 		})
 
 	it = property(lambda self: self._it
@@ -104,7 +110,7 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		self._do_move(dest)
 
 	search = property(lambda self: self._search
-		, doc="Current string to search with nN")
+		, doc="Current string to search with n/N")
 	@search.setter
 	def search(self, new):
 		status = ""
@@ -158,22 +164,18 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 			#alter the string to be drawn
 			if i+partition < len(self.list):
 				self._draw_line(row, i+partition)
-			row = _search_cache(self._draw_cache, row)
+			#assuming that assembling and justifying the line is more intensive
+			if row in self._draw_cache:
+				justified = self._draw_cache[row]
+			else:
+				justified = self.box_noform(row.justify(maxx))
+				#cache the newly justified string
+				self._draw_cache[row] = justified
 			#draw the justified string
-			lines[i+1] = self.box_noform(row.justify(maxx))
-			#and cache it
-			self._draw_cache.add(row)
+			lines[i+1] = justified
 
 		lines[-1] = self.box_bottom(self._modes[self.mode])
 		return lines
-
-	def line_drawer(self, func):
-		'''
-		Decorator to set a line drawer. Must have signature (self, line,
-		, number), where `line` is a Coloring object of a line and `number`
-		is its index in self.list
-		'''
-		self._draw_other = func
 
 	def _draw_line(self, line, number):
 		'''Callback to run to modify display of each line. '''
@@ -182,27 +184,20 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		if number == self.it:	#reverse video on selected line
 			line.add_global_effect(0)
 
+	def line_drawer(self, func):
+		'''
+		Decorator to set a line drawer. Expects signature (self, line, number),
+		where `line` is a Coloring object of a line and `number`
+		is its index in self.list
+		'''
+		self._draw_other = func
+
 	def _do_move(self, dest):
 		'''
 		Callback for setting property 'it'. Useful for when an update is needed
 		self.it changes (like VisualListOverlay)
 		'''
 		self._it = dest
-
-	#predefined list iteration methods
-	def increment(self, amt):
-		'''Move self.it by amt'''
-		if not self.list:
-			return
-		self.it = (self.it + amt) % len(self.list)
-
-	def chmode(self, amt):
-		'''Move to mode amt over, with looparound'''
-		self.mode = (self.mode + amt) % len(self._modes)
-
-	def goto_edge(self, is_end):
-		'''Move to the beginning or end of the list'''
-		self.it = int(is_end and (len(self.list)-1))
 
 	def _goto_lambda(self, func, direction, loop):
 		'''
@@ -213,7 +208,7 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		for i in range(len(self.list)-start-1 if direction else start):
 			i = (start+i+1) if direction else (start-i-1)
 			if func(i):
-				self.it = i
+				self.it = i #pylint: disable=invalid-name
 				return
 		if loop:
 			for i in range(start if direction else len(self.list)-start-1):
@@ -232,30 +227,81 @@ class ListOverlay(OverlayBase, Box): #pylint: disable=too-many-instance-attribut
 		return tuple(staticize(self._goto_lambda, func, i, loop)
 			for i in range(2))
 
+	#predefined list iteration methods
+	@key_handler("down", amt=1, doc="Down one list item")
+	@key_handler("j", amt=1, doc="Down one list item")
+	@key_handler("mouse-wheel-down", amt=1, doc="Down one list item")
+	@key_handler("up", amt=-1, doc="Up one list item")
+	@key_handler("k", amt=-1, doc="Up one list item")
+	@key_handler("mouse-wheel-up", amt=-1, doc="Up one list item")
+	def increment(self, amt):
+		'''Move self.it by amt'''
+		if not self.list:
+			return
+		self.it = (self.it + amt) % len(self.list) #pylint: disable=invalid-name
+
+	@key_handler("l", amt=1, doc="Go to next mode")
+	@key_handler("h", amt=-1, doc="Go to previous mode")
+	@key_handler("right", amt=1, doc="Go to next mode")
+	@key_handler("left", amt=-1, doc="Go to previous mode")
+	def chmode(self, amt):
+		'''Move to mode amt over, with looparound'''
+		self.mode = (self.mode + amt) % len(self._modes)
+
+	@key_handler("g", is_end=0, doc="Go to beginning of list")
+	@key_handler("G", is_end=1, doc="Go to end of list")
+	def goto_edge(self, is_end):
+		self.it = int(is_end and (len(self.list)-1))
+
+	@key_handler("mouse-left")
+	@key_handler("mouse-right", override=0)
+	def try_mouse(self, _, y):
+		'''Run enter on the element of the list that was clicked'''
+		#Manipulate self.it and try_enter
+		#y in the list
+		size = self.height - 2
+		#borders
+		if not y in range(1, size+1):
+			return None
+		newit = (self.it//size)*size + (y - 1)
+		if newit >= len(self.list):
+			return None
+		self.it = newit #pylint: disable=invalid-name
+		enter_fun = self.keys["enter"]
+		if callable(enter_fun):
+			return enter_fun()
+		return None
+
+	@key_handler("^r")
 	def regen_list(self):
 		'''Regenerate list based on raw list reference'''
 		if self.raw:
 			self.list = self._builder(self.raw)
 
+	@key_handler('/')
+	@key_handler("^f")
 	def open_search(self):
 		'''Open a search window'''
 		search = InputOverlay(self.parent)
 		search.text.setnonscroll('/')
-		def callback(value):
+		@search.callback
+		def _(value):
 			self.search = str(value)
-			self.scroll_search(1)
-		search.callback(callback)
+			self.scroll_search.bound(self, 1)
 		search.add()
 
+	@key_handler("backspace")
 	def clear_search(self):
 		'''Clear search'''
 		self.search = ""
 
+	@key_handler("n", direction=1)
+	@key_handler("N", direction=0)
 	def scroll_search(self, direction):
 		'''Scroll through search index'''
 		def goto(index):
-			value = self.list[index]
-			if isinstance(value, str) and self.search is not None:
+			value = str(self.list[index])
+			if value and self.search is not None:
 				return value.lower().find(self.search.lower()) != -1
 			return False
 		self._goto_lambda(goto, direction, True)
@@ -268,12 +314,6 @@ class VisualListOverlay(ListOverlay, Box):
 		self._selected = set()
 		self._select_buffer = set()
 		self._start_select = -1
-
-		self.add_keys({
-			  'q':	self.clear_quit
-			, 's':	self.toggle
-			, 'v':	self.toggle_select
-		})
 
 	@property
 	def current(self):
@@ -309,10 +349,16 @@ class VisualListOverlay(ListOverlay, Box):
 		self._select_buffer = set()
 		self._start_select = -1
 
+	def _selected_index(self):
+		'''Get list (set) of selected and buffered indices'''
+		return self._selected.symmetric_difference(self._select_buffer)
+
+	@key_handler('s')
 	def toggle(self):
 		'''Toggle the current line'''
 		self._selected.symmetric_difference_update((self.it,))
 
+	@key_handler('v')
 	def toggle_select(self):
 		'''Toggle visual mode selecting'''
 		if self._start_select + 1:	#already selecting
@@ -321,13 +367,10 @@ class VisualListOverlay(ListOverlay, Box):
 			self._select_buffer = set()
 			self._start_select = -1
 			return
-		self.toggle()
+		self._selected.symmetric_difference_update((self.it,))
 		self._start_select = self.it
 
-	def _selected_index(self):
-		'''Get list (set) of selected and buffered indices'''
-		return self._selected.symmetric_difference(self._select_buffer)
-
+	@key_handler('q')
 	def clear_quit(self):
 		'''Clear the selection or quit the overlay'''
 		if self._select_buffer or self._selected:
@@ -342,7 +385,6 @@ class ColorOverlay(ListOverlay, Box):
 		"cyan", "turquoise", "blue", "purple", "magenta", "pink", "color sliders"]
 
 	def __init__(self, parent, initcolor=None):
-		self._spectrum = self._genspectrum()
 		super().__init__(parent, self._COLOR_LIST, self._SELECTIONS)
 		self.initcolor = [127, 127, 127]
 		self._callback = None
@@ -356,7 +398,7 @@ class ColorOverlay(ListOverlay, Box):
 			divs = [divmod(i*5/255, 1) for i in initcolor]
 			#if each error is low enough to be looked for
 			if all(i[1] < .05 for i in divs):
-				for i, j in enumerate(self._spectrum[:3]):
+				for i, j in enumerate(self.SPECTRUM[:3]):
 					try:
 						find = j.index(tuple(int(k[0]) for k in divs))
 						self.it = find
@@ -366,24 +408,23 @@ class ColorOverlay(ListOverlay, Box):
 						pass
 			else:
 				self.it = len(self._COLOR_LIST)-1
-		self.add_keys({
-			  'tab':	self._select
-			, 'enter':	self._select
-			, ' ':	self._select
-		})
 
-	def _select(self):
-		'''Open the sliders or run the callback with the selected color'''
+	def _new_callback(self, fut):
+		'''Add Color slider overlay if the right element's selected'''
 		if self.it == 12:
-			return self.open_sliders()
-		return self._callback(self.color)
+			further_input = ColorSliderOverlay(self.parent, self.initcolor)
+			further_input.callback(self._callback)
+			self.swap(further_input)
+			return
+		super()._new_calllback(fut)
 
-	def callback(self, callback):
-		'''
-		Set callback when color is selected. Callback should have signature
-		(color), where `color` is a RGB 3-tuple
-		'''
-		self._callback = callback
+	@property
+	def selected(self):
+		'''Retrieve color as RGB 3-tuple'''
+		which = self.SPECTRUM[self.mode][self.it]
+		if self.mode == 3:
+			return (255 * which/ 12 for i in range(3))
+		return tuple(int(i*255/5) for i in which)
 
 	def _draw_line(self, line, number):
 		'''Add color samples to the end of lines'''
@@ -391,7 +432,7 @@ class ColorOverlay(ListOverlay, Box):
 		#reserved for color sliders
 		if number == len(self._COLOR_LIST)-1 or not colors.two56on:
 			return
-		which = self._spectrum[self.mode][number]
+		which = self.SPECTRUM[self.mode][number]
 		if self.mode == 3: #grayscale
 			color = colors.grayscale(number * 2)
 		else:
@@ -401,22 +442,8 @@ class ColorOverlay(ListOverlay, Box):
 		except DisplayException:
 			pass
 
-	@property
-	def color(self):
-		'''Retrieve color as RGB 3-tuple'''
-		which = self._spectrum[self.mode][self.it]
-		if self.mode == 3:
-			return (255 * which/ 12 for i in range(3))
-		return tuple(int(i*255/5) for i in which)
-
-	def open_sliders(self):
-		'''Swap with a ColorSliderOverlay and defer callback'''
-		further_input = ColorSliderOverlay(self.parent, self.initcolor)
-		further_input.callback(self._callback)
-		self.swap(further_input)
-
-	@staticmethod
-	def _genspectrum():
+	@classmethod
+	def genspectrum(cls):
 		'''
 		Create colors that correspond to values of _COLOR_LIST, as well as
 		as tints, shades, and 12-step-grayscale
@@ -440,9 +467,10 @@ class ColorOverlay(ListOverlay, Box):
 			for i in spectrum]
 		grayscale = range(12)
 
-		return [spectrum, shade, tint, grayscale]
+		cls.SPECTRUM = [spectrum, shade, tint, grayscale]
+ColorOverlay.genspectrum()
 
-class ColorSliderOverlay(OverlayBase, Box):
+class ColorSliderOverlay(FutureOverlay, Box):
 	'''Display 3 bars for red, green, and blue.'''
 	replace = True
 	NAMES = ["Red", "Green", "Blue"]
@@ -452,33 +480,13 @@ class ColorSliderOverlay(OverlayBase, Box):
 		initcolor = initcolor if initcolor is not None else [127, 127, 127]
 		if not isinstance(initcolor, (tuple, list)):
 			raise TypeError("initcolor must be list or tuple")
-		self.color = initcolor.copy()
+		self._color = list(initcolor)
 		self._update_text()
 		self._rgb = 0
-		self._callback = None
 
-		increase = staticize(self.increment, 1)
-		decrease = staticize(self.increment, -1)
+		self.add_keys({'q':		quitlambda})
 
-		next_bar = staticize(self.chmode, 1)
-		prev_bar = staticize(self.chmode, -1)
-
-		self.add_keys({
-			  'enter':	self._select
-			, 'q':		quitlambda
-			, 'k':		increase
-			, 'j':		decrease
-			, 'l':		next_bar
-			, 'h':		prev_bar
-			, 'up':		increase
-			, 'down':	decrease
-			, 'ppage':	staticize(self.increment, 10)
-			, 'npage':	staticize(self.increment, -10)
-			, "home":	staticize(self.increment, 255)
-			, "end":	staticize(self.increment, -255)
-			, "right":	next_bar
-			, "left":	prev_bar
-		})
+	selected = property(lambda self: tuple(self._color))
 
 	def __call__(self, lines):
 		'''Display 3 bars, their names, values, and string in hex'''
@@ -491,7 +499,7 @@ class ColorSliderOverlay(OverlayBase, Box):
 			string = ""
 			#draw on this line (ratio of space = ratio of value to 255)
 			for j in range(3):
-				if (space-i)*255 < (self.color[j]*space):
+				if (space-i)*255 < (self._color[j]*space):
 					string += colors.RGB_COLUMNS[j]
 				string += ' ' * wide + CLEAR_FORMATTING + ' '
 			#justify (including escape sequence length)
@@ -504,40 +512,45 @@ class ColorSliderOverlay(OverlayBase, Box):
 				names += SELECT
 				vals += SELECT
 			names += self.NAMES[i].center(wide) + CLEAR_FORMATTING
-			vals += str(self.color[i]).center(wide) + CLEAR_FORMATTING
+			vals += str(self._color[i]).center(wide) + CLEAR_FORMATTING
 		lines[-5] = self.box_part(names) #4 lines
 		lines[-4] = self.box_part(vals) #3 line
 		lines[-3] = sep #2 lines
 		lines[-2] = self.box_part(format(self._colored_text).rjust(3*(wide+1)//2)) #1
 		lines[-1] = self.box_bottom() #last line
 
-	def _select(self):
-		'''Run callback'''
-		return self._callback(tuple(self.color))
-
-	def callback(self, callback):
-		self._callback = callback
-
 	#predefined self-traversal methods
+	@key_handler('up', amt=1, doc="Increase selected color by 1")
+	@key_handler('k', amt=1, doc="Increase selected color by 1")
+	@key_handler('ppage', amt=10, doc="Increase selected color by 10")
+	@key_handler('home', amt=255, doc="Set color value to 255")
+	@key_handler('down', amt=-1, doc="Decrease selected color by 1")
+	@key_handler('j', amt=-1, doc="Decrease selected color by 1")
+	@key_handler('npage', amt=-10, doc="Decrease selected color by 10")
+	@key_handler('end', amt=-255, doc="Set color value to 0")
 	def increment(self, amt):
 		'''Increase the selected color by amt'''
-		self.color[self._rgb] = max(0, min(255, self.color[self._rgb] + amt))
+		self._color[self._rgb] = max(0, min(255, self._color[self._rgb] + amt))
 		self._update_text()
 
+	@key_handler('h', amt=-1, doc="Go to color to left")
+	@key_handler('left', amt=-1, doc="Go to color to left")
+	@key_handler('l', amt=1, doc="Go to color to right")
+	@key_handler('right', amt=1, doc="Go to color to right")
 	def chmode(self, amt):
 		'''Go to the color amt to the right'''
 		self._rgb = (self._rgb + amt) % 3
 
 	def _update_text(self):
-		self._colored_text = Coloring(self.to_hex(self.color))
-		self._colored_text.insert_color(0, colors.two56(self.color))
+		self._colored_text = Coloring(self.to_hex(self._color))
+		self._colored_text.insert_color(0, colors.two56(self._color))
 
 	@staticmethod
 	def to_hex(color):
 		'''Get color in hex form'''
 		return ''.join("{:02X}".format(int(i)) for i in color)
 
-class InputOverlay(TextOverlay, Box):
+class InputOverlay(TextOverlay, FutureOverlay, Box):
 	'''
 	An overlay to retrieve input from the user.
 	Can either use `await this.result` or set a callback with `callback`
@@ -545,8 +558,6 @@ class InputOverlay(TextOverlay, Box):
 	replace = False
 	def __init__(self, parent, prompt=None, password=False, default=""):
 		super().__init__(parent)
-		self._future = parent.loop.create_future()
-		self._callback = None
 
 		if prompt is None:
 			self._prompt, self._prompts = None, []
@@ -557,14 +568,9 @@ class InputOverlay(TextOverlay, Box):
 
 		self.text.setstr(default)
 		self.text.password = password
-		self.add_keys({
-			  '^d':	quitlambda
-			, '^w':	quitlambda
-			, 10:	self._finish
-			, 127:	self._wrap_backspace
-		})
+		self.add_keys({'^w':	quitlambda})
 
-	result = property(lambda self: self._future)
+	selected = property(lambda self: str(self.text))
 
 	def __call__(self, lines):
 		'''Display the prompt in a box roughly in the middle'''
@@ -583,35 +589,16 @@ class InputOverlay(TextOverlay, Box):
 	def resize(self, newx, newy):
 		'''Resize prompts'''
 		super().resize(newx, newy)
-		self._prompts = self._prompt.breaklines(self.width-2)
+		if self._prompt is None:
+			return
+		self._prompts = self._prompt.breaklines(newx-2)
 
+	@key_handler("backspace") 
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
 		if not str(self.text):
 			return -1
 		return self.text.backspace()
-
-	def _finish(self):
-		'''Regular stop (i.e, with enter)'''
-		self._future.set_result(str(self.text))
-		return -1
-
-	def remove(self):
-		'''Cancel future unless future completed'''
-		if not self._future.done():
-			self._future.cancel()
-		super().remove()
-
-	def callback(self, func):
-		'''Attach a callback to the future'''
-		def ret(future):
-			if future.cancelled():
-				return
-			if asyncio.iscoroutinefunction(func):
-				self.parent.loop.create_task(func(future.result()))
-			else:
-				func(future.result())
-		self._future.add_done_callback(ret)
 
 class DisplayOverlay(OverlayBase, Box):
 	'''Overlay that displays a message in a box'''
@@ -625,16 +612,9 @@ class DisplayOverlay(OverlayBase, Box):
 		self._begin = 0
 		self.change_display(strings)
 
-		up = staticize(self.scroll, -1, doc="Scroll downward")
-		down = staticize(self.scroll, 1, doc="Scroll upward")
-
 		self.add_keys({
-			  'k':		up
-			, 'j':		down
-			, 'q':		quitlambda
+			 'q':		quitlambda
 			, 'H':		self.open_help
-			, "up":		up
-			, "down":	down
 		})
 
 	def __call__(self, lines):
@@ -653,6 +633,8 @@ class DisplayOverlay(OverlayBase, Box):
 
 	def resize(self, newx, newy):
 		'''Resize message'''
+		if self._rawlist is None:
+			return
 		self._formatted = [j for i in self._rawlist
 			for j in i.breaklines(newx-2, outdent=self._outdent)]
 		# if bigger than the box holding it, stop drawing the overlay behind it
@@ -676,30 +658,31 @@ class DisplayOverlay(OverlayBase, Box):
 	def set_outdent(self, outdent):
 		self._outdent = outdent
 
-	def scroll(self, amount):
+	@key_handler('k', amt=-1, doc="Scroll upward")
+	@key_handler('up', amt=-1, doc="Scroll upward")
+	@key_handler('j', amt=1, doc="Scroll downward")
+	@key_handler('down', amt=1, doc="Scroll downward")
+	def scroll(self, amt):
 		maxlines = self.height-2
 		if len(self._formatted) <= maxlines:
 			return
-		self._begin = min(max(0, self.begin+amount), maxlines-len(self._formatted))
+		self._begin = min(max(0, self.begin+amt), maxlines-len(self._formatted))
 
 class TabOverlay(OverlayBase):
 	'''
 	Overlay for 'tabbing' through things.
 	Displays options on lines nearest to the input scrollable
 	'''
-	def __init__(self, parent, lis, start=0, rows=5): #pylint: disable=too-many-arguments
+	def __init__(self, parent, lis, *args, start=0, rows=5): #pylint: disable=too-many-arguments
 		super().__init__(parent)
 		self.list = lis
 		self._it = min(start, len(self.list)-1) #pylint: disable=invalid-name
 		self._rows = min(len(self.list), rows, self.height)
 		self._callback = None
 		self.replace = self._rows == self.height
-
-		self.add_keys({
-			 -1:		self.remove
-			, "tab":	staticize(self.move_it, 1)
-			, "btab":	staticize(self.move_it, -1)
-		})
+		for i, j in enumerate(args):
+			self.key_handler(j, direction=(1 - 2*(i % 2)))(self.move_it.bound)
+		self.add_keys({-1:		quitlambda})
 	it = property(lambda self: self._it)
 
 	def __call__(self, lines):
@@ -728,6 +711,8 @@ class TabOverlay(OverlayBase):
 		'''Add callback when tab or shift-tab was clicked.'''
 		self._callback = callback
 
+	@key_handler('tab', direction=1, doc="Tab forward")
+	@key_handler('btab', direction=-1, doc="Tab backward")
 	def move_it(self, direction):
 		self._it = (self._it + direction) % len(self.list)
 		if callable(self._callback):
@@ -750,7 +735,7 @@ class ConfirmOverlay(OverlayBase):
 
 		self.add_keys({			#run these in order
 			  'y':	call
-			, 'n':	override(self.parent.blurb.release, -1)
+			, 'n':	(self.parent.blurb.release, -1)
 		})
 		self.keys.nomouse()
 		self.keys.noalt()
@@ -784,16 +769,16 @@ class InputMux:
 			, [self.indices[i].doc for i in self.ordering])
 		overlay.line_drawer(self._drawing)
 
-		@overlay.key_handler("tab", make_method=True)
-		@overlay.key_handler("enter", make_method=True)
-		@overlay.key_handler(' ', make_method=True)
+		@overlay.key_handler("enter")
+		@overlay.key_handler(' ')
+		@overlay.key_handler("tab")
 		def _(me):
 			"Change value"
 			return self.indices[self.ordering[me.it]].select()
 
 		overlay.add_keys({
 			'q':	staticize(self.try_warn, parent, overlay
-				, doc=quitlambda.__doc__)
+				, doc=quitlambda.doc)
 		})
 
 		overlay.add()
@@ -805,17 +790,32 @@ class InputMux:
 		if element.draw and element.get:
 			element.draw(self, element.get(self.context), string)
 
-	class _ListEl:
+	def try_warn(self, parent, overlay):
+		'''Exit, warning about unconfirmed values'''
+		if self.warn_exit:
+			ConfirmOverlay(parent, "Really close menu? (y/n)"
+				, overlay.remove).add()
+			return None
+		return -1
+
+	def listel(self, data_type):
 		'''
 		Decorator to create an input field with a certain data type.
-		dataType can be one of "str", "color", "enum", "bool", or "button"
-		The __init__ is akin to a `@property` decorator: as a getter;
-		subsequent setters and drawers can be added from the return value
-		(bound to func.__name__); i.e. `@func.setter...`
+		`data_type` can be one of "str", "color", "enum", "bool", or "button"
+		When a function is decorated with a particular data type, it acts as a
+		getter for a list element, similar to a `property` getter.
+		Setters and drawers can be added in the same way as properties
 
 		func should have signature:
 			(context:	the context as supplied by the InputMux)
 		The name of the field in the list will be derived from func.__doc__
+		'''
+		return staticize(self._ListEl, self, data_type)
+
+	class _ListEl:
+		'''
+		Backend class.
+		Use `listel` to abstract away the `parent` argument in __init__
 		'''
 		def __init__(self, parent, data_type, func):
 			self.name = func.__name__
@@ -851,7 +851,8 @@ class InputMux:
 			self._set = None
 
 		def setter(self, func):
-			'''Decorator to set setter. Setters should have the signature:
+			'''
+			Decorator to set setter. Setters should have the signature:
 				(context:	the context supplied by the InputMux
 				,value:		the new value after input)
 			'''
@@ -868,16 +869,16 @@ class InputMux:
 			self.draw = func
 			return self
 
-		def select(self, *args):
+		def select(self):
 			'''Open input overlay to modify value'''
 			further_input = None
 			if self._type == "color":
 				further_input = ColorOverlay(self.parent.parent
 					, self.get(self.parent.context))			#initial color
 				@further_input.callback
-				def callback(rgb): #pylint: disable=unused-variable
+				def _(rgb): #pylint: disable=unused-variable
 					self._set(self.parent.context, rgb)
-					return -1
+					return 1
 
 			elif self._type == "str":
 				further_input = InputOverlay(self.parent.parent
@@ -893,12 +894,10 @@ class InputMux:
 					, enumeration)		#enum entries
 				further_input.it = index
 
-				@further_input.key_handler("tab")
-				@further_input.key_handler("enter")
-				@further_input.key_handler(' ')
-				def callback(me):
-					self._set(self.parent.context, me.it)
-					return -1
+				@further_input.callback
+				def _(_): #neither the name of the function nor the value matter
+					self._set(self.parent.context, further_input.it)
+					return 1
 
 			elif self._type == "bool":
 				self._set(self.parent.context,
@@ -936,19 +935,3 @@ class InputMux:
 			'''Default bool drawer'''
 			coloring.add_indicator('y' if value else 'n'
 				, colors.green_text if value else colors.red_text)
-
-	def listel(self, data_type):
-		'''
-		Frontend decorator to create a _ListEl. Abstracts away the need to
-		supply `parent` and  transforms the decorator to be of the form
-		@listel(data_type) (=> _ListEl(self, data_type, __decorated_func__))
-		'''
-		return staticize(self._ListEl, self, data_type)
-
-	def try_warn(self, parent, overlay):
-		'''Exit, warning about unconfirmed values'''
-		if self.warn_exit:
-			ConfirmOverlay(parent, "Really close menu? (y/n)"
-				, overlay.remove).add()
-			return None
-		return -1
