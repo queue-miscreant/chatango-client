@@ -671,7 +671,7 @@ class JustifiedColoring(Coloring):
 		if ensure_indicator:
 			#trim if too many columns
 			if columns > ensure_indicator:
-				final_column = columnslice(sub, room-1)
+				final_column = columnslice(sub, room-2)
 				if final_column < len(sub):
 					sub = sub[:final_column] + self._ELLIPSIS
 				else:
