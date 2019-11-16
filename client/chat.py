@@ -126,31 +126,6 @@ class CommandOverlay(TextOverlay):
 
 		return wrapper
 
-class EscapeOverlay(OverlayBase):
-	'''Overlay for redirecting input after \\ is pressed'''
-	replace = False
-	def __init__(self, parent, scroll):
-		super().__init__(parent)
-		add_tab = staticize(self._add_char, scroll, '\t')
-		add_newline = staticize(self._add_char, scroll, '\n')
-		add_slash = staticize(self._add_char, scroll, '\\')
-
-		self.add_keys({
-			  -1:		quitlambda
-			, 'tab':	add_tab
-			, 'enter':	add_newline
-			, 'n':		add_newline
-			, '\\':		add_slash
-			, 't':		add_tab
-		})
-		self.keys.nomouse()
-		self.keys.noalt()
-
-	@staticmethod
-	def _add_char(scroll, char):
-		scroll.append(char)
-		return -1
-
 class Message(Coloring):
 	'''
 	Virtual wrapper class around "Coloring" objects. Allows certain kinds of
@@ -664,11 +639,6 @@ class ChatOverlay(TextOverlay):
 		if hasattr(msg, "keys"):
 			return msg.keys.mouse(msg, self, pos, state=state, x=x, y=y)
 		return 1
-
-	@key_handler('\\')
-	def _replace_back(self):
-		'''Input escape sequences for \\n, \\t, \\\\'''
-		EscapeOverlay(self.parent, self.text).add()
 
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _max_select(self):

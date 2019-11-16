@@ -29,6 +29,10 @@ def staticize(func, *args, doc=None, **kwargs):
 	ret.__doc__ = doc or func.__doc__
 	return ret
 
+def from_bytes(chars):
+	'''Allow unicode input by decoding bytes, filtering out curses escapes'''
+	return bytes(filter(lambda x: x < 256, chars)).decode()
+
 class KeyException(Exception):
 	'''Exception caught in `Screen.input` to capture failed keypresses'''
 
@@ -95,11 +99,11 @@ class KeyContainer:
 			, curses.KEY_RESIZE:	self._BoundKey(screen.schedule_resize)
 		})
 
-	def __call__(self, chars, *args):
+	def __call__(self, chars, *args, raise_=True): #pylint: disable=inconsistent-return-statements
 		'''
 		Run a key's callback. This expects a single argument: a list of numbers
 		terminated by -1. Subsequent arguments are passed to the key handler.
-		Returns singleton tuple if there is no handler, otherwise propagates
+		Raises KeyException if there is no handler, otherwise propagates
 		handler's return
 		'''
 		try:
@@ -113,7 +117,8 @@ class KeyContainer:
 		#capture the rest of inputs, as long as they begin printable
 		if -1 in self._keys and (char in range(32, 255) or char in (9, 10)):
 			return self._keys[-1](chars[:-1], *args)
-		raise KeyException
+		if raise_:
+			raise KeyException
 
 	def _callalt(self, *args):
 		'''Run a alt-key's callback'''
@@ -128,7 +133,8 @@ class KeyContainer:
 		args = args[:-1]
 		if chars[0] != -1:
 			#control not returned to loop until later
-			asyncio.get_event_loop().call_soon(self, chars, *args)
+			asyncio.get_event_loop().call_soon(
+				partial(self, chars, *args, _raise=False))
 		try:
 			if self._last_mouse is not None:
 				x, y, state = self._last_mouse	#pylint: disable=unpacking-non-sequence
@@ -219,24 +225,6 @@ class KeyContainer:
 		KeyContainer._last_mouse = (x, y, state)
 		return self._callmouse(*args, [-1])
 
-	def copy_from(self, keys, redefine=False):
-		'''
-		Copy keys from another KeyContainer instance.
-		Keys are only redefined if `redefine` is True
-		'''
-		#mouse
-		for copy_mouse, handler in keys._mouse.items():
-			if redefine or copy_mouse not in self._mouse:
-				self._mouse[copy_mouse] = handler
-		#alt
-		for copy_alt, handler in keys._altkeys.items():
-			if redefine or copy_alt not in self._altkeys:
-				self._altkeys[copy_alt] = handler
-		#the rest
-		for copy_key, handler in keys._keys.items():
-			if redefine or copy_key not in self._keys:
-				self._keys[copy_key] = handler
-
 	def nomouse(self):
 		'''Unbind the mouse from _keys'''
 		if curses.KEY_MOUSE in self._keys:
@@ -255,7 +243,7 @@ class KeyContainer:
 				old = cls._VALID_KEYNAMES[old]
 			if isinstance(new, str):
 				new = cls._VALID_KEYNAMES[new]
-		except:
+		except KeyError:
 			raise ValueError("%s or %s is an invalid key name"%(old, new))
 		cls._KEY_LUT[old] = new
 
@@ -287,7 +275,10 @@ class KeyContainer:
 		def __eq__(self, other):
 			return other == self._func
 
-	def add_key(self, key_name, func, pass_keys=False, return_val=None, doc=None):
+		def __repr__(self):
+			return f"BoundKey({repr(self._func)}) at {hex(id(self))}"
+
+	def add_key(self, key_name, func, pass_keys=False, return_val=None, doc=None): #pylint: disable=too-many-arguments
 		'''Key addition that supports some nicer names than ASCII numbers'''
 		if not isinstance(func, self._BoundKey):
 			func = self._BoundKey(func, pass_keys, return_val, doc)
@@ -325,14 +316,8 @@ class key_handler: #pylint: disable=invalid-name
 				continue
 			try:
 				bind = staticize(self.bound, **keywords)
-				if key_name == -1:
-					keys.add_key(key_name, bind, True, override, doc=doc)
-					continue
-				if isinstance(key_name, str) and key_name.startswith("mouse"):
-					keys.add_key(key_name, bind, return_val=override, doc=doc)
-					continue
-				keys.add_key(key_name, bind
-					, return_val=override, doc=doc)
+				pass_keys = (key_name == -1) #pass keys only if -1 ("input")
+				keys.add_key(key_name, bind, pass_keys, override, doc)
 			except KeyError:
 				print("Failed binding {} to {} ".format(key_name, self.bound))
 
@@ -385,16 +370,6 @@ class Box:
 		'''Returns a properly sized string of the bottom of a box'''
 		return self.box_format(self.CHAR_BTML, fmt, self.CHAR_BTMR
 			, self.CHAR_HSPACE)
-
-class _NScrollable(ScrollSuggest):
-	'''A scrollable that updates a Screen on changes'''
-	def __init__(self, parent):
-		super().__init__(parent.width)
-		self.parent = parent
-
-	def _onchanged(self):
-		super()._onchanged()
-		self.parent.update_input()
 
 #OVERLAYS----------------------------------------------------------------------
 class OverlayBase:
@@ -489,7 +464,7 @@ class OverlayBase:
 			elif isinstance(handler, key_handler):
 				handler = handler.func
 			if redefine or key_name not in self.keys:
-				self.keys.add_key(key_name, handler, return_val=override)
+				self.keys.add_key(key_name, handler, key_name == -1, override)
 
 		for handler in self.__class__.__dict__.values():
 			if isinstance(handler, key_handler):
@@ -536,11 +511,31 @@ class OverlayBase:
 		'''Open help overlay'''
 		self._get_help_overlay().add()
 
+class EscapeOverlay(OverlayBase):
+	'''Overlay for redirecting input after \\ is pressed'''
+	replace = False
+	def __init__(self, parent, callback):
+		super().__init__(parent)
+		add_tab = staticize(callback, '\t')
+		add_newline = staticize(callback, '\n')
+		add_slash = staticize(callback, '\\')
+
+		self.add_keys({
+			  -1:		(lambda _, x: callback(from_bytes(x)), -1)
+			, 'tab':	(add_tab, -1)
+			, 'enter':	(add_newline, -1)
+			, 'n':		(add_newline, -1)
+			, '\\':		(add_slash, -1)
+			, 't':		(add_tab, -1)
+		})
+		self.keys.nomouse()
+		self.keys.noalt()
+
 class TextOverlay(OverlayBase):
 	'''Virtual overlay with text input (at bottom of screen)'''
 	def __init__(self, parent=None):
 		super().__init__(parent)
-		self.text = _NScrollable(self.parent)
+		self.text = self._NScrollable(parent)
 		#ASCII code of sentinel char
 		self._sentinel = 0
 
@@ -581,11 +576,12 @@ class TextOverlay(OverlayBase):
 		if self._sentinel and not str(self.text) and len(chars) == 1 and \
 			chars[0] == self._sentinel:
 			return self._on_sentinel()
-		#allow unicode input by decoding bytes, filtering out curses escapes
-		buffer = bytes(filter(lambda x: x < 256, chars))
-		if not buffer:
-			return None
-		return self.text.append(self._transform_paste(buffer.decode()))
+		return self.text.append(self._transform_paste(from_bytes(chars)))
+
+	@key_handler('\\')
+	def _replace_back(self):
+		'''Input escape sequences for \\n, \\t, \\\\'''
+		EscapeOverlay(self.parent, self.text.append).add()
 
 	def _on_sentinel(self):
 		'''Callback run when self._sentinel is typed and self.text is empty'''
@@ -605,6 +601,16 @@ class TextOverlay(OverlayBase):
 			  "up":		nexthist
 			, "down":	prevhist
 		})
+
+	class _NScrollable(ScrollSuggest):
+		'''A scrollable that updates a Screen on changes'''
+		def __init__(self, parent):
+			super().__init__(parent.width)
+			self.parent = parent
+
+		def _onchanged(self):
+			super()._onchanged()
+			self.parent.update_input()
 
 #OVERLAY MANAGER----------------------------------------------------------------
 class Blurb:
@@ -626,7 +632,7 @@ class Blurb:
 			self.queue = blurb.breaklines(self.parent.width)
 		#holding a message?
 		if self.last < 0:
-			return None
+			return ""
 		#next blurb is either a pop from the last message or nothing
 		blurb = self.queue.pop(0) if self.queue else ""
 		self.last = timestamp
@@ -788,12 +794,6 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			self._displaybuffer.write(i+"\x1b[K\n\r")
 		self._displaybuffer.write(self._RETURN_CURSOR)
 
-	def schedule_display(self):
-		self.loop.create_task(self.display())
-
-	def schedule_resize(self):
-		self.loop.create_task(self.resize())
-
 	def update_input(self):
 		'''Input display backend'''
 		if not (self.active and self._candisplay):
@@ -814,10 +814,17 @@ class Screen: #pylint: disable=too-many-instance-attributes
 				break
 
 	def write_status(self, string, height):
-		if not (self.active and self._candisplay) or string is None:
+		'''Backend to draw below overlays'''
+		if not (self.active and self._candisplay):
 			return
 		self._displaybuffer.write(self._SINGLE_LINE %
 			(self.height+height, string))
+
+	def schedule_display(self):
+		self.loop.create_task(self.display())
+
+	def schedule_resize(self):
+		self.loop.create_task(self.resize())
 
 	def redraw_all(self):
 		'''Force redraw'''
@@ -877,22 +884,16 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		Returns a list of Overlays that are instances of `class_`
 		'''
 		#limit the highest index
-		if not highest:
-			highest = len(self._ins)
+		highest = len(self._ins) - highest
 
-		ret = []
-		for i in range(highest):
-			overlay = self._ins[i]
-			if class_ in type(overlay).mro():	#respect inheritence
-				ret.append(overlay)
-		return ret
+		return [j for _, j in zip(range(highest), reversed(self._ins))
+			if class_ in type(j).mro()] #respect inheritence
 
 	#Loop Coroutines------------------------------------------------------------
 	async def input(self):
 		'''
 		Wait (non-blocking) for character, then run an overlay's key handler.
-		If the key handler returns -1, the overlay is removed. If its return
-		value is boolean True, re-displays the screen.
+		If its return value is boolean True, re-displays the screen.
 		'''
 		nextch = -1
 		while nextch == -1:
