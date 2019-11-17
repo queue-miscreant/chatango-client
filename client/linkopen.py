@@ -124,6 +124,10 @@ class DummyScreen: #pylint: disable=too-few-public-methods
 		push = lambda _: None
 		hold = lambda _: None
 		release = lambda _: None
+	def add_overlay(self, other):
+		pass
+	def pop_overlay(self, other):
+		pass
 
 #---------------------------------------------------------------
 class _LinkDelegator: #pylint: disable=invalid-name

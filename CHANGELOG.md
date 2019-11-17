@@ -25,9 +25,9 @@ gathered in this version.
 	* Trims strings that are too long by inserting ellipsis into the middle
 	* Supports indicator lamps (i.e., for displaying colors)
 		* InputMux heavily relies on these to display current value
-* Blurbs now support coloring using defined color numbers
+* Reverse video display now supports coloring using defined color numbers
 	* They also use a JustifiedColoring instance instead of special justification
-* `ChatOverlay`s now use `Message` class; `Message`s is now a container class thereof
+* `ChatOverlay`s now use `Message` class; `Messages` is now a container class thereof
 	* `Message` is a subclass of `Coloring`, and defines a consistent way to re-apply effects/colors
 	* `ChatOverlay.colorize_message` is now a method of (subclasses of) `Message`
 		* Same goes for `filter_message`

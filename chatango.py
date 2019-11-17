@@ -748,7 +748,7 @@ class ChatangoOverlay(client.ChatOverlay):
 	def _max_select(self):
 		#when we've gotten too many messages
 		group = self.bot.joined_group
-		if group:
+		if group and not group.no_more:
 			self.can_select = False
 			group.get_more()
 			#wait until we're done getting more
