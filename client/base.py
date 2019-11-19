@@ -134,7 +134,7 @@ class KeyContainer:
 		if chars[0] != -1:
 			#control not returned to loop until later
 			asyncio.get_event_loop().call_soon(
-				partial(self, chars, *args, _raise=False))
+				partial(self, chars, *args, raise_=False))
 		try:
 			if self._last_mouse is not None:
 				x, y, state = self._last_mouse	#pylint: disable=unpacking-non-sequence
@@ -955,7 +955,11 @@ class Manager:
 			pass	#catch cancellations
 		finally:
 			for i in self._on_exit:
-				await i
+				try:
+					await i
+				except Exception:
+					print("Error occurred during shutdown:")
+					traceback.print_exc()
 			self.exited.set()
 
 	@classmethod
