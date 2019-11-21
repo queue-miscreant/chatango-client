@@ -51,12 +51,11 @@ class KeyContainer:
 		, 13:					10		#CR to LF, but curses does it already
 	}
 	MOUSE_MASK = 0
-	#PRESSED tends to make curses.getch tends hang on nodelay; wheel is separate
-	_MOUSE_BUTTONS = {
+	_MOUSE_BUTTONS = {	#curses.getch with nodelay tends to hang on PRESSED
 		  "left":		curses.BUTTON1_RELEASED
 		, "middle":		curses.BUTTON2_RELEASED
 		, "right":		curses.BUTTON3_RELEASED
-		, "wheel-up":	curses.BUTTON4_PRESSED
+		, "wheel-up":	curses.BUTTON4_PRESSED #mouse wheel is fine, though
 		, "wheel-down":	2**21
 	}
 	_MOUSE_ERROR = "expected signature ({0}, x, y) or ({0}) from function '{1}'"
@@ -65,15 +64,14 @@ class KeyContainer:
 	@classmethod
 	def initialize_class(cls):
 		for curse_name in dir(curses):
-			if "KEY_" in curse_name:
-				better_name = curse_name[4:].lower()
-				#better name
-				if better_name == "dc":
-					better_name = "delete"
-				if better_name in ("resize", "mouse"):
-					continue
-				elif better_name not in cls._VALID_KEYNAMES: #no remapping keys
-					cls._VALID_KEYNAMES[better_name] = getattr(curses, curse_name)
+			if "KEY_" not in curse_name \
+			or curse_name in ("KEY_RESIZE", "KEY_MOUSE"):
+				continue
+			better_name = curse_name[4:].lower()
+			if better_name == "dc":
+				better_name = "delete"
+			if better_name not in cls._VALID_KEYNAMES: #no remapping keys
+				cls._VALID_KEYNAMES[better_name] = getattr(curses, curse_name)
 
 		#simple command key names
 		for no_print in range(32):
@@ -632,7 +630,7 @@ class Blurb:
 			self.queue = blurb.breaklines(self.parent.width)
 		#holding a message?
 		if self.last < 0:
-			return ""
+			return None #don't display nothing, but don't update display
 		#next blurb is either a pop from the last message or nothing
 		blurb = self.queue.pop(0) if self.queue else ""
 		self.last = timestamp
@@ -815,7 +813,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 
 	def write_status(self, string, height):
 		'''Backend to draw below overlays'''
-		if not (self.active and self._candisplay):
+		if not (self.active and self._candisplay) or string is None:
 			return
 		self._displaybuffer.write(self._SINGLE_LINE %
 			(self.height+height, string))
@@ -834,16 +832,16 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		self.update_status()
 
 	#Overlay Backends-----------------------------------------------------------
-	def add_overlay(self, new):
+	def add_overlay(self, overlay):
 		'''Add overlay backend. Use overlay.add() instead.'''
-		if not isinstance(new, OverlayBase):
+		if not isinstance(overlay, OverlayBase):
 			return
-		new.index = len(self._ins)
-		self._ins.append(new)
-		if new.replace:
-			self._last_replace = new.index
-		if isinstance(new, TextOverlay):
-			self._last_text = new.index
+		overlay.index = len(self._ins)
+		self._ins.append(overlay)
+		if overlay.replace:
+			self._last_replace = overlay.index
+		if isinstance(overlay, TextOverlay):
+			self._last_text = overlay.index
 			self.update_input()
 		#display is not strictly called beforehand, so better safe than sorry
 		self.schedule_display()
