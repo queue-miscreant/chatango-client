@@ -269,7 +269,7 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		self.it = newit #pylint: disable=invalid-name
 		enter_fun = self.keys["enter"]
 		if callable(enter_fun):
-			return enter_fun()
+			return enter_fun([-1], self)
 		return None
 
 	@key_handler("^r")
