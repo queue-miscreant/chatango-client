@@ -607,10 +607,8 @@ class JustifiedColoring(Coloring):
 		#if we don't have an odd split which we can insert the ellipsis into
 		else:
 			left = columnslice(self._str, ceil(half_width))
-			i, form = 0, 0
-			while i < len(self._positions) and self._positions[i] < left:
-				self._formatting = places[i]
-				i += 1
+			i = sum(1 for i in self._positions if i < left)
+			form = 0
 			places.insert(i, (left, None))
 			while i < len(self._positions) and self._positions[i] < right:
 				form = places[i]

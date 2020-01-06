@@ -324,13 +324,16 @@ class Messages: #pylint: disable=too-many-instance-attributes
 	def up(self, amount=1):
 		height = self.parent.height-1
 
-		#scroll within a message if possible, and exit
-		if self._selector and self._start_message == self._selector:
-			new_amount = min(amount, self.selected.height - height)
-			self._start_inner += new_amount
-			if new_amount == 0:
-				return -1
-			amount -= new_amount
+		#the currently selected message is the top message
+		if self._start_message+1 == self._selector:
+			new_inner = min(self._start_inner + amount	#add to the inner height
+				, self.selected.height - height)		#or use the max possible
+			if new_inner >= 0:
+				inner_diff = new_inner - self._start_inner
+				self._start_inner = new_inner
+				amount -= inner_diff
+				if amount <= 0:
+					return inner_diff
 
 		#out of checking for scrolling inside of a message; go by messages now
 		select = self._selector+1
@@ -378,12 +381,16 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			return 0
 		height = self.parent.height-1
 		#scroll within a message if possible, if there is a hidden line
-		if self._selector == self._start_message and self._start_inner > 0:
-			new_amount = min(amount, self._start_inner)
-			self._start_inner -= new_amount
-			if new_amount == 0:
-				return -1
-			amount -= new_amount
+		if self._selector == self._start_message+1 and self._start_inner > 0:
+			new_inner = max(0, self._start_inner - amount)
+			inner_diff = self._start_inner - new_inner
+			self._start_inner = new_inner
+			amount -= new_inner
+			if new_inner == 0:
+				if self._selector == 1:
+					self.stop_select()
+					return 0
+				return inner_diff
 
 		#out of checking for scrolling inside of a message; go by messages now
 		select = self._selector
