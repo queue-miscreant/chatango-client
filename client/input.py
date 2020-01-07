@@ -32,8 +32,8 @@ class FutureOverlay(OverlayBase):
 			self._callback = None
 
 	@property
-	async def result(self):
-		return await self._future
+	def result(self):
+		return self._future
 	@property
 	async def exit(self):
 		try: #await; make sure that the callback doesn't run while cancelled
@@ -55,10 +55,18 @@ class FutureOverlay(OverlayBase):
 		self._future = self.parent.loop.create_future()
 		self._future.add_done_callback(self._new_callback)
 
-	def callback(self, func):
+	def callback(self, func, coro_rem=0):
 		'''Decorator for a function with a single argument: the future result'''
 		if not callable(func):
 			raise TypeError(f"Callback expected callable, got {type(func)}")
+		if asyncio.iscoroutinefunction(func):
+			async def new_future():
+				result = await self.result
+				remove = await func(result)
+				if remove or coro_rem:
+					self.remove()
+			self.parent.loop.create_task(new_future())
+			return func
 		self._callback = func
 		return func
 
@@ -74,7 +82,6 @@ class FutureOverlay(OverlayBase):
 			self._future.set_result(self.selected)
 		except: #pylint: disable=bare-except
 			pass
-		return -1
 
 #DISPLAY CLASSES----------------------------------------------------------------
 class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attributes
@@ -288,6 +295,7 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		def _(value):
 			self.search = str(value)
 			self.scroll_search.bound(self, 1)
+			return 1
 		search.add()
 
 	@key_handler("backspace")
@@ -570,7 +578,11 @@ class InputOverlay(TextOverlay, FutureOverlay, Box):
 		self.text.password = password
 		self.add_keys({'^w':	quitlambda})
 
-	selected = property(lambda self: str(self.text))
+	@property
+	def selected(self):
+		ret = str(self.text)
+		self.text.clear()
+		return ret
 
 	def __call__(self, lines):
 		'''Display the prompt in a box roughly in the middle'''
@@ -593,9 +605,10 @@ class InputOverlay(TextOverlay, FutureOverlay, Box):
 			return
 		self._prompts = self._prompt.breaklines(newx-2)
 
-	@key_handler("backspace") 
+	@key_handler("backspace")
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
+		print("BACKSPACE PRESSED")
 		if not str(self.text):
 			return -1
 		return self.text.backspace()
@@ -887,6 +900,7 @@ class InputMux:
 				@further_input.callback
 				def _(string):
 					self._set(self.parent.context, string)
+					return 1
 
 			elif self._type == "enum":
 				enumeration, index = self.get(self.parent.context)

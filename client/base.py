@@ -448,13 +448,17 @@ class OverlayBase:
 		self.remove()
 		new.add()
 
-	def add_keys(self, new_functions, redefine=True):
+	def add_keys(self, new_functions, redefine=False):
 		'''
 		Add keys from preexisting functions. `new_functions` should be a dict
 		with either functions or (function, return value) tuples as values
 		If redefine is True, then will redefine pre-existing key handlers.
 		Also prioritizes binding all class-level key handlers to instance
 		'''
+		for handler in self.__class__.__dict__.values():
+			if isinstance(handler, key_handler):
+				handler.bind(self.keys, redefine)
+
 		for key_name, handler in new_functions.items():
 			override = None
 			if isinstance(handler, tuple):
@@ -463,10 +467,6 @@ class OverlayBase:
 				handler = handler.func
 			if redefine or key_name not in self.keys:
 				self.keys.add_key(key_name, handler, key_name == -1, override)
-
-		for handler in self.__class__.__dict__.values():
-			if isinstance(handler, key_handler):
-				handler.bind(self.keys)
 
 	@classmethod
 	def key_handler(cls, key_name, override=None, _bind_immed=None, **kwargs):
@@ -782,7 +782,6 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		#start with the last "replacing" overlay, then all overlays afterward
 			for start in range(self._last_replace, len(self._ins)):
 				self._ins[start](lines)
-				await asyncio.sleep(self._INTERLEAVE_DELAY)
 		except SizeException:
 			self._candisplay = 0
 			return
@@ -841,6 +840,11 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		if overlay.replace:
 			self._last_replace = overlay.index
 		if isinstance(overlay, TextOverlay):
+			#provide the illusion that we have the same scrollable
+			if self._last_text >= self._last_replace and not str(overlay.text):
+				text = self._ins[self._last_text]
+				overlay.text.setstr(str(text.text))
+				text.text.clear()
 			self._last_text = overlay.index
 			self.update_input()
 		#display is not strictly called beforehand, so better safe than sorry
@@ -862,6 +866,9 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			j.index = i
 		if self._last_text == overlay.index:
 			self._last_text = -1
+		elif was_text and self._last_text >= self._last_replace:
+			text = self._ins[self._last_text]
+			text.text.setstr(str(overlay.text))
 		overlay.index = None
 		self.schedule_display()
 		self.update_status()
@@ -941,7 +948,7 @@ class Manager:
 			await self.screen.resize()
 			#done for now; call coroutines waiting for preparation
 			if asyncio.iscoroutine(prepared_coroutine):
-				await prepared_coroutine
+				self.loop.create_task(prepared_coroutine)
 			#keep running key callbacks
 			while self.screen.active:
 				try:

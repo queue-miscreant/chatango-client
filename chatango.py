@@ -908,7 +908,7 @@ class ChatangoOverlay(client.ChatOverlay):
 	def join_group(self):
 		'''Join a new group'''
 		inp = client.InputOverlay(self.parent, "Enter group name")
-		inp.callback(self.bot.join_group)
+		inp.callback(self.bot.join_group, 1)
 		inp.add()
 
 	def userpass(self):
@@ -1003,7 +1003,7 @@ async def start_client(manager, creds):
 		inp.add()
 
 		try:
-			creds[i] = await inp.result
+			creds[i] = await inp.exit
 		except asyncio.CancelledError:
 			manager.stop()
 			return
