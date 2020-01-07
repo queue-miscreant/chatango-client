@@ -608,7 +608,6 @@ class InputOverlay(TextOverlay, FutureOverlay, Box):
 	@key_handler("backspace")
 	def _wrap_backspace(self):
 		'''Backspace a char, or quit out if there are no chars left'''
-		print("BACKSPACE PRESSED")
 		if not str(self.text):
 			return -1
 		return self.text.backspace()
