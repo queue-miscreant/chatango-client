@@ -1,6 +1,6 @@
 Cuboid Chatango Client
 ==========================
-Version 6.28318530717
+Version 6.283185307179
 --------------------------
 A terminal application written in Python with curses input and ANSI escape-colored output.   
 Used to implement a client for chatango, an online chatroom.

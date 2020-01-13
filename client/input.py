@@ -1,87 +1,18 @@
 #!/usr/bin/env python3
 #client/input.py
 '''
-Overlays that allow multiple input formats. Also includes InputMux, which
+Various non-text input overlays. Also includes InputMux, which
 provides a nice interface for modifying values within a context.
 '''
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, colors \
-	, Coloring, JustifiedColoring, DisplayException
-from .base import staticize, quitlambda, key_handler \
-	, Box, OverlayBase, TextOverlay, SizeException
+	, Box, Coloring, JustifiedColoring, DisplayException
+from .util import staticize, quitlambda, key_handler
+from .base import FutureOverlay, OverlayBase, TextOverlay
 
-__all__ = [
-	  "Box", "OverlayBase", "ListOverlay", "VisualListOverlay", "ColorOverlay"
-	, "ColorSliderOverlay", "ConfirmOverlay", "DisplayOverlay", "InputMux"
-]
-
-#'enter' should set the future
-#'tab' should set the future, but close the overlay
-class FutureOverlay(OverlayBase):
-	'''
-	Overlay extension that can create recurring futures and set callbacks
-	If a callback returns value other than boolean False, the overlay is removed
-	Alternatively, the "result" property can be awaited multiple times, while
-	the "exit" property will remove the overlay after the future is set
-	'''
-	def __init__(self, parent):
-		super().__init__(parent)
-		self._future = parent.loop.create_future()
-		self._future.add_done_callback(self._new_callback)
-		if not hasattr(self, "_callback"):
-			self._callback = None
-
-	@property
-	def result(self):
-		return self._future
-	@property
-	async def exit(self):
-		try: #await; make sure that the callback doesn't run while cancelled
-			ret = await self._future
-			self._future.remove_done_callback(self._new_callback)
-		finally:
-			self.remove()
-		return ret
-
-	def _new_callback(self, fut):
-		'''When the future is done, we need to make a new future object'''
-		if self._callback is not None:
-			try:
-				if self._callback(fut.result()):
-					self.remove()
-					return
-			except asyncio.CancelledError:
-				pass
-		self._future = self.parent.loop.create_future()
-		self._future.add_done_callback(self._new_callback)
-
-	def callback(self, func, coro_rem=0):
-		'''Decorator for a function with a single argument: the future result'''
-		if not callable(func):
-			raise TypeError(f"Callback expected callable, got {type(func)}")
-		if asyncio.iscoroutinefunction(func):
-			async def new_future():
-				result = await self.result
-				remove = await func(result)
-				if remove or coro_rem:
-					self.remove()
-			self.parent.loop.create_task(new_future())
-			return func
-		self._callback = func
-		return func
-
-	def remove(self):
-		if not self._future.done():
-			self._future.cancel()
-		super().remove()
-
-	@key_handler("enter")
-	@key_handler("tab", override=0)
-	def set_result(self):
-		try:
-			self._future.set_result(self.selected)
-		except: #pylint: disable=bare-except
-			pass
+__all__ = ["ListOverlay", "VisualListOverlay", "ColorOverlay"
+	, "ColorSliderOverlay", "ConfirmOverlay", "DisplayOverlay", "TabOverlay"
+	, "PromptOverlay", "InputMux"]
 
 #DISPLAY CLASSES----------------------------------------------------------------
 class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attributes
@@ -158,7 +89,7 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		#worst case rows: |(list member)|(RESERVED)
 		#				  1	2			3
 		if size < 1 or maxx < 3:
-			raise SizeException()
+			raise DisplayException()
 		#which portion of the list is currently displaced
 		partition = self.it - (self.it%size)
 		#get the partition of the list we're at, pad the list
@@ -289,8 +220,8 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 	@key_handler("^f")
 	def open_search(self):
 		'''Open a search window'''
-		search = InputOverlay(self.parent)
-		search.text.setnonscroll('/')
+		search = TextOverlay(self.parent)
+		search.nonscroll = '/'
 		@search.callback
 		def _(value):
 			self.search = str(value)
@@ -501,7 +432,7 @@ class ColorSliderOverlay(FutureOverlay, Box):
 		wide = (self.width-2)//3 - 1
 		space = self.height-7
 		if space < 1 or wide < 5: #green is the longest name
-			raise SizeException()
+			raise DisplayException()
 		lines[0] = self.box_top()
 		for i in range(space):
 			string = ""
@@ -558,101 +489,34 @@ class ColorSliderOverlay(FutureOverlay, Box):
 		'''Get color in hex form'''
 		return ''.join("{:02X}".format(int(i)) for i in color)
 
-class InputOverlay(TextOverlay, FutureOverlay, Box):
-	'''
-	An overlay to retrieve input from the user.
-	Can either use `await this.result` or set a callback with `callback`
-	'''
-	replace = False
-	def __init__(self, parent, prompt=None, password=False, default=""):
-		super().__init__(parent)
-
-		if prompt is None:
-			self._prompt, self._prompts = None, []
-		else:
-			self._prompt = prompt if isinstance(prompt, Coloring) \
-				else Coloring(prompt)
-			self._prompts = self._prompt.breaklines(self.width-2)
-
-		self.text.setstr(default)
-		self.text.password = password
-		self.add_keys({'^w':	quitlambda})
-
-	@property
-	def selected(self):
-		ret = str(self.text)
-		self.text.clear()
-		return ret
-
-	def __call__(self, lines):
-		'''Display the prompt in a box roughly in the middle'''
-		if self._prompt is None:
-			return
-		start = self.height//2 - len(self._prompts)//2
-		end = self.height//2 + len(self._prompts)
-		if start+len(self._prompts) > self.height:
-			lines[start] = self._prompts[0][:-1] + JustifiedColoring._ELLIPSIS
-		lines[start] = self.box_top()
-		for i, j in enumerate(self._prompts):
-			lines[start+i+1] = self.box_part(j)
-		#preserve the cursor position save
-		lines[end+1] = self.box_bottom()
-
-	def resize(self, newx, newy):
-		'''Resize prompts'''
-		super().resize(newx, newy)
-		if self._prompt is None:
-			return
-		self._prompts = self._prompt.breaklines(newx-2)
-
-	@key_handler("backspace")
-	def _wrap_backspace(self):
-		'''Backspace a char, or quit out if there are no chars left'''
-		if not str(self.text):
-			return -1
-		return self.text.backspace()
-
 class DisplayOverlay(OverlayBase, Box):
-	'''Overlay that displays a message in a box'''
-	def __init__(self, parent, strings, outdent=""):
+	'''
+	Overlay that displays a message in a box. Valid messages are (lists of)
+	strings and (lists of) Coloring objects.
+	'''
+	def __init__(self, parent, prompts, outdent=""):
 		super().__init__(parent)
+		self.replace = False		#bother drawing under this overlay?
+		self._begin = 0				#internal scroll
 		self._outdent = outdent
 
 		self._rawlist = []
-		self._formatted = []
-		self.replace = False
-		self._begin = 0
-		self.change_display(strings)
+		self._prompts = []
+		self.prompts = prompts
 
 		self.add_keys({
 			 'q':		quitlambda
 			, 'H':		self.open_help
 		})
 
-	def __call__(self, lines):
-		'''Display message'''
-		begin = max((self.height-2)//2 - len(self._formatted)//2, 0) \
-			if not self.replace else 0
-		i = 0
-		lines[begin] = self.box_top()
-		for i in range(min(len(self._formatted), len(lines)-2)):
-			lines[begin+i+1] = self.box_part(self._formatted[self._begin+i])
-		if self.replace:
-			while i < len(lines)-3:
-				lines[begin+i+2] = self.box_part("")
-				i += 1
-		lines[begin+i+2] = self.box_bottom()
+	outdent = property(lambda self: self._outdent)
+	@outdent.setter
+	def outdent(self, val):
+		self._outdent = val
 
-	def resize(self, newx, newy):
-		'''Resize message'''
-		if self._rawlist is None:
-			return
-		self._formatted = [j for i in self._rawlist
-			for j in i.breaklines(newx-2, outdent=self._outdent)]
-		# if bigger than the box holding it, stop drawing the overlay behind it
-		self.replace = len(self._formatted) > self.height-2
-
-	def change_display(self, strings):
+	prompts = property(lambda self: self._rawlist)
+	@prompts.setter
+	def prompts(self, strings):
 		'''Basically re-initialize without making a new overlay'''
 		if isinstance(strings, (str, Coloring)):
 			strings = [strings]
@@ -660,15 +524,37 @@ class DisplayOverlay(OverlayBase, Box):
 			for i in strings]
 
 		#flattened list of broken strings
-		self._formatted = [j for i in self._rawlist
+		self._prompts = [j for i in self._rawlist
 			for j in i.breaklines(self.width-2, outdent=self._outdent)]
 		#bigger than the box holding it
-		self.replace = len(self._formatted) > self.height-2
+		self.replace = len(self._prompts) > self.height-2
 
-		self._begin = 0	#begin from this prompt
+		self._begin = 0
 
-	def set_outdent(self, outdent):
-		self._outdent = outdent
+	def __call__(self, lines):
+		'''Display message'''
+		begin = max((self.height-2)//2 - len(self._prompts)//2, 0) \
+			if not self.replace else 0
+		i = 0
+		lines[begin] = self.box_top()
+		for i in range(min(len(self._prompts), len(lines)-2)):
+			lines[begin+i+1] = self.box_part(self._prompts[self._begin+i])
+		i += 2
+		#fill in the rest of the box
+		if self.replace:
+			while begin + i < len(lines)-1:
+				lines[begin+i] = self.box_part("")
+				i += 1
+		lines[begin+i] = self.box_bottom()
+
+	def resize(self, newx, newy):
+		'''Resize message'''
+		if self._rawlist is None:
+			return
+		self._prompts = [j for i in self._rawlist
+			for j in i.breaklines(newx-2, outdent=self._outdent)]
+		# if bigger than the box holding it, stop drawing the overlay behind it
+		self.replace = len(self._prompts) > self.height-2
 
 	@key_handler('k', amt=-1, doc="Scroll upward")
 	@key_handler('up', amt=-1, doc="Scroll upward")
@@ -676,9 +562,15 @@ class DisplayOverlay(OverlayBase, Box):
 	@key_handler('down', amt=1, doc="Scroll downward")
 	def scroll(self, amt):
 		maxlines = self.height-2
-		if len(self._formatted) <= maxlines:
+		if len(self._prompts) <= maxlines: #nothing to scroll
 			return
-		self._begin = min(max(0, self.begin+amt), maxlines-len(self._formatted))
+		self._begin = min(max(0, self.begin+amt), maxlines-len(self._prompts))
+
+class PromptOverlay(DisplayOverlay, TextOverlay):
+	'''Combine text input with a prompt'''
+	def __init__(self, screen, prompt, default=None, password=False):
+		DisplayOverlay.__init__(self, screen, prompt)
+		TextOverlay.__init__(self, screen, default, password)
 
 class TabOverlay(OverlayBase):
 	'''
@@ -893,8 +785,8 @@ class InputMux:
 					return 1
 
 			elif self._type == "str":
-				further_input = InputOverlay(self.parent.parent
-					, self.doc								#input window text
+				further_input = PromptOverlay(self.parent.parent
+					, self.doc
 					, default=str(self.get(self.parent.context)))
 				@further_input.callback
 				def _(string):

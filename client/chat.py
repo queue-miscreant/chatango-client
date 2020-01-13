@@ -6,125 +6,11 @@ import asyncio
 import traceback
 from collections import deque
 
-from .display import SELECT_AND_MOVE, collen, numdrawing, colors, Coloring
-from .util import LazyIterList, History
-from .base import staticize, quitlambda, key_handler \
-	, Box, KeyException, KeyContainer, OverlayBase, TextOverlay
-from .input import ListOverlay, DisplayOverlay
-__all__ = ["CommandOverlay", "ChatOverlay", "add_message_scroller"]
-
-class CommandOverlay(TextOverlay):
-	'''Overlay to run commands'''
-	CHAR_COMMAND = '/'
-	replace = False
-	history = History()	#global command history
-	#command containers
-	commands = {}
-	_command_complete = {}
-
-	def __init__(self, parent, caller=None):
-		super().__init__(parent)
-		self._sentinel = ord(self.CHAR_COMMAND)
-		self.caller = caller
-		self.text.setnonscroll(self.CHAR_COMMAND)
-		self.text.completer.add_complete(self.CHAR_COMMAND, self.commands)
-		for i, j in self._command_complete.items():
-			self.text.add_command(i, j)
-		self.control_history(self.history)
-
-	def __call__(self, lines):
-		lines[-1] = "COMMAND"
-
-	def _on_sentinel(self):
-		if self.caller is not None:
-			# override sentinel that added this overlay
-			self.caller.text.append(self.CHAR_COMMAND)
-		return -1
-
-	@key_handler("backspace")
-	def _wrap_backspace(self):
-		'''Backspace a char, or quit out if there are no chars left'''
-		if not str(self.text):
-			return -1
-		return self.text.backspace()
-
-	@key_handler("enter")
-	def _run(self):
-		'''Run command'''
-		#parse arguments like a command line: quotes enclose single args
-		args = self.escape_text(self.text)
-		self.history.append(str(self.text))
-
-		if args[0] not in self.commands:
-			self.parent.blurb.push("command \"{}\" not found".format(args[0]))
-			return -1
-		self.parent.loop.create_task(self.run_command(
-			  self.commands[args[0]]
-			, self.parent, args[1:], name=args[0]))
-		return -1
-
-	@staticmethod
-	def escape_text(string):
-		'''
-		Formats a string with terminal-like arguments (separated by unescaped
-		spaces) into a tuple
-		'''
-		text = ""
-		args = []
-		escaping = False
-		single_flag = False
-		double_flag = False
-		for i in str(string):
-			if escaping:
-				escaping = False
-				if not (single_flag or double_flag):
-					text += i
-					continue
-				text += '\\'
-
-			if i == '\\':
-				escaping = True
-			elif i == "'":
-				single_flag ^= True
-			elif i == '"':
-				double_flag ^= True
-			elif i == ' ' and not (single_flag or double_flag):
-				args.append(text)
-				text = ""
-			else:
-				text += i
-		if escaping:
-			text += "\\"
-		args.append(text)
-		return args
-
-	@staticmethod
-	async def run_command(command, param, args, name=""):
-		try:
-			result = command(param, *args)
-			if asyncio.iscoroutine(result):
-				result = await result
-			if isinstance(result, OverlayBase):
-				result.add()
-		except Exception as exc: #pylint: disable=broad-except
-			param.blurb.push("%s occurred in command '%s'" % (exc, name))
-			traceback.print_exc()
-
-	@classmethod
-	def command(cls, name, complete=None):
-		'''
-		Decorator that adds command `name` with argument suggestion `complete`,
-		which may either be a list or a callable with signature (index), the
-		string index to start completion from, that returns a list
-		'''
-		complete = complete if complete is not None else []
-		def wrapper(func):
-			cls.commands[name] = func
-			if complete:
-				cls._command_complete[name] = complete
-			return func
-
-		return wrapper
+from .display import SELECT_AND_MOVE, Box, collen, numdrawing, colors, Coloring
+from .base import TextOverlay
+from .util import key_handler, KeyException, KeyContainer, LazyIterList
+from .input import DisplayOverlay
+__all__ = ["ChatOverlay", "Message", "add_message_scroller"]
 
 class Message(Coloring):
 	'''
@@ -337,17 +223,23 @@ class Messages: #pylint: disable=too-many-instance-attributes
 
 		#out of checking for scrolling inside of a message; go by messages now
 		select = self._selector+1
+		num_messages = 0
 		addlines = 0
 		cached_range = range(*self._lazy_bounds)
-		while select - self._selector <= amount:
+		while num_messages < amount:
 			if select > len(self._all_messages):
 				break
 			if select - self._lazy_offset not in cached_range:
 				#recache to get the correct message height
-				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
-			addlines += self._all_messages[-select].height
+				self._all_messages[-select].cache_display(self.parent.width
+					, self._last_recolor)
+			last_height = self._all_messages[-select].height
+			if last_height:
+				num_messages += 1
+				addlines += last_height
 			select += 1
-		self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset, select)
+		self._lazy_bounds[1] = max(self._lazy_bounds[1] + self._lazy_offset
+			, select)
 		self._lazy_offset = 0
 		self._selector = select-1
 
@@ -395,20 +287,24 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		#out of checking for scrolling inside of a message; go by messages now
 		select = self._selector
 		last_height = 0
+		num_messages = 0
 		addlines = 0
 		cached_range = range(*self._lazy_bounds)
-		while self._selector - select <= amount:
+		while num_messages <= amount:
 			#stop selecting if too low
 			if select == 0:
 				self.stop_select()
 				return 0
 			if select - self._lazy_offset not in cached_range:
-				self._all_messages[-select].cache_display(self.parent.width, self._last_recolor)
+				self._all_messages[-select].cache_display(self.parent.width
+					, self._last_recolor)
 			last_height = self._all_messages[-select].height
-			addlines += last_height
+			if last_height:
+				addlines += last_height
+				num_messages += 1
 			select -= 1
-
-		self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, select+1)
+		self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset
+			, select+1)
 		self._lazy_offset = 0
 		self._selector = select+1
 
@@ -506,7 +402,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 
 	def scroll_to(self, index):
 		'''
-		Directly set selector and start_height, then redo_lines.
+		Directly set selector and height_up, then redo_lines.
 		Redraw necessary afterward.
 		'''
 		if not self._all_messages:
@@ -560,14 +456,14 @@ class ChatOverlay(TextOverlay):
 	replace = True
 	def __init__(self, parent, push_times=600):
 		super().__init__(parent)
-		self._sentinel = ord(CommandOverlay.CHAR_COMMAND)
 		self._push_times = push_times
 		self._push_task = None
 		self._last_time = -1
+		#options for TextOverlays
+		self._empty_close = False
+		self.isolated = False
 
 		self.messages = Messages(self)
-		self.history = History()
-		self.control_history(self.history)
 
 	can_select = property(lambda self: self.messages.can_select)
 	@can_select.setter
@@ -588,14 +484,9 @@ class ChatOverlay(TextOverlay):
 		separator += '^' if self.messages.has_hidden else Box.CHAR_HSPACE
 		lines[-1] = separator
 
-	def _on_sentinel(self):
-		'''Enter CommandOverlay when CHAR_CURSOR typed'''
-		CommandOverlay(self.parent, self).add()
-
 	def add(self):
 		'''Start timeloop and add overlay'''
 		super().add()
-		#self.messages.redo_lines()
 		if self._push_times > 0:
 			self._push_task = self.parent.loop.create_task(self._time_loop())
 
@@ -604,9 +495,8 @@ class ChatOverlay(TextOverlay):
 		Quit timeloop (if it hasn't already exited).
 		Exit client if last overlay.
 		'''
-		if self._push_times:
+		if self._push_task is not None:
 			#finish running the task
-			self._push_times = 0
 			self._push_task.cancel()
 		if self.index == 0:
 			self.parent.stop()
@@ -773,20 +663,3 @@ def add_message_scroller(overlay, callback, empty, early, late):
 	ret = _MessageScrollOverlay(overlay, lazy_list, early, late)
 	ret.add()
 	return ret
-
-@CommandOverlay.command("help")
-def list_commands(parent, *_):
-	'''Display a list of the defined commands and their docstrings'''
-	command_list = ListOverlay(parent, list(CommandOverlay.commands))
-
-	@command_list.key_handler("enter")
-	def _(self):
-		new = CommandOverlay(parent)
-		new.text.append(self.list[self.it])
-		self.swap(new)
-
-	return command_list
-
-@CommandOverlay.command("q")
-def close(parent, *_):
-	parent.stop()

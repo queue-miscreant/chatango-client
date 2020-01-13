@@ -5,14 +5,13 @@ Module for formatting; support for fitting strings to column widths and ANSI
 color escape string manipulations. Also contains generic string containers.
 '''
 import re
-from shlex import shlex
 from math import ceil, floor
+from .util import Sigil
 from .wcwidth import wcwidth
-from .util import Tokenize
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "SELECT_AND_MOVE"
-			, "collen", "numdrawing", "columnslice", "colors", "Coloring"
+			, "collen", "numdrawing", "columnslice", "colors", "Box", "Coloring"
 			, "JustifiedColoring", "Scrollable", "ScrollSuggest"]
 
 BAD_CHARSETS = [
@@ -29,7 +28,8 @@ BAD_CHARSETS = [
 def _parse_fractur(raw):
 	cooked = ""
 	for i in raw:
-		#look for fractur and double-width fonts that don't comply with wcwidth
+		#look for fractur and double-width fonts that don't
+		#comply with wcwidth (even C wcwidth, because tmux fails)
 		for begin, length, onto in BAD_CHARSETS:
 			if ord(i) in range(begin, begin+length):
 				i = chr(ord(i) - begin + onto)
@@ -247,6 +247,47 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 		color = min(max(color, 0), 24)
 		return self.two56(color + 232) #magic, but whatever
 colors = _ColorManager() #pylint: disable=invalid-name
+
+class Box:
+	'''
+	Virtual class containing useful box shaping characters.
+	Subclasses must have `width` property, like Overlays
+	'''
+	CHAR_HSPACE = '─'
+	CHAR_VSPACE = '│'
+	CHAR_TOPL = '┌'
+	CHAR_TOPR = '┐'
+	CHAR_BTML = '└'
+	CHAR_BTMR = '┘'
+
+	def box_just(self, string, justchar=' '):
+		'''Pad string by column width'''
+		if not hasattr(self, "width"):
+			raise DisplayException("cannot get width of Box %s" % self.__name__)
+		return string + justchar*(self.width-2-collen(string))
+
+	def box_format(self, left, string, right, justchar=' '):
+		'''Format and justify part of box'''
+		return "{}{}{}".format(left, self.box_just(string, justchar), right)
+
+	def box_noform(self, string):
+		'''Returns a string in the sides of a box. Does not pad spaces'''
+		return self.CHAR_VSPACE + string + self.CHAR_VSPACE
+
+	def box_part(self, fmt=''):
+		'''Returns a properly sized string of the sides of a box'''
+		return self.box_format(self.CHAR_VSPACE, fmt
+			, self.CHAR_VSPACE)
+
+	def box_top(self, fmt=''):
+		'''Returns a properly sized string of the top of a box'''
+		return self.box_format(self.CHAR_TOPL, fmt, self.CHAR_TOPR
+			, self.CHAR_HSPACE)
+
+	def box_bottom(self, fmt=''):
+		'''Returns a properly sized string of the bottom of a box'''
+		return self.box_format(self.CHAR_BTML, fmt, self.CHAR_BTMR
+			, self.CHAR_HSPACE)
 
 class Coloring:
 	'''Container for a string and coloring to be done'''
@@ -541,8 +582,8 @@ class Coloring:
 
 class JustifiedColoring(Coloring):
 	'''
-	Coloring object that can lazily add indicator lamps at the end of its
-	displayed string.
+	Coloring object fitted to a certain column length.
+	Can add indicator lamps and shorten strings with ellipses.
 	'''
 	_ELLIPSIS = '…'
 	def __init__(self, string, remove_fractur=True):
@@ -628,7 +669,7 @@ class JustifiedColoring(Coloring):
 				ret += temp
 				running_length += collen(temp)
 				continue
-			elif left < pos < right:
+			if left < pos < right:
 				continue
 
 			next_effect = form & colors.effects_bits
@@ -703,7 +744,6 @@ class Scrollable:
 		#nonscrolling characters
 		self._nonscroll = ""
 		self._nonscroll_width = 0
-		self.password = False
 
 	def __repr__(self):
 		return f"{type(self)}({self._width}, {repr(self._str)})"
@@ -712,7 +752,7 @@ class Scrollable:
 		'''Return the raw text contained'''
 		return self._str
 
-	def __format__(self, *args):
+	def show(self, password=False):
 		'''Display text contained with cursor'''
 		#sometimes our self._disp gets off
 		self._disp = min(self._disp, len(self._str))
@@ -743,7 +783,7 @@ class Scrollable:
 			elif ord(char) >= 32:
 				width -= wcwidth(char)
 			start += 1
-		if self.password:
+		if password:
 			if not endwidth: #cursor is at the end
 				endwidth = self._width
 			else:
@@ -810,7 +850,7 @@ class Scrollable:
 	def wordback(self):
 		'''Go back to the last word'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
-		if pos and not self.password:
+		if pos:
 			#`_UP_TO_WORD_RE`'s first group begins where the last word does
 			#use movepos to maintain display offset of 1 b/c space
 			self.movepos(pos.end(1)-self._pos-1)
@@ -820,7 +860,7 @@ class Scrollable:
 	def wordnext(self):
 		'''Advance to the next word'''
 		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
-		if pos and not self.password:
+		if pos:
 			#move forward the length of the captured word
 			self.movepos((lambda x, y: y - x)(*pos.span(1)))
 		else:
@@ -850,7 +890,7 @@ class Scrollable:
 	def delword(self):
 		'''Delete word behind cursor, like in sane text boxes'''
 		pos = _UP_TO_WORD_RE.match(' '+self._str[:self._pos])
-		if pos and not self.password:
+		if pos:
 			#we started with a space
 			span = pos.end(1) - 1
 			#how far we went
@@ -865,7 +905,7 @@ class Scrollable:
 	def delnextword(self):
 		'''Delete word ahead of cursor, like in sane text boxes'''
 		pos = _NEXT_WORD_RE.match(self._str[self._pos:]+' ')
-		if pos and not self.password:
+		if pos:
 			span = pos.end(1)
 			#how far we went
 			self._str = self._str[:self._pos] + self._str[self._pos+span:]
@@ -880,114 +920,76 @@ class Scrollable:
 
 class ScrollSuggest(Scrollable): #pylint: disable=too-many-instance-attributes
 	'''
-	A Scrollable extension with suggestion built in
+	A Scrollable extension with suggestion-based completion from Sigils.
 	If you need to extend a Scrollable, it's probably this one
 	'''
 	def __init__(self, width, string=""):
 		super().__init__(width, string)
-		self._argument_complete = {}
 		#completer
-		self.completer = Tokenize()
 		self._suggest_list = []
-		self._suggest_num = 0
-		self._keep_suggest = False
+		self._suggest_index = 0
+		self._clear_suggest = False
 		#storage vars
 		self._lastdisp = None
-		self._lastpos = None
+		self._lastpos = None		#position of last word tabbed
 
 	def _onchanged(self):
 		'''Get rid of stored suggestions'''
-		if not self._keep_suggest:
-			self._suggest_num = -1
+		if self._clear_suggest:
+			self._suggest_index = -1
 			self._suggest_list.clear()
 			self._lastpos, self._lastdisp = None, None
-		self._keep_suggest = False
+		self._clear_suggest = True
 
-	def add_command(self, command, suggestion):
-		self._argument_complete[command] = suggestion
+	def _splitwords(self):
+		'''split words up to current cursor position'''
+		ret = []
+		buffer = ""
+		last_word_pos = 0
+		for pos, char in enumerate(self._str):
+			if pos >= self._pos:
+				break
+			buffer += char
+			if char in _LINE_BREAKING:
+				ret.append(buffer)
+				last_word_pos = pos+1
+				buffer = ""
+				continue
+		ret.append(buffer)
+		self._lastpos = last_word_pos
+		return ret
 
-	def complete(self):
+	def complete(self, completer: Sigil):
 		'''Tab forward in suggestions'''
 		#need to generate list
 		if not self._suggest_list:
-			close_quote = False
-			if self._str[:self._pos].count('"') % 2:
-				lexicon = shlex(self._str[:self._pos]+'"', posix=True)
-				close_quote = True
-			else:
-				lexicon = shlex(self._str[:self._pos], posix=True)
-			lexicon.quotes = '"' #no single quotes
-			lexicon.wordchars += ''.join(self.completer.local_prefix) + \
-				''.join(self.completer.prefixes) + '/~' #add in predefined characters
-			argsplit = []
-			last_token = lexicon.get_token()
-			while last_token:
-				argsplit.append(last_token)
-				last_token = lexicon.get_token()
-
-			#last character was a space
-			completed_word = self._str[self._pos-1:self._pos] == ' '
-
-			if (completed_word or len(argsplit) > 1) and self._argument_complete:
-				verb, suggest = argsplit[0], '' if completed_word else argsplit[-1]
-
-				if verb in self._argument_complete:
-					complete = self._argument_complete[verb]
-					temp_suggest, temp = Tokenize.collapse_suggest(suggest,
-						complete, add_space=False)
-
-					#temp is the amount of characters to keep for the suggestion
-					if temp_suggest:
-						#-2 for both quotes being counted
-						started_with_quote = self._str[-len(suggest)-1] == '"'
-						if started_with_quote or close_quote:
-							#if we're closing a quote, then we only need to account
-							#for one quote
-							temp -= 1 + (not close_quote)
-							temp_suggest = [(i[-1] != '"') and ('"%s"' % i) or i
-								for i in temp_suggest]
-
-						self._str = self._str[:self._pos+temp] + self._str[self._pos:]
-						self.movepos(temp)
-						self._suggest_list = temp_suggest
-
-			#just use a prefix
-			if argsplit and not self._suggest_list:
-				search = argsplit[-1]
-				if completed_word:
-					#no need to try to complete if the word has been completed by a space
-					return False
-				if len(argsplit) == 1:
-					search = self._nonscroll + search
-				self._suggest_list = self.completer.complete(search)
-
-		#if there's a list or we could generate one
-		if self._suggest_list:
-			self._suggest_num = (self._suggest_num+1) % len(self._suggest_list)
-			suggestion = self._suggest_list[self._suggest_num]
-			#no need to tab through a single one
-			if len(self._suggest_list) > 1:
-				self._keep_suggest = True
-				if self._lastpos is None:
-					self._lastpos, self._lastdisp = self._pos, self._disp
-				else:
-					self._str = self._str[:self._lastpos] + self._str[self._pos:]
-					self._pos, self._disp = self._lastpos, self._lastdisp
-			self.append(suggestion)
-			return True
-		return False
+			#get word list up until current string position
+			wordlist = self._splitwords()
+			adjust, self._suggest_list = completer.complete(wordlist)
+			#adjust display position
+			self._lastpos += adjust
+			self._lastdisp = max(0, self._disp - (self._pos - self._lastpos))
+			self._suggest_index = -1
+		return self._complete(1)
 
 	def backcomplete(self):
 		'''Tab backward in suggestions'''
+		return self._complete(-1)
+
+	def _complete(self, direction):
 		if self._suggest_list:
-			self._suggest_num = (self._suggest_num-1)%len(self._suggest_list)
-			suggestion = self._suggest_list[self._suggest_num]
-			self._keep_suggest = True
-			if self._lastpos is None:
-				self._lastpos, self._lastdisp = self._pos, self._disp
-			else:
-				self._str = self._str[:self._lastpos] + self._str[self._pos:]
-				self._pos, self._disp = self._lastpos, self._lastdisp
-			self.append(suggestion)
+			sliced = self._str[:self._lastpos]
+			suffix = self._str[self._pos:]
+			#modify suggestion
+			if len(self._suggest_list) > 1:
+				self._suggest_index += direction
+				self._suggest_index %= len(self._suggest_list)
+			self._clear_suggest = False
+			suggestion = self._suggest_list[self._suggest_index]
+			#adjust string and display
+			self._pos = self._lastpos
+			self._disp = self._lastdisp
+			self._str = sliced + suggestion + suffix
+			self.movepos(len(suggestion))
 			return True
 		return False

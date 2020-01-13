@@ -1,5 +1,16 @@
 Changelog
 =========================
+## v6.283185307179 *2019/1/13*
+* Retooled tab completion to be much more convenient
+	* Renamed "Tokenize" to "Sigil", which is mostly the same
+	* Word-based completers can be a list reference, or a callable returning one with arguments `(last_word, word_number)`
+	* "Extra" completers are attempted when all word-based completers fail, and receive all words at once
+* TextOverlays to all use the same Scrollable instance
+	* Commands can be done in any non-"isolated" TextOverlay
+	* Tabbing commands keeps track of cursor backtracking automatically
+	* Tabbing files in now much simpler to take advantage of this
+* Fixed Messages scrolling with hidden messages
+
 ## v6.28318530717 *2019/11/16*
 When splitting the README from the changelog, I forgot to add the file to the repo.
 Due to an unfortunate incident involving git removing all files that weren't in

@@ -358,7 +358,7 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		client.on_done(self.graceful_exit())
 
 		#tabbing for members, ignoring the # and ! induced by anons and temps
-		client.Tokenize('@', self.members)
+		self.overlay.completer.add_sigil('@', self.members)
 		self.loop.create_task(self.connect())
 
 	@property
@@ -728,8 +728,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		self.can_select = False
 		self.bot = bot
 		self.add_keys({
-			  "enter":		self._enter
-			, "f2":			self._show_links
+			 "f2":			self._show_links
 			, "f3":			self._show_members
 			, "f4":			self._show_formatting
 			, "f5":			self._show_channels
@@ -745,6 +744,12 @@ class ChatangoOverlay(client.ChatOverlay):
 
 		linkopen.open_link.add_redraw_method(self.redo_lines)
 
+	def _callback(self, text): #pylint: disable=method-hidden
+		'''Open selected message's links or send message'''
+		#if it's not just spaces
+		if not text.isspace():
+			self.bot.send_post(text)
+
 	def _max_select(self):
 		#when we've gotten too many messages
 		group = self.bot.joined_group
@@ -758,17 +763,6 @@ class ChatangoOverlay(client.ChatOverlay):
 	def clear(self):
 		super().clear()
 		self.last_links.clear()
-
-	def _enter(self):
-		'''Open selected message's links or send message'''
-		text = str(self.text)
-		#if it's not just spaces
-		if not text.isspace():
-			#add it to the history
-			self.text.clear()
-			self.history.append(text)
-			#call the send
-			self.bot.send_post(text)
 
 	def _show_links(self):
 		'''List accumulated links'''
@@ -861,8 +855,8 @@ class ChatangoOverlay(client.ChatOverlay):
 	def _search_scroller(self):
 		'''Find message with some text'''
 		#minimalism
-		box = client.InputOverlay(self.parent)
-		box.text.setnonscroll("^f: ")
+		box = client.TextOverlay(self.parent)
+		box.nonscroll = "^f: "
 
 		@box.callback
 		def search(string): #pylint: disable=unused-variable

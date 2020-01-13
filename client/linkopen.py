@@ -104,7 +104,7 @@ async def get_opengraph(link, *args, loop=None):
 		if prev is None:
 			full[i] = j
 			continue
-		elif not isinstance(prev, list):
+		if not isinstance(prev, list):
 			full[i] = [prev]
 		full[i].append(j)
 
