@@ -572,21 +572,22 @@ class PromptOverlay(DisplayOverlay, TextOverlay):
 		DisplayOverlay.__init__(self, screen, prompt)
 		TextOverlay.__init__(self, screen, default, password)
 
-class TabOverlay(OverlayBase):
+class TabOverlay(FutureOverlay):
 	'''
 	Overlay for 'tabbing' through things.
 	Displays options on lines nearest to the input scrollable
 	'''
-	def __init__(self, parent, lis, *args, start=0, rows=5): #pylint: disable=too-many-arguments
+	def __init__(self, parent, tab_list, *args, rows=5): #pylint: disable=too-many-arguments
 		super().__init__(parent)
-		self.list = lis
-		self._it = min(start, len(self.list)-1) #pylint: disable=invalid-name
-		self._rows = min(len(self.list), rows, self.height)
-		self._callback = None
+		self.list = tab_list
+		self._it = 0
+		self._rows = min(len(tab_list), rows, self.height)
 		self.replace = self._rows == self.height
+		#add extra keys for tabbing
 		for i, j in enumerate(args):
 			self.key_handler(j, direction=(1 - 2*(i % 2)))(self.move_it.bound)
-		self.add_keys({-1:		quitlambda})
+		append = lambda _, chars: self.parent.text.append_bytes(chars) or -1
+		self.add_keys({-1:	append})
 	it = property(lambda self: self._it)
 
 	def __call__(self, lines):
@@ -594,7 +595,6 @@ class TabOverlay(OverlayBase):
 		line_offset = 1
 		for i, entry in zip(range(self._rows), (self.list + self.list)[self._it:]):
 			entry = Coloring(entry)
-			#entry.insert_color(0, colors.raw_num(7))
 			entry.add_global_effect(1)
 			if i == 0:
 				entry.add_global_effect(0)
@@ -603,24 +603,26 @@ class TabOverlay(OverlayBase):
 				lines[-line_offset-j] = line
 			line_offset += len(formatted)
 
-	def add(self):
-		'''If list is too small, exit early. Run callback on nonempty list'''
-		if self.list:
-			self._callback(self.list[self._it])
-		if len(self.list) < 2:
-			return
+	def add(self, set_result=False): #pylint: disable=arguments-differ
+		'''
+		Add the overlay. `set_result` controls when whether to "autotab" when
+		the overlay is added. If this is true and the list is a singleton,
+		the overlay is not added
+		'''
+		if set_result:
+			self._future.set_result(self.list[self._it])
+			if len(self.list) <= 1:
+				return
 		super().add()
-
-	def callback(self, callback):
-		'''Add callback when tab or shift-tab was clicked.'''
-		self._callback = callback
 
 	@key_handler('tab', direction=1, doc="Tab forward")
 	@key_handler('btab', direction=-1, doc="Tab backward")
 	def move_it(self, direction):
 		self._it = (self._it + direction) % len(self.list)
-		if callable(self._callback):
-			self._callback(self.list[self._it])
+		try:
+			self._future.set_result(self.list[self._it])
+		except: #pylint: disable=bare-except
+			pass
 
 class ConfirmOverlay(OverlayBase):
 	'''Overlay to confirm selection y/n (no slash)'''

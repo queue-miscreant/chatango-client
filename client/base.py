@@ -309,14 +309,14 @@ class FutureOverlay(OverlayBase):
 		self._future = self.parent.loop.create_future()
 		self._future.add_done_callback(self._new_callback)
 
-	def callback(self, func):
+	def callback(self, func, do_remove=False):
 		'''Decorator for a function with a single argument: the future result'''
 		if not callable(func):
 			raise TypeError(f"Callback expected callable, got {type(func)}")
 		if asyncio.iscoroutinefunction(func):
 			async def new_future():
 				result = await self.result
-				remove = await func(result)
+				remove = await func(result) or do_remove
 				if remove:
 					self.remove()
 			self.parent.loop.create_task(new_future())
