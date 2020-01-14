@@ -296,6 +296,9 @@ class key_handler: #pylint: disable=invalid-name
 		self.bound = func
 		return self
 
+	def __repr__(self):
+		return f"key_handler({self.keys}, {self.bound})"
+
 	def bind(self, keys: KeyContainer, redefine=True):
 		'''
 		Bind function to `keys`. Function is partially called with extra kwargs

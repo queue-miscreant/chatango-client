@@ -42,7 +42,6 @@ class Command:
 			if complete:
 				cls._command_complete[name] = complete
 			return func
-
 		return wrapper
 
 	@classmethod
@@ -457,7 +456,7 @@ class _NScrollable(ScrollSuggest):
 	def transform_paste(cls, transformer):
 		cls._transformers.append(transformer)
 
-	def _onchanged(self):
+	def _onchanged(self):		#TODO option to set result on every change, use for listoverlay
 		super()._onchanged()
 		self.parent.update_input()
 transform_paste = _NScrollable.transform_paste
