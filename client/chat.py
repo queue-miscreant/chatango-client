@@ -19,7 +19,8 @@ class Message(Coloring):
 	colorizing method, without binding tightly to a ChatOverlay subclass
 	'''
 	INDENT = "    "
-	SHOW_CLASS = True
+	_shown_class = -1
+	subclasses = []
 	msg_count = 0
 	def __init__(self, msg, remove_fractur=True, **kwargs):
 		super().__init__(msg, remove_fractur)
@@ -36,10 +37,41 @@ class Message(Coloring):
 		self._last_recolor = -1
 		Message.msg_count += 1
 
+	def __init_subclass__(cls, **kwargs):
+		super().__init_subclass__(**kwargs)
+		cls.subclasses.append(cls)
+
 	mid = property(lambda self: self._mid)
-	filtered = property(lambda self: self.SHOW_CLASS and self.filter())
 	display = property(lambda self: self._cached_display)
 	height = property(lambda self: len(self._cached_display))
+	@property
+	def filtered(self):
+		if 0 <= self._shown_class <= len(self.subclasses) \
+		and not isinstance(self, self.subclasses[self._shown_class]):
+			return True
+		return self.filter()
+
+	@classmethod
+	def move_filter(cls, val=None):
+		'''
+		Move the filtered subclass list index. If `val` is an integer, then
+		this cycles between 'all' and the rest of subclasses. If a subclass,
+		then it sets the filter to only that subclass. If None or not supplied,
+		then all messages are unfiltered.
+		returns a string corresponding to the allowed message type
+		'''
+		if val is None:
+			cls._shown_class = -1
+		elif isinstance(val, type):
+			cls._shown_class = cls.subclasses.index(val)
+		else:
+			cls._shown_class += val + 1
+			cls._shown_class %= len(cls.subclasses)+1
+			cls._shown_class -= 1
+			val = cls.subclasses[cls._shown_class]
+		if cls._shown_class == -1:
+			return 'all'
+		return val.__name__
 
 	def colorize(self):
 		'''
@@ -508,7 +540,7 @@ class ChatOverlay(TextOverlay):
 		self.messages.redo_lines(False)
 		return 1
 
-	def run_key(self, chars):
+	def run_key(self, chars, do_input):
 		'''Delegate running characters to a selected message that supports it'''
 		selected = self.messages.selected
 		ret = None
@@ -519,7 +551,7 @@ class ChatOverlay(TextOverlay):
 			else:
 				raise KeyException
 		except KeyException:
-			ret = self.keys(chars, self)
+			ret = self.keys(chars, self, do_input=do_input)
 
 		#stop selecting if False is returned
 		if not ret and self.messages.stop_select():
@@ -569,6 +601,14 @@ class ChatOverlay(TextOverlay):
 			#move the cursor back
 			self.parent.update_input()
 		return 1
+
+	@key_handler("^m", direction=-1)
+	@key_handler("^n", direction=1)
+	def cycle_message_filter(self, direction):
+		'''Cycle the displayed Message subclasses'''
+		displayed = Message.move_filter(direction)
+		self.redo_lines()
+		self.parent.blurb.push(f"Displaying messates of type '{displayed}'")
 
 	@key_handler("a-g")
 	def select_top(self):

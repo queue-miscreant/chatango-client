@@ -86,7 +86,7 @@ class KeyContainer:
 			, curses.KEY_RESIZE:	self._BoundKey(screen.schedule_resize)
 		})
 
-	def __call__(self, chars, *args, raise_=True): #pylint: disable=inconsistent-return-statements
+	def __call__(self, chars, *args, do_input=True, raise_=True): #pylint: disable=inconsistent-return-statements
 		'''
 		Run a key's callback. This expects a single argument: a list of numbers
 		terminated by -1. Subsequent arguments are passed to the key handler.
@@ -98,11 +98,14 @@ class KeyContainer:
 		except KeyError:
 			char = chars[0]
 
-		#capture keys that exist and (begin with ESC, are sufficiently short, or curses remapped
-		if char in self._keys and (char == 27 or len(chars) <= 2 or char > 255):
-			return self._keys[char](chars[1:] or [-1], *args) #include trailing -1
+		#capture keys that are handled and (escaped, short, or curses remapped)
+		if char in self._keys \
+		and (char == 27 or len(chars) <= 2 or char > 255):
+			#include trailing -1
+			return self._keys[char](chars[1:] or [-1], *args)
 		#capture the rest of inputs, as long as they begin printable
-		if -1 in self._keys and (char in range(32, 255) or char in (9, 10)):
+		if do_input and -1 in self._keys \
+		and (char in range(32, 255) or char in (9, 10)):
 			return self._keys[-1](chars[:-1], *args)
 		if raise_:
 			raise KeyException
@@ -349,15 +352,15 @@ class Sigil:
 			numargs = len(inspect.signature(suggestion).parameters)
 			if numargs == 1:
 				suggest = lambda x, y: suggestion(x)
-		suggest = lambda x, y: [i for i in suggestion(x, y) if i.startswith(x)]
+		suggest_list = lambda x, y: [i for i in suggest(x, y) if i.startswith(x)]
 
 		#append to the global or local list
 		if isglobal:
 			self._global_sigils.append(sigil)
-			self._global_suggestions.append(suggest)
+			self._global_suggestions.append(suggest_list)
 		else:
 			self._sigils.append(sigil)
-			self._suggestions.append(suggest)
+			self._suggestions.append(suggest_list)
 
 	def complete(self, wordlist):
 		'''

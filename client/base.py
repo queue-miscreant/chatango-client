@@ -16,7 +16,7 @@ import asyncio		#self-explanatory
 import traceback	#error handling without breaking stopping the client
 from signal import SIGINT #redirect ctrl-c
 from .display import CLEAR_FORMATTING, collen, ScrollSuggest \
-	, Coloring, JustifiedColoring
+	, Coloring, JustifiedColoring, DisplayException
 from .util import KeyContainer, KeyException, key_handler, staticize \
 	, quitlambda, Sigil, argsplit, argunsplit, History
 __all__ = ["Command", "OverlayBase", "TextOverlay", "transform_paste", "Manager"]
@@ -48,7 +48,7 @@ class Command:
 	@classmethod
 	def complete(cls, wordlist):
 		command = wordlist[0]
-		if command[0] != cls.CHAR_COMMAND:
+		if not command or command[0] != cls.CHAR_COMMAND:
 			return []
 		#attempt to find a completer
 		try:
@@ -84,24 +84,27 @@ class Command:
 		#parse arguments like a command line: quotes enclose single args
 		args = argsplit(string)
 
-		if args[0] not in cls.commands:
-			screen.blurb.push("command \"{}\" not found".format(args[0]))
-			return -1
-		screen.loop.create_task(cls._run(cls.commands[args[0]]
-			, screen, args[1:], name=args[0]))
-		return -1
+		possible = [i for i in cls.commands if i.startswith(args[0])]
+		if not possible:
+			screen.blurb.push("command '{}' not found".format(args[0]))
+		elif len(possible) > 1:
+			screen.blurb.push("ambiguous command; could be "\
+				"'{}'".format("', '".join(possible[:10])))
+		else:
+			screen.loop.create_task(cls._run(possible[0], screen, args[1:]))
 
-	@staticmethod
-	async def _run(command, param, args, name=""):
+	@classmethod
+	async def _run(cls, name, screen, args):
+		command = cls.commands[name]
 		try:
-			result = command(param, *args)
+			result = command(screen, *args)
 			if asyncio.iscoroutine(result):
 				result = await result
 			if isinstance(result, OverlayBase):
 				result.add()
 		except Exception as exc: #pylint: disable=broad-except
 			classname = type(exc).__name__
-			param.blurb.push(f"{classname} occurred in command '{name}'")
+			screen.blurb.push(f"{classname} occurred in command '{name}'")
 			traceback.print_exc()
 Sigil(Command.CHAR_COMMAND
 	, lambda _, wordnum: list(Command.commands) if wordnum == 0 else [])
@@ -120,7 +123,7 @@ def list_commands(screen, *_):
 
 	return command_list
 
-@Command.command("q")
+@Command.command("quit")
 def close(parent, *_):
 	parent.stop()
 
@@ -178,13 +181,13 @@ class OverlayBase:
 		lines[value]) to display to the screen
 		'''
 
-	def run_key(self, chars):
+	def run_key(self, chars, do_input):
 		'''
 		Run a key callback. This expects a single argument: a list of numbers
 		terminated by -1. If the return value has boolean True, Screen will
 		redraw; if the return value is -1, the overlay will remove itself
 		'''
-		if self.keys(chars, self) == -1:
+		if self.keys(chars, self, do_input=do_input) == -1:
 			self.remove()
 		return 1
 
@@ -377,9 +380,9 @@ class TextOverlay(FutureOverlay):
 	def nonscroll(self, val):
 		if val is None:
 			val = self._nonscroll
-			self.parent.text.isolated = self.isolated
+		else:
+			self._nonscroll = val
 		self.parent.text.setnonscroll(val)
-		self._nonscroll = val
 
 	@key_handler("backspace")
 	def wrap_backspace(self):
@@ -402,9 +405,15 @@ class _NScrollable(ScrollSuggest):
 	def __init__(self, parent):
 		super().__init__(parent.width)
 		self.parent = parent
-		self.isolate = True			#save/control history
 		self._escape_mode = False	#next character should be escaped
 		self._history = History()
+
+	@property
+	def isolated(self):
+		last_text = self.parent.last_text
+		if last_text is not None:
+			return last_text.isolated
+		return False
 
 	def append_bytes(self, chars):
 		'''Appends to the parent's scrollable. Enters "escape mode" on \\'''
@@ -605,12 +614,12 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		#magic number, but who cares; lines for text, blurbs, and reverse info
 		newy -= self._RESERVE_LINES
 		try:
-			self.text.setwidth(newx)
 			for i in self._ins:
 				i.resize(newx, newy)
 				await asyncio.sleep(self._INTERLEAVE_DELAY)
 			self.width, self.height = newx, newy
 			self._candisplay = 1
+			self.text.setwidth(newx)
 			self.update_input()
 			self.update_status()
 			await self.display()
@@ -630,7 +639,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		#start with the last "replacing" overlay, then all overlays afterward
 			for start in range(self._last_replace, len(self._ins)):
 				self._ins[start](lines)
-		except SizeException:
+		except DisplayException:
 			self._candisplay = 0
 			return
 		self._displaybuffer.write(self._DISPLAY_INIT)
@@ -688,6 +697,8 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		if overlay.replace:
 			self._last_replace = overlay.index
 		if isinstance(overlay, TextOverlay):
+			if overlay.isolated:
+				self.text.clear()	#TODO maybe use a stack?
 			overlay.nonscroll = None
 			self._last_text = overlay.index
 			self.update_input()
@@ -761,13 +772,14 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		while nextch != -1:
 			nextch = self._screen.getch()
 			chars.append(nextch)
+		do_input = True
 		for i in range(len(self._ins) - self._last_replace):
 			try: #shoot up the hierarchy of overlays to try to handle
-				if self._ins[-i-1].run_key(chars):
+				if self._ins[-i-1].run_key(chars, do_input):
 					await self.display()
 				break
 			except KeyException:
-				pass
+				do_input = False
 
 	def stop(self):
 		self.active = False
