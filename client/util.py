@@ -213,7 +213,11 @@ class KeyContainer:
 	def mouse(self, *args, state, x=0, y=0):
 		'''Unget some mouse data and run the associated mouse callback'''
 		KeyContainer._last_mouse = (x, y, state)
-		return self._callmouse(*args, [-1])
+		try:
+			return self._callmouse(*args, [-1])
+		except KeyException:
+			KeyContainer._last_mouse = None
+		raise KeyException
 
 	def nomouse(self):
 		'''Unbind the mouse from _keys'''
