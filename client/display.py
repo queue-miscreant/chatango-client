@@ -455,12 +455,14 @@ class Coloring:
 		if self._maxpos == -1:
 			return None
 		if end > self._maxpos:
-			return self._formatting[-1]
+			return self._formatting[-1] & ~colors.effects_bits #ignore the formatting
 		last = self._formatting[0]
+		effects = 0
 		for pos, form in zip(self._positions, self._formatting):
+			effects ^= form & colors.effects_bits
 			if end < pos:
 				return last
-			last = form
+			last = (form & ~colors.effects_bits) | effects
 		return last
 
 	def color_by_regex(self, regex, group_func, fallback=None, group=0):
@@ -470,7 +472,7 @@ class Coloring:
 		returns int
 		'''
 		if not callable(group_func):
-			ret = group_func	#get another header
+			ret = group_func	#get another ref to prevent recursion
 			group_func = lambda x: ret
 		# only get_last when supplied a color number fallback
 		get_last = False

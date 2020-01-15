@@ -608,7 +608,7 @@ class ChatOverlay(TextOverlay):
 		'''Cycle the displayed Message subclasses'''
 		displayed = Message.move_filter(direction)
 		self.redo_lines()
-		self.parent.blurb.push(f"Displaying messates of type '{displayed}'")
+		self.parent.blurb.push(f"displaying: '{displayed}'")
 
 	@key_handler("a-g")
 	def select_top(self):
