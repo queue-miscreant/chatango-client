@@ -346,6 +346,7 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		self.ignores = set(creds["ignores"])
 		self.filtered_channels = creds["filtered_channels"]
 		self.options = creds["options"]
+		self._prepend_history = True
 
 		self.connecting = False
 		self.joined_group = None
@@ -387,7 +388,7 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 	async def join_group(self, group_name): #pylint: disable=arguments-differ
 		await self.leave_group(self.joined_group)
 		self.creds["room"] = group_name
-		self.overlay.clear()
+		self.overlay.messages.delete(lambda x: isinstance(x, ChatangoMessage), True)
 		try:
 			await super().join_group(group_name)
 		except (ConnectionError, ValueError):
@@ -425,8 +426,7 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		self.overlay.left = "{}@{}".format(group.username, group.name)
 		#show last message time
 		self.overlay.msg_system("Connected to "+group.name)
-		self.overlay.msg_time(group.last_message, "Last message at ")
-		self.overlay.msg_time()
+		self._prepend_history = False
 
 	async def on_pm_connect(self, _):
 		self.overlay.msg_system("Connected to PMs")
@@ -447,16 +447,29 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		self.overlay.msg_append(ChatangoMessage(post, self, self.me, False
 			, alts=self.alts))
 
-	async def on_history_done(self, _, history):
+	async def on_history_done(self, group, history):
+		add = self.overlay.msg_prepend
+		if self._prepend_history:
+			#self.overlay.msg_time(prepend=True)
+			self.overlay.msg_time(history[0].time, prepend=True)
+		else:
+			history = reversed(history)
+			add = self.overlay.msg_append
+
 		for post in history:
 			username = str(post.user).lower()
 			if username[0] in '!#':
 				username = username[1:]
 			self.members.append(username)
 			self.overlay.parse_links(post.post, True)
-			self.overlay.msg_prepend(ChatangoMessage(post, self, self.me, True
-				, alts=self.alts))
+			add(ChatangoMessage(post, self, self.me, True, alts=self.alts))
+
+		if not self._prepend_history:
+			self.overlay.msg_time(group.last_message, "Last message at ")
+			self.overlay.msg_time()
+
 		self.overlay.can_select = True
+		self._prepend_history = True
 
 	async def on_flood_warning(self, _):
 		self.overlay.msg_system("Flood ban warning issued")
@@ -668,8 +681,8 @@ def _(mux, value, coloring):
 		coloring.insert_color(0, client.grayscale(12))
 
 #Extended overlay---------------------------------------------------------------
-@ChatangoMessage.key_handler("a-enter", 1)
-@ChatangoMessage.key_handler("enter")
+@client.Message.key_handler("a-enter", 1)
+@client.Message.key_handler("enter")
 def open_selected_links(message, overlay):
 	'''Open links in selected message'''
 	msg = message.post.post
@@ -701,7 +714,7 @@ def add_ignore(message, overlay):
 	except IndexError:
 		pass
 
-@ChatangoMessage.key_handler("mouse-left")
+@client.Message.key_handler("mouse-left")
 def _click_link(message, overlay, pos):
 	'''Click on a link as you would a hyperlink in a web browser'''
 	if pos == -1:

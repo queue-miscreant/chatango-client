@@ -102,8 +102,7 @@ class Command:
 			if isinstance(result, OverlayBase):
 				result.add()
 		except Exception as exc: #pylint: disable=broad-except
-			classname = type(exc).__name__
-			screen.blurb.push(f"{classname} occurred in command '{name}'")
+			screen.blurb.push(f"{str(exc)} occurred in command '{name}'")
 			traceback.print_exc()
 Sigil(Command.CHAR_COMMAND
 	, lambda _, wordnum: list(Command.commands) if wordnum == 0 else [])
@@ -180,14 +179,16 @@ class OverlayBase:
 		lines[value]) to display to the screen
 		'''
 
-	def run_key(self, chars, do_input):
+	def run_key(self, overlay, chars, do_input):
 		'''
-		Run a key callback. This expects a single argument: a list of numbers
-		terminated by -1. If the return value has boolean True, Screen will
+		Run a key callback. This expects the following arguments: `overlay`,
+		the topmost overlay attempting to run a callback, `chars`, a list of
+		numbers terminated by -1, and `do_input`, whether to run keys[-1]
+		If the return value has boolean True, Screen will
 		redraw; if the return value is -1, the overlay will remove itself
 		'''
-		if self.keys(chars, self, do_input=do_input) == -1:
-			self.remove()
+		if overlay.keys(chars, overlay, do_input=do_input) == -1:
+			overlay.remove()
 		return 1
 
 	def resize(self, newx, newy):
@@ -342,8 +343,10 @@ class TextOverlay(FutureOverlay):
 	def __init__(self, parent, default=None, password=False, empty_close=True):
 		super().__init__(parent)
 		text = parent.text
+		self._modified = False
 		if default is not None:
 			text.setstr(default)
+			self._modified = True
 		self.completer = Sigil()
 		self.password = password
 		self.isolated = True
@@ -372,6 +375,11 @@ class TextOverlay(FutureOverlay):
 			, "a-l":		text.wordnext
 			, "a-backspace":	text.delword
 		})
+
+	def add(self):
+		super().add()
+		if self.isolated and not self._modified:
+			self.text.clear()	#TODO maybe use a stack?
 
 	text = property(lambda self: self.parent.text)
 	nonscroll = property(lambda self: None)
@@ -696,8 +704,6 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		if overlay.replace:
 			self._last_replace = overlay.index
 		if isinstance(overlay, TextOverlay):
-			if overlay.isolated:
-				self.text.clear()	#TODO maybe use a stack?
 			overlay.nonscroll = None
 			self._last_text = overlay.index
 			self.update_input()
@@ -772,9 +778,10 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			nextch = self._screen.getch()
 			chars.append(nextch)
 		do_input = True
+		context = self._ins[self._last_replace]
 		for i in range(len(self._ins) - self._last_replace):
 			try: #shoot up the hierarchy of overlays to try to handle
-				if self._ins[-i-1].run_key(chars, do_input):
+				if context.run_key(self._ins[-i-1], chars, do_input):
 					await self.display()
 				break
 			except KeyException:

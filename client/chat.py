@@ -20,7 +20,8 @@ class Message(Coloring):
 	'''
 	INDENT = "    "
 	_shown_class = -1
-	subclasses = []
+	subclasses = []		#list of subclasses
+	subclass_keys = {}	#dict of keys
 	msg_count = 0
 	def __init__(self, msg, remove_fractur=True, **kwargs):
 		super().__init__(msg, remove_fractur)
@@ -88,6 +89,16 @@ class Message(Coloring):
 		'''
 		return False
 
+	def setstr(self, new, clear=True):
+		'''
+		Invalidate cache and set contained string to something new.
+		By default, also clears the contained formatting.
+		'''
+		super().setstr(new, clear)
+		self._last_recolor = -1
+		self._cached_hash = -1
+		self._cached_width = 0
+
 	def cache_display(self, width, recolor_count):
 		'''
 		Break a message to `width` columns. Does nothing if matches last call.
@@ -139,12 +150,14 @@ class Message(Coloring):
 		Mouse handlers expect signature (message, calling overlay, position)
 		See OverlayBase.add_keys documentation for valid values of `key_name`
 		'''
-		if not hasattr(cls, "keys"):
-			cls.keys = KeyContainer()
+		keys = cls.subclass_keys.get(cls)
+		if keys is None:
+			keys = KeyContainer()
 			#mouse callbacks don't work quite the same; they need an overlay
-			cls.keys.nomouse()
+			keys.nomouse()
+			cls.subclass_keys[cls] = keys
 		def ret(func):
-			cls.keys.add_key(key_name, func, return_val=override_val)
+			keys.add_key(key_name, func, return_val=override_val)
 			return func
 		return ret
 
@@ -224,8 +237,8 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		while line_number <= len(lines) and msg_number <= len(self._all_messages):
 			reverse = SELECT_AND_MOVE if msg_number == self._selector else ""
 			msg = self._all_messages[-msg_number]
-			if msg_number - self._lazy_offset not in cached_range:
-				msg.cache_display(self.parent.width, self._last_recolor)
+#			if msg_number - self._lazy_offset not in cached_range:
+			msg.cache_display(self.parent.width, self._last_recolor)
 			#if a message is ignored, then msg.display is []
 			for line_count, line in enumerate(reversed(msg.display)):
 				if ignore > line_count:
@@ -374,18 +387,26 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		msg.cache_display(self.parent.width, self._last_recolor)
 		return msg.mid
 
-	def delete(self, result, test=lambda x, y: x.mid == y):
-		''' Delete a message if `test`(a contained Message, `result`) is True'''
-		if not callable(test):
+	def delete(self, test, all=False):
+		'''
+		Delete a message. If `test` is an int, then the message with that id
+		will be deleted. Otherwise, the first message for which `test`(Message)
+		is True will be deleted. If `all` is true, then all messages satisfying
+		`test` are deleted.
+		'''
+		if not self._all_messages:
+			return
+		if isinstance(test, int):
+			mid = test
+			test = lambda x: x.mid == mid
+		elif not callable(test):
 			raise TypeError("delete requires callable")
 
-		start = self._start_message+1
-		#height remaining
-		start_height = -self._start_inner
+		start = 1
 
-		while start_height <= self.parent.height-1:
+		while start <= len(self._all_messages):
 			msg = self._all_messages[-start]
-			if test(msg, result):
+			if test(msg):
 				del self._all_messages[-start]
 				if self._selector > start: #below the selector
 					self._selector += 1
@@ -396,8 +417,8 @@ class Messages: #pylint: disable=too-many-instance-attributes
 						if self._selector == self._start_inner: #off by 1 anyway
 							self._start_inner += 1
 							self._height_up = self.selected.height
-				return
-			start_height += msg.height
+				if not all:
+					return
 			start += 1
 
 	def from_position(self, x, y):
@@ -461,6 +482,8 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		Returns an iterator that yields when the callback is true.
 		Callback is called with arguments passed into append (or msg_append...)
 		'''
+		if not self._all_messages:
+			return
 		select = 1
 		while select <= len(self._all_messages):
 			message = self._all_messages[-select]
@@ -472,6 +495,15 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			if ret:
 				yield message, select
 			select += 1
+
+	def get_first(self, callback):
+		'''
+		Get the first instance (if any) that `iterate_with` would retireve
+		Raises ValueError if no message satisfies callback
+		'''
+		for message, select in self.iterate_with(callback):
+			return message, select
+		raise ValueError("no messages match callback")
 
 	#REAPPLY METHODS-----------------------------------------------------------
 	def redo_lines(self, recolor=True):
@@ -488,6 +520,7 @@ class ChatOverlay(TextOverlay):
 	replace = True
 	def __init__(self, parent, push_times=600):
 		super().__init__(parent)
+		del self.keys["^w"] #unbind overlay exit
 		self._push_times = push_times
 		self._push_task = None
 		self._last_time = -1
@@ -540,33 +573,48 @@ class ChatOverlay(TextOverlay):
 		self.messages.redo_lines(False)
 		return 1
 
-	def run_key(self, chars, do_input):
+	def run_key(self, overlay, chars, do_input):
 		'''Delegate running characters to a selected message that supports it'''
 		selected = self.messages.selected
 		ret = None
 		try:
-			if selected is not None and hasattr(selected, "keys"):
-				#pass in the message and this overlay to the handler
-				ret = selected.keys(chars, selected, self)
-			else:
+			if selected is None:
+				raise KeyException
+			prevent_exception = False
+			for subclass in type(selected).mro():
+				try:
+					keys = Message.subclass_keys.get(subclass)
+					if keys is not None:
+						#pass in the message and this overlay to the handler
+						ret = keys(chars, selected, self)
+						prevent_exception = True
+						break
+				except KeyException:
+					pass
+			if not prevent_exception:
 				raise KeyException
 		except KeyException:
-			ret = self.keys(chars, self, do_input=do_input)
+			ret = overlay.keys(chars, overlay, do_input=do_input)
 
 		#stop selecting if False is returned
 		if not ret and self.messages.stop_select():
 			self.parent.update_input()
 			ret = 1
 		elif ret == -1:
-			self.remove()
+			overlay.remove()
 		return ret
 
 	@key_handler("mouse")
 	def _mouse(self, state, x, y):
 		'''Delegate mouse to message clicked on'''
 		msg, pos = self.messages.from_position(x, y)
-		if hasattr(msg, "keys"):
-			return msg.keys.mouse(msg, self, pos, state=state, x=x, y=y)
+		for subclass in type(msg).mro():
+			try:
+				keys = Message.subclass_keys.get(subclass)
+				if keys is not None:
+					return keys.mouse(msg, self, pos, state=state, x=x, y=y)
+			except KeyException:
+				pass
 		return 1
 
 	#MESSAGE SELECTION----------------------------------------------------------
@@ -628,16 +676,18 @@ class ChatOverlay(TextOverlay):
 		self.parent.schedule_display()
 
 	#MESSAGE ADDITION----------------------------------------------------------
-	def msg_system(self, base):
+	def msg_system(self, base, prepend=False):
 		'''System message'''
+		if prepend:
+			return self.msg_prepend(SystemMessage(base))
 		return self.msg_append(SystemMessage(base))
 
-	def msg_time(self, numtime=None, predicate=""):
+	def msg_time(self, numtime=None, predicate="", prepend=False):
 		'''Push a system message of the time'''
 		dtime = time.strftime("%H:%M:%S"
 			, time.localtime(numtime or time.time()))
-		ret = self.msg_system(predicate+dtime)
-		if not predicate:
+		ret = self.msg_system(predicate+dtime, prepend=prepend)
+		if not predicate and not prepend:
 			if self._last_time == ret-1:
 				self.messages.delete(self._last_time)
 			self._last_time = ret
@@ -679,8 +729,7 @@ class _MessageScrollOverlay(DisplayOverlay):
 	def next(self, step):
 		attempt = self.lazy_list.step(step)
 		if attempt:
-			self.change_display(attempt[0])
-			self.msg_index = attempt[1]
+			self.prompts, self.msg_index = attempt
 		elif step == 1:
 			self.parent.blurb.push(self.early)
 		elif step == -1:
