@@ -770,7 +770,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		if nextch == 3:
 			self.active = False
 			return
-		if not self._ins:
+		if not self._ins or self._last_replace < 0:
 			return
 
 		chars = [nextch]

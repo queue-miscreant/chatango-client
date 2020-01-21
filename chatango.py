@@ -346,7 +346,7 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		self.ignores = set(creds["ignores"])
 		self.filtered_channels = creds["filtered_channels"]
 		self.options = creds["options"]
-		self._prepend_history = True
+		self._prepend_history = False
 
 		self.connecting = False
 		self.joined_group = None
@@ -375,6 +375,7 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		if self.connecting:
 			return
 		self.connecting = True
+		self.overlay.messages.delete(lambda x: isinstance(x, ChatangoMessage), True)
 		self.members.clear()
 		self.overlay.msg_system("Connecting")
 		await self.join_group(self.creds["room"])
@@ -382,13 +383,11 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 
 	async def reconnect(self):
 		await self.leave_group(self.joined_group)
-		self.overlay.clear()
 		await self.connect()
 
 	async def join_group(self, group_name): #pylint: disable=arguments-differ
 		await self.leave_group(self.joined_group)
 		self.creds["room"] = group_name
-		self.overlay.messages.delete(lambda x: isinstance(x, ChatangoMessage), True)
 		try:
 			await super().join_group(group_name)
 		except (ConnectionError, ValueError):
@@ -426,7 +425,6 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		self.overlay.left = "{}@{}".format(group.username, group.name)
 		#show last message time
 		self.overlay.msg_system("Connected to "+group.name)
-		self._prepend_history = False
 
 	async def on_pm_connect(self, _):
 		self.overlay.msg_system("Connected to PMs")

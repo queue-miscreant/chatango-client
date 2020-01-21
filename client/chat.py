@@ -597,7 +597,7 @@ class ChatOverlay(TextOverlay):
 			ret = overlay.keys(chars, overlay, do_input=do_input)
 
 		#stop selecting if False is returned
-		if not ret and self.messages.stop_select():
+		if not ret and (self.messages.stop_select() or overlay != self):
 			self.parent.update_input()
 			ret = 1
 		elif ret == -1:
