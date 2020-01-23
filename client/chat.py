@@ -387,7 +387,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		msg.cache_display(self.parent.width, self._last_recolor)
 		return msg.mid
 
-	def delete(self, test, all=False):
+	def delete(self, test, delete_all=False):
 		'''
 		Delete a message. If `test` is an int, then the message with that id
 		will be deleted. Otherwise, the first message for which `test`(Message)
@@ -408,6 +408,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			msg = self._all_messages[-start]
 			if test(msg):
 				del self._all_messages[-start]
+				start -= 1
 				if self._selector > start: #below the selector
 					self._selector += 1
 					self._height_up -= msg.height
@@ -417,9 +418,11 @@ class Messages: #pylint: disable=too-many-instance-attributes
 						if self._selector == self._start_inner: #off by 1 anyway
 							self._start_inner += 1
 							self._height_up = self.selected.height
-				if not all:
+				if not delete_all:
+					self.parent.redo_lines()
 					return
 			start += 1
+		self.parent.redo_lines()
 
 	def from_position(self, x, y):
 		'''Get the message and depth into the message at position x,y'''

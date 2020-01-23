@@ -375,7 +375,6 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 		if self.connecting:
 			return
 		self.connecting = True
-		self.overlay.messages.delete(lambda x: isinstance(x, ChatangoMessage), True)
 		self.members.clear()
 		self.overlay.msg_system("Connecting")
 		await self.join_group(self.creds["room"])
@@ -387,6 +386,8 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 
 	async def join_group(self, group_name): #pylint: disable=arguments-differ
 		await self.leave_group(self.joined_group)
+		self.overlay.messages.delete(lambda x: isinstance(x, ChatangoMessage), True)
+		self._prepend_history = False
 		self.creds["room"] = group_name
 		try:
 			await super().join_group(group_name)
@@ -448,7 +449,6 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 	async def on_history_done(self, group, history):
 		add = self.overlay.msg_prepend
 		if self._prepend_history:
-			#self.overlay.msg_time(prepend=True)
 			self.overlay.msg_time(history[0].time, prepend=True)
 		else:
 			history = reversed(history)
