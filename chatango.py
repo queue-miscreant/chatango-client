@@ -459,7 +459,7 @@ class ChatBot(pytango.Manager): #pylint: disable=too-many-instance-attributes, t
 			if username[0] in '!#':
 				username = username[1:]
 			self.members.append(username)
-			self.overlay.parse_links(post.post, True)
+			self.overlay.parse_links(post.post, self._prepend_history)
 			add(ChatangoMessage(post, self, self.me, True, alts=self.alts))
 
 		if not self._prepend_history:
@@ -683,8 +683,7 @@ def _(mux, value, coloring):
 @client.Message.key_handler("enter")
 def open_selected_links(message, overlay):
 	'''Open links in selected message'''
-	msg = message.post.post
-	all_links = linkopen.LINK_RE.findall(msg)
+	all_links = linkopen.LINK_RE.findall(str(message))
 	linkopen.open_link(overlay.parent, all_links)
 
 @ChatangoMessage.key_handler("tab")
@@ -876,6 +875,7 @@ class ChatangoOverlay(client.ChatOverlay):
 				, empty="No message containing `%s` found" % string
 				, early="No earlier instance of `%s`" % string
 				, late="No later instance of `%s`" % string)
+			return -1
 
 		box.add()
 
