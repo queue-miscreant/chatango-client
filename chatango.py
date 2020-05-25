@@ -758,6 +758,7 @@ class ChatangoOverlay(client.ChatOverlay):
 		'''Open selected message's links or send message'''
 		#if it's not just spaces
 		if not text.isspace():
+			linkopen.visit_link(linkopen.LINK_RE.findall(text))
 			self.bot.send_post(text)
 
 	def _max_select(self):

@@ -310,7 +310,10 @@ class FutureOverlay(OverlayBase):
 		self._future.add_done_callback(self._new_callback)
 
 	def callback(self, func, do_remove=False):
-		'''Decorator for a function with a single argument: the future result'''
+		'''
+		Decorator for a function with a single argument: the future result
+		Note that by default, async functions (i.e, generators) only run once
+		'''
 		if not callable(func):
 			raise TypeError(f"Callback expected callable, got {type(func)}")
 		if asyncio.iscoroutinefunction(func):

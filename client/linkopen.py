@@ -110,15 +110,12 @@ async def get_opengraph(link, *args, loop=None):
 
 	if not args:
 		return full
-	try:
-		if len(args) == 1:
-			return full[args[0]]		#never try 1-tuple assignment
-		return [full[i] for i in args]	#tuple unpacking
-	except KeyError as exc:
-		raise ValueError("Requested OpenGraph tags not found") from exc
+	if len(args) == 1:
+		return full[args[0]]		#never try 1-tuple assignment
+	return [full[i] if i in full else None for i in args]	#tuple unpacking
 
 class DummyScreen: #pylint: disable=too-few-public-methods
-	'''Dummy class for base.Screen'''
+	'''Dummy class for base.Screen used by _LinkDelegator'''
 	loop = property(lambda _: asyncio.get_event_loop())
 	class blurb: #pylint: disable=invalid-name
 		push = lambda _: None
@@ -137,7 +134,7 @@ class _LinkDelegator: #pylint: disable=invalid-name
 	'''
 	warning_count = 5
 	def __init__(self):
-		self._visited = []
+		self._visited = set()
 		self._visit_redraw = []
 
 	def __call__(self, screen, links, default=0, force=False):
@@ -157,10 +154,26 @@ class _LinkDelegator: #pylint: disable=invalid-name
 		for link in links:
 			#append to visited links
 			if link not in self._visited:
-				self._visited.append(link)
+				self._visited.add(link)
 				do_redraw = True
 			func = opener.get(link, default)
 			screen.loop.create_task(self._open_safe(func, screen, link))
+
+		if do_redraw:
+			for func in self._visit_redraw:
+				func()
+
+	def visit_link(self, links):
+		'''Mark links as visited without using an opener'''
+		if not isinstance(links, list):
+			links = [links]
+
+		do_redraw = False
+		for link in links:
+			#append to visited links
+			if link not in self._visited:
+				self._visited.add(link)
+				do_redraw = True
 
 		if do_redraw:
 			for func in self._visit_redraw:
@@ -190,6 +203,7 @@ class _LinkDelegator: #pylint: disable=invalid-name
 		except ValueError:
 			pass
 open_link = _LinkDelegator() #pylint: disable=invalid-name
+visit_link = open_link.visit_link #pylint: disable=invalid-name
 
 class opener: #pylint: disable=invalid-name
 	'''
