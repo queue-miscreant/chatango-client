@@ -36,14 +36,14 @@ if sys.platform in ("win32", "cygwin"):
 import webbrowser #pylint: disable=wrong-import-position, wrong-import-order
 
 __all__ =	["LINK_RE", "get_defaults", "get_extension", "opener", "open_link"
-	, "images", "videos", "browser"]
+	, "visit_link", "images", "videos", "browser"]
 
 #extension recognizing regex
 _NO_QUERY_FRAGMENT_RE =	re.compile(r"[^?#]+(?=.*)")
 _EXTENSION_RE = re.compile(r"\.(\w+)[&/\?]?")
 LINK_RE = re.compile("(https?://.+?\\.[^`\\s]+)")
 #opengraph regex
-OG_RE = re.compile(b"<meta\\s+(?:name|property)=\"og:(\\w+)\"\\s+" \
+OG_RE = re.compile(b"<meta\\s+(?:name|property)=\"og:([:\\w]+)\"\\s+" \
 	b"content=\"(.+?)\"", re.MULTILINE)
 
 class LinkException(Exception):

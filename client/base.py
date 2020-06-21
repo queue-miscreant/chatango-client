@@ -155,12 +155,7 @@ class OverlayBase:
 	left = property(lambda self: str(self._reverse), doc="Left side display")
 	@left.setter
 	def left(self, new):
-		color = None
-		if isinstance(new, tuple):
-			new, color = new #extract a color
 		self._reverse.setstr(new)
-		if color is not None:
-			self._reverse.insert_color(0, color)
 		self.parent.update_status()
 
 	right = property(lambda self: self._reverse.indicator, doc="Right side display")

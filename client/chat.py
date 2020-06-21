@@ -89,12 +89,12 @@ class Message(Coloring):
 		'''
 		return False
 
-	def setstr(self, new, clear=True):
+	def setstr(self, new, clear=True, remove_fractur=True):
 		'''
 		Invalidate cache and set contained string to something new.
 		By default, also clears the contained formatting.
 		'''
-		super().setstr(new, clear)
+		super().setstr(new, clear, remove_fractur)
 		self._last_recolor = -1
 		self._cached_hash = -1
 		self._cached_width = 0
@@ -600,7 +600,7 @@ class ChatOverlay(TextOverlay):
 			ret = overlay.keys(chars, overlay, do_input=do_input)
 
 		#stop selecting if False is returned
-		if not ret and (self.messages.stop_select() or overlay != self):
+		if not ret and (overlay != self or self.messages.stop_select()):
 			self.parent.update_input()
 			ret = 1
 		elif ret == -1:

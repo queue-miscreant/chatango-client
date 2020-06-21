@@ -14,6 +14,7 @@ __all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "SELECT_AND_MOVE"
 			, "collen", "numdrawing", "columnslice", "colors", "Box", "Coloring"
 			, "JustifiedColoring", "Scrollable", "ScrollSuggest"]
 
+#character ranges that don't appear to cooperate with wcwidth (even the C implementation)
 BAD_CHARSETS = [
 	  (119964, 26, ord('A'))	#uppercase math
 	, (119990, 26, ord('a'))	#lowercase math
@@ -28,8 +29,6 @@ BAD_CHARSETS = [
 def _parse_fractur(raw):
 	cooked = ""
 	for i in raw:
-		#look for fractur and double-width fonts that don't
-		#comply with wcwidth (even C wcwidth, because tmux fails)
 		for begin, length, onto in BAD_CHARSETS:
 			if ord(i) in range(begin, begin+length):
 				i = chr(ord(i) - begin + onto)
@@ -293,12 +292,11 @@ class Coloring:
 	'''Container for a string and coloring to be done'''
 	def __init__(self, string, remove_fractur=True):
 		colors.CAN_DEFINE_EFFECTS = False #pylint: disable=invalid-name
-		if remove_fractur:
-			string = _parse_fractur(string)
-		self._str = string
+		self._str = ""
 		self._positions = []
 		self._formatting = []
 		self._maxpos = -1
+		self.setstr(string, False, remove_fractur)
 
 	def __hash__(self):
 		'''Base hash on internal parameters only, to make memoization easier'''
@@ -311,14 +309,21 @@ class Coloring:
 		self._positions.clear()
 		self._formatting.clear()
 
-	def setstr(self, new, clear=True):
+	def setstr(self, new, clear=True, remove_fractur=True):
 		'''
-		Set contained string to something new.
-		By default, also clears the contained formatting.
+		Set contained string to something new, clearing formatting if `clear`
+		`new` can be a (str, color) tuple to instantly add a color
 		'''
 		if clear:
 			self.clear()
+		color = None
+		if isinstance(new, tuple):
+			new, color = new #extract a color
+		if remove_fractur:
+			new = _parse_fractur(new)
 		self._str = new
+		if color is not None:
+			self.insert_color(0, color)
 
 	def __repr__(self):
 		return "<{} string = {}, positions = {}, formatting = {}>".format(
@@ -591,7 +596,6 @@ class JustifiedColoring(Coloring):
 	def __init__(self, string, remove_fractur=True):
 		super().__init__(string, remove_fractur)
 		self._indicator = None
-
 		self._memoargs = None
 		self._rendered = None
 
@@ -730,8 +734,7 @@ class JustifiedColoring(Coloring):
 #SCROLLABLE CLASSES-------------------------------------------------------------
 class Scrollable:
 	'''Scrollable text input'''
-	#arbitrary number of characters a scrollable can have and not scroll
-	MAX_NONSCROLL_WIDTH = 5
+	MAX_NONSCROLL_WIDTH = 5 #arbitrary maximum prefix length
 	_TABLEN = 4
 
 	def __init__(self, width, string=""):
