@@ -599,8 +599,10 @@ class ChatOverlay(TextOverlay):
 		except KeyException:
 			ret = overlay.keys(chars, overlay, do_input=do_input)
 
-		#stop selecting if False is returned
-		if not ret and (overlay != self or self.messages.stop_select()):
+		#more naturally, it should be for any overlay with -1, but TextOverlays
+		#tend to control a scrollable, which should back us out of selection
+		if not ret and isinstance(overlay, TextOverlay):
+			self.messages.stop_select()
 			self.parent.update_input()
 			ret = 1
 		elif ret == -1:
