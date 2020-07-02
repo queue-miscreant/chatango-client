@@ -608,10 +608,9 @@ class ChatOverlay(TextOverlay):
 		if not ret and isinstance(overlay, TextOverlay):
 			self.messages.stop_select()
 			self.parent.update_input()
-			return 1
-		if ret == -1:
+		elif ret == -1:
 			overlay.remove()
-		return ret
+		return 1
 
 	@key_handler("mouse")
 	def _mouse(self, state, x, y):
