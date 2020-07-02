@@ -207,6 +207,22 @@ class KeyContainer:
 		del list_ref[name]
 
 	def __contains__(self, other):
+		'''
+		Returns whether this object can handle running the key `other`
+		Can be either a list of characters or the formal name of a key
+		'''
+		if isinstance(other, list):
+			try:
+				char = self._KEY_LUT[other[0]]
+			except KeyError:
+				char = other[0]
+
+			#alt escapes
+			if char == 27:
+				return other[1] in self._altkeys
+			printing = char in range(32, 255) or char in (9, 10)
+			return char in self._keys or (-1 in self._keys and printing)
+
 		list_ref, key_name = self._get_key(other)
 		return key_name in list_ref
 

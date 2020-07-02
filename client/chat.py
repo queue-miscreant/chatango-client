@@ -231,7 +231,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		line_number = 2
 		msg_number = self._start_message + 1
 		ignore = self._start_inner
-		cached_range = range(*self._lazy_bounds)
+#		cached_range = range(*self._lazy_bounds)
 		self._lazy_bounds[0] = min(self._lazy_bounds[0] + self._lazy_offset, msg_number)
 		#traverse list of lines
 		while line_number <= len(lines) and msg_number <= len(self._all_messages):
@@ -581,7 +581,11 @@ class ChatOverlay(TextOverlay):
 		selected = self.messages.selected
 		ret = None
 		try:
-			if selected is None:
+			#only ignore message keys if there is a superior overlay that is
+			#not a TextOverlay and can run the chars provided
+			ignore = overlay != self and not isinstance(overlay, TextOverlay) \
+				and chars in overlay.keys
+			if selected is None or ignore:
 				raise KeyException
 			prevent_exception = False
 			for subclass in type(selected).mro():
@@ -604,8 +608,8 @@ class ChatOverlay(TextOverlay):
 		if not ret and isinstance(overlay, TextOverlay):
 			self.messages.stop_select()
 			self.parent.update_input()
-			ret = 1
-		elif ret == -1:
+			return 1
+		if ret == -1:
 			overlay.remove()
 		return ret
 

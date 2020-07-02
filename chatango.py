@@ -879,6 +879,7 @@ class ChatangoOverlay(client.ChatOverlay):
 			return -1
 
 		box.add()
+		return 1
 
 	#LINK RELATED--------------------------------------------------------------
 	def parse_links(self, raw, prepend=False):
