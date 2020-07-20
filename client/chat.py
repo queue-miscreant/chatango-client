@@ -122,7 +122,7 @@ class Message(Coloring):
 		self._cached_hash = self_hash
 		self._cached_width = width
 
-	def dump(self, prefix, coloring=False):
+	def dump(self, prefix="", coloring=False):
 		'''Dump public variables associated with the message'''
 		publics = {i: j for i, j in self.__dict__.items() \
 			if not i.startswith('_')}
@@ -182,6 +182,11 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._lazy_bounds = [0, 0]	#latest/earliest messages to recolor
 		self._lazy_offset = 0		#lines added since last lazy_bounds modification
 		self._last_recolor = 0
+
+	def dump(self):
+		self_dict = {i:j for i, j in self.__dict__.items()
+			if i not in ("_all_messages", "parent")}
+		print(self_dict)
 
 	def clear(self):
 		'''Clear all lines and messages'''
@@ -319,14 +324,17 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		height = self.parent.height-1
 		#scroll within a message if possible, if there is a hidden line
 		if self._selector == self._start_message+1 and self._start_inner > 0:
-			new_inner = max(0, self._start_inner - amount)
+			new_inner = max(-1, self._start_inner - amount)
 			inner_diff = self._start_inner - new_inner
 			self._start_inner = new_inner
-			amount -= new_inner
-			if new_inner == 0:
+			amount -= inner_diff
+			if new_inner < 0:
 				if self._selector == 1:
 					self.stop_select()
 					return 0
+				return inner_diff
+			if amount <= 0:
+				self.dump()
 				return inner_diff
 
 		#out of checking for scrolling inside of a message; go by messages now
@@ -530,6 +538,10 @@ class ChatOverlay(TextOverlay):
 		#options for TextOverlays
 		self._empty_close = False
 		self.isolated = False
+		self.add_keys({
+			   "^p":	lambda: (self.messages.selected and self.messages.selected.dump(coloring=True)) or 1
+			 , "^o":	lambda: self.messages.dump() or 1
+		})
 
 		self.messages = Messages(self)
 
@@ -628,7 +640,7 @@ class ChatOverlay(TextOverlay):
 	#MESSAGE SELECTION----------------------------------------------------------
 	def _max_select(self):
 		self.parent.sound_bell()
-		self.can_select = 0
+		#self.can_select = 0
 
 	@key_handler("ppage", amount=5)
 	@key_handler("a-k")

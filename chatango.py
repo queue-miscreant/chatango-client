@@ -738,18 +738,18 @@ class ChatangoOverlay(client.ChatOverlay):
 		self.can_select = False
 		self.bot = bot
 		self.add_keys({
-			 "f2":			self._show_links
-			, "f3":			self._show_members
-			, "f4":			self._show_formatting
-			, "f5":			self._show_channels
-			, "f6":			self._replies_scroller
-#			, "f7":			self.pmConnect
-			, "f12":		self._show_options
-			, "^f":			self._search_scroller
-			, "^t":			self.join_group
-			, "^p":			self.userpass
-			, "^g":			self.open_last_link
-			, "^r":			self.reload_client
+			 "f2":		self._show_links
+			, "f3":		self._show_members
+			, "f4":		self._show_formatting
+			, "f5":		self._show_channels
+			, "f6":		self._replies_scroller
+#			, "f7":		self.pmConnect
+			, "f12":	self._show_options
+			, "^f":		self._search_scroller
+			, "^t":		self.join_group
+			, "^p":		self.userpass
+			, "^g":		self.open_last_link
+			, "^r":		self.reload_client
 		})
 
 		linkopen.open_link.add_redraw_method(self.redo_lines)

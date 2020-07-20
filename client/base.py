@@ -133,6 +133,8 @@ class OverlayBase:
 	'''
 	replace = False
 	def __init__(self, parent):
+		if not isinstance(parent, Screen):
+			raise TypeError("OverlayBase parent must be an instance of Screen")
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
 		self._reverse = JustifiedColoring("")	#text to draw in reverse video
