@@ -564,7 +564,7 @@ class DisplayOverlay(OverlayBase, Box):
 		maxlines = self.height-2
 		if len(self._prompts) <= maxlines: #nothing to scroll
 			return
-		self._begin = min(max(0, self.begin+amt), maxlines-len(self._prompts))
+		self._begin = min(max(0, self._begin+amt), len(self._prompts) - maxlines)
 
 class PromptOverlay(DisplayOverlay, TextOverlay):
 	'''Combine text input with a prompt'''

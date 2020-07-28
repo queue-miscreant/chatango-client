@@ -137,6 +137,7 @@ class OverlayBase:
 			raise TypeError("OverlayBase parent must be an instance of Screen")
 		self.parent = parent		#parent
 		self.index = None			#index in the stack
+		self._term = None			#terminate input; leave None to be equivalent to replace
 		self._reverse = JustifiedColoring("")	#text to draw in reverse video
 		self._ensure = 2			#number of columns reserved to the RHS in _reverse
 
@@ -168,6 +169,11 @@ class OverlayBase:
 			new, color = new #extract a color
 		self._reverse.add_indicator(new, color)
 		self.parent.update_status()
+
+	terminate_input = property(lambda self: self.replace if self._term is None else self._term)
+	@terminate_input.setter
+	def terminate_input(self, new):
+		self._term = new
 
 	def __call__(self, lines):
 		'''
@@ -223,7 +229,7 @@ class OverlayBase:
 			if isinstance(handler, tuple):
 				handler, override = handler
 			elif isinstance(handler, key_handler):
-				handler = handler.func
+				handler = handler.bound
 			if redefine or key_name not in self.keys:
 				self.keys.add_key(key_name, handler, key_name == -1, override)
 
@@ -234,7 +240,8 @@ class OverlayBase:
 		See `client.key_handler` documentation for valid values of `key_name`
 		'''
 		def ret(func):
-			if not isinstance(func, key_handler): #extract stacked
+			handle = func
+			if not isinstance(handle, key_handler): #extract stacked
 				handle = key_handler(key_name, override, **kwargs)(func)
 			#setattr to class
 			if _bind_immed is None:
@@ -497,16 +504,19 @@ class Blurb:
 
 	def push(self, blurb=""):
 		'''Pushes blurb to the queue and timestamps the transaction.'''
-		self.parent.write_status(self._push(blurb, self.parent.loop.time()), 2)
+		self.parent.write_status(self._push(blurb, self.parent.loop.time())
+			, self.parent.START_BLURB)
 
 	def hold(self, blurb):
 		'''Holds blurb, preempting all `push`s until `release`'''
-		self.parent.write_status(self._push(blurb, -1), 2)
+		self.parent.write_status(self._push(blurb, -1)
+			, self.parent.START_BLURB)
 
 	def release(self):
 		'''Releases a `hold`. Needed to re-enable `push`'''
 		self.last = self.parent.loop.time()
-		self.parent.write_status(self._push("", self.last), 2)
+		self.parent.write_status(self._push("", self.last)
+			, self.parent.START_BLURB)
 
 	async def _refresh(self):
 		'''Helper coroutine to start_refresh'''
@@ -536,11 +546,15 @@ class Screen: #pylint: disable=too-many-instance-attributes
 
 	_RETURN_CURSOR = "\x1b[?25h\x1b[u\n\x1b[A"
 	#return cursor to the top of the screen, hide, and clear formatting on drawing
-	_DISPLAY_INIT = f"\x1b[;f{CLEAR_FORMATTING}\x1b[?25l"
+	_DISPLAY_INIT = "\x1b[%d;f" + CLEAR_FORMATTING + "\x1b[?25l"
 	#format with tuple (row number, string)
 	#move cursor, clear formatting, print string, clear garbage, and return cursor
 	_SINGLE_LINE = "\x1b[%d;f" + CLEAR_FORMATTING +"%s\x1b[K" + _RETURN_CURSOR
 	_RESERVE_LINES = 3
+	START_DISPLAY = 0
+	START_TEXT = -3
+	START_BLURB = -2
+	START_REVERSE = -1
 
 	def __init__(self, manager, refresh_blurbs=True, loop=None):
 		if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -614,6 +628,13 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		'''Sound console bell.'''
 		self._displaybuffer.write('\a')
 
+	def reverse_top(self):
+		'''Alternate display method'''
+		self.START_REVERSE = 0
+		self.START_DISPLAY = 1
+		self.START_TEXT = -2
+		self.START_BLURB = -1
+
 	#Display Methods------------------------------------------------------------
 	async def resize(self):
 		'''Fire all added overlay's resize methods'''
@@ -649,7 +670,7 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		except DisplayException:
 			self._candisplay = 0
 			return
-		self._displaybuffer.write(self._DISPLAY_INIT)
+		self._displaybuffer.write(self._DISPLAY_INIT % (self.START_DISPLAY + 1))
 		#draw each line in lines, deleting the rest of the garbage on the line
 		for i in lines:
 			self._displaybuffer.write(i+"\x1b[K\n\r")
@@ -659,11 +680,11 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		'''Input display backend'''
 		if not (self.active and self._candisplay):
 			return
-		if self._last_text < 0:
+		last = self.last_text
+		if last is None:
 			return	#no textoverlays added
-		string = self._ins[self._last_text].text.show(self.last_text.password)
-		self._displaybuffer.write(self._SINGLE_LINE %
-			(self.height+1, string))
+		string = last.text.show(last.password)
+		self.write_status(string, self.START_TEXT, skip=True)
 
 	def update_status(self):
 		'''Look for the highest blurb for which status has been set'''
@@ -671,15 +692,17 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			reverse = i._reverse
 			if reverse:
 				just = reverse.justify(self.width, ensure_indicator=i._ensure)
-				self.write_status("\x1b[7m" + just, 3)
+				self.write_status("\x1b[7m" + just, self.START_REVERSE)
 				break
 
-	def write_status(self, string, height):
+	def write_status(self, string, height, skip=False):
 		'''Backend to draw below overlays'''
-		if not (self.active and self._candisplay) or string is None:
-			return
-		self._displaybuffer.write(self._SINGLE_LINE %
-			(self.height+height, string))
+		if not skip:
+			if not (self.active and self._candisplay) or string is None:
+				return
+		if height < 0:
+			height = self.height + self._RESERVE_LINES + height
+		self._displaybuffer.write(self._SINGLE_LINE % (height+1, string))
 
 	def schedule_display(self):
 		self.loop.create_task(self.display())
@@ -779,13 +802,15 @@ class Screen: #pylint: disable=too-many-instance-attributes
 			chars.append(nextch)
 		do_input = True
 		context = self._ins[self._last_replace]
-		for i in range(len(self._ins) - self._last_replace):
+		for i in reversed(self._ins):
 			try: #shoot up the hierarchy of overlays to try to handle
-				if context.run_key(self._ins[-i-1], chars, do_input):
+				if context.run_key(i, chars, do_input):
 					await self.display()
 				break
 			except KeyException:
 				do_input = False
+			if i.terminate_input:
+				break
 
 	def stop(self):
 		self.active = False

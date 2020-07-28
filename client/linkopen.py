@@ -36,7 +36,7 @@ if sys.platform in ("win32", "cygwin"):
 import webbrowser #pylint: disable=wrong-import-position, wrong-import-order
 
 __all__ =	["LINK_RE", "get_defaults", "get_extension", "opener", "open_link"
-	, "visit_link", "images", "videos", "browser"]
+	, "visit_link", "images", "videos", "browser", "urlopen_async", "get_opengraph"]
 
 #extension recognizing regex
 _NO_QUERY_FRAGMENT_RE =	re.compile(r"[^?#]+(?=.*)")
@@ -145,18 +145,21 @@ class _LinkDelegator: #pylint: disable=invalid-name
 			links = [links]
 
 		#limit opening too many links
-		if not force and len(links) >= self.warning_count:
+		if not force and not isinstance(screen, DummyScreen) \
+		and len(links) >= self.warning_count:
 			ConfirmOverlay(screen, "Really open %d links? (y/n)" % len(links)
 				, lambda: self(screen, links, default, True)).add()
 			return
 
 		do_redraw = False
 		for link in links:
+			if not isinstance(link, (tuple, list)):
+				link = (link,)
 			#append to visited links
-			if link not in self._visited:
-				self._visited.add(link)
+			if link[0] not in self._visited:
+				self._visited.add(link[0])
 				do_redraw = True
-			func = opener.get(link, default)
+			func = opener.get(link[0], default)
 			screen.loop.create_task(self._open_safe(func, screen, link))
 
 		if do_redraw:
@@ -182,7 +185,10 @@ class _LinkDelegator: #pylint: disable=invalid-name
 	async def _open_safe(self, func, screen, link):
 		'''Safely open a link and catch exceptions'''
 		try:
-			await func(screen, link)
+			try:
+				await func(screen, *link)
+			except TypeError:
+				await func(screen, link[0])
 		except Exception as exc: #pylint: disable=broad-except
 			screen.blurb.push("Error opening link: " + str(exc))
 			traceback.print_exc()
@@ -305,12 +311,14 @@ async def images(main, link):
 @opener("extension", "webm")
 @opener("extension", "mp4")
 @opener("extension", "gif")
-async def videos(main, link):
+async def videos(main, link, title=None):
 	'''Start mpv (or replaced video player) in main.loop'''
 	if not MPV_ARGS:
 		return await browser(main, link)
 	main.blurb.push("Playing video...")
 	args = MPV_ARGS + [link]
+	if title is not None:
+		args.extend(["--title={}".format(title)])
 	try:
 		await asyncio.create_subprocess_exec(*args
 			, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, loop=main.loop)

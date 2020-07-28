@@ -309,7 +309,9 @@ class key_handler: #pylint: disable=invalid-name
 		self.bound = None
 		self.keys = [(key_name, override, doc, kwargs)]
 
-	def __call__(self, func):
+	def __call__(self, func=None, *args, **kwargs):
+		if func is None:
+			return func(*args, **kwargs)
 		if isinstance(func, key_handler):
 			func.keys.extend(self.keys)
 			return func

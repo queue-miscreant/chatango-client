@@ -19,6 +19,7 @@ class Message(Coloring):
 	colorizing method, without binding tightly to a ChatOverlay subclass
 	'''
 	INDENT = "    "
+	KEEP_EMPTY = True
 	_shown_class = -1
 	subclasses = []		#list of subclasses
 	subclass_keys = {}	#dict of keys
@@ -118,7 +119,7 @@ class Message(Coloring):
 			self_hash = hash(self)
 		if self._cached_hash == self_hash and self._cached_width == width: #don't break lines again
 			return
-		self._cached_display = super().breaklines(width, self.INDENT)
+		self._cached_display = super().breaklines(width, self.INDENT, self.KEEP_EMPTY)
 		self._cached_hash = self_hash
 		self._cached_width = width
 
@@ -168,7 +169,7 @@ class SystemMessage(Message):
 
 class Messages: #pylint: disable=too-many-instance-attributes
 	'''Container object for Message objects'''
-	def __init__(self, parent):
+	def __init__(self, parent, no_recolors=False):
 		self.parent = parent
 
 		self.can_select = True
@@ -181,7 +182,10 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		#lazy storage
 		self._lazy_bounds = [0, 0]	#latest/earliest messages to recolor
 		self._lazy_offset = 0		#lines added since last lazy_bounds modification
-		self._last_recolor = 0
+		self._last_recolor = -1 if no_recolors else 0
+
+	def __len__(self):
+		return len(self._all_messages)
 
 	def dump(self):
 		self_dict = {i:j for i, j in self.__dict__.items()
@@ -198,7 +202,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._height_up = 0
 		self._lazy_bounds = [0, 0]
 		self._lazy_offset = 0
-		self._last_recolor += 1
+		self._last_recolor += (self._last_recolor >= 0)
 
 	def stop_select(self):
 		'''Stop selecting'''
@@ -334,7 +338,6 @@ class Messages: #pylint: disable=too-many-instance-attributes
 					return 0
 				return inner_diff
 			if amount <= 0:
-				self.dump()
 				return inner_diff
 
 		#out of checking for scrolling inside of a message; go by messages now
@@ -529,7 +532,7 @@ class ChatOverlay(TextOverlay):
 	Optionally pushes time messages every `push_times` seconds, 0 to disable.
 	'''
 	replace = True
-	def __init__(self, parent, push_times=600):
+	def __init__(self, parent, push_times=600, no_recolors=False):
 		super().__init__(parent)
 		del self.keys["^w"] #unbind overlay exit
 		self._push_times = push_times
@@ -543,7 +546,7 @@ class ChatOverlay(TextOverlay):
 			 , "^o":	lambda: self.messages.dump() or 1
 		})
 
-		self.messages = Messages(self)
+		self.messages = Messages(self, no_recolors)
 
 	can_select = property(lambda self: self.messages.can_select)
 	@can_select.setter
@@ -552,7 +555,7 @@ class ChatOverlay(TextOverlay):
 
 	async def _time_loop(self):
 		'''Prints the current time every 10 minutes'''
-		while self._push_times:
+		while self._push_times > 0:
 			await asyncio.sleep(self._push_times)
 			self.msg_time()
 
@@ -615,9 +618,7 @@ class ChatOverlay(TextOverlay):
 		except KeyException:
 			ret = overlay.keys(chars, overlay, do_input=do_input)
 
-		#more naturally, it should be for any overlay with -1, but TextOverlays
-		#tend to control a scrollable, which should back us out of selection
-		if not ret and isinstance(overlay, TextOverlay):
+		if not ret and -1 in overlay.keys:
 			self.messages.stop_select()
 			self.parent.update_input()
 		elif ret == -1:

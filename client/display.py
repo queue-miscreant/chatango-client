@@ -209,7 +209,7 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 			raise DisplayException("raw numbers may not be below 0")
 		return pair_number - self.predefined
 
-	def two56(self, color, too_black=2, too_white=34):
+	def two56(self, color, too_black=2, too_white=34, reweight=None):
 		'''
 		Convert a hex string, 3-tuple, or pre-calculated int to 256 color
 		Returns `colors.default` if not running in 256 color mode
@@ -233,13 +233,31 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 			else:
 				in216 = [int(color[i]*5/255) for i in range(3)]
 
+			if callable(reweight):
+				in216 = reweight(in216)
+			elif reweight is not None:
+				in216 = self.reweight(in216)
 			#too white or too black
-			if sum(in216) < too_black or sum(in216) > too_white:
+			elif sum(in216) < too_black or sum(in216) > too_white:
 				return self.default
 			return self._two56_start + 16 + \
 				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
 		except (AttributeError, TypeError):
 			return self.default
+
+	@staticmethod
+	def reweight(in216):
+		#too black or too white? just bias toward the center
+		#prelim = [[0, 1, 2, 2, 3, 4][i] for i in in216]
+		prelim = in216
+		if sum(in216) == 0:
+			return [1, 1, 1] #dark gray better than black
+		if sum(in216) == 15:
+			return [4, 4, 4]
+		#greenify pure blues so they're easier on the eyes
+		if sum(in216) == prelim[2]:
+			prelim[1] += 1 
+		return prelim
 
 	def grayscale(self, color):
 		'''Gets a 256-color grayscale `color` from 0 (black) to 24 (white)'''
@@ -324,6 +342,17 @@ class Coloring:
 		self._str = new
 		if color is not None:
 			self.insert_color(0, color)
+
+	def __add__(self, other):
+		if not isinstance(other, Coloring):
+			raise TypeError("Cannot concat non-Coloring to Coloring")
+		if other._positions and other._positions[0]+len(self._str) == self._maxpos:
+			self._positions.pop()
+			self._formatting.pop()
+		self._formatting.extend(other._formatting)
+		self._positions.extend((pos+len(self._str) for pos in other._positions))
+		self._str += other._str
+		return self
 
 	def __repr__(self):
 		return "<{} string = {}, positions = {}, formatting = {}>".format(
@@ -414,7 +443,7 @@ class Coloring:
 		if start < 0:
 			start = len(self._str) + start
 		if not end or end <= 0:
-			end = len(self._str) + int(end)
+			end = len(self._str) + int(end if end is not None else 0)
 		if start >= end:
 			return
 
@@ -512,12 +541,12 @@ class Coloring:
 		outdent_len = collen(outdent) #cache the length of the outdent
 
 		start = 0	#last index to append from
-		lastcol, space = 0, length	#remaining column: at "good" position, total
+		lastcol, space = 0, length	#remaining columns: at "good" position, total
 
 		format_pos, get_format = 0, bool(self._positions) #formatting iterators
 		last_color, last_effect = 0, 0	#last color/effect; continue after break
-		for pos, j in enumerate(self._str):	#character by character, the old fashioned way
-			lenj = wcwidth(j)
+		#character by character, the old fashioned way
+		for pos, (j, lenj) in enumerate(map(lambda x: (x, wcwidth(x)), self._str)):
 			#if we have a 'next color', and we're at that position
 			if get_format and pos == self._positions[format_pos]:
 				line_buffer += self._str[start:pos]
@@ -539,8 +568,8 @@ class Coloring:
 				lenj = outdent_len
 				line_buffer += self._str[start:pos] + ' '*min(lenj, space)
 				start = pos+1
-			elif j == '\n':
-				if keep_empty or line_buffer.rstrip() != outdent.rstrip():
+			elif j in ('\r', '\n'):
+				if keep_empty or space != length - outdent_len:
 					#add in a space to preserve string position
 					broken.append(line_buffer + self._str[start:pos] + ' ' + \
 						CLEAR_FORMATTING)
@@ -576,15 +605,14 @@ class Coloring:
 						, 0, last_effect)
 					start = pos
 				lastcol = 0
-				#tab space minus this next cahracter
+				#tab space minus this next character
 				space = length - outdent_len - lenj
 
 		#empty the buffer one last time
 		line_buffer += self._str[start:]
-		if line_buffer.rstrip() != outdent.rstrip():
+		if keep_empty or space != length - outdent_len + collen(self._str[start:]):
 			broken.append(line_buffer+CLEAR_FORMATTING)
 
-		#guarantee that a broken empty string is a singleton of an empty string
 		return broken
 
 class JustifiedColoring(Coloring):
