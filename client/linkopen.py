@@ -17,14 +17,17 @@ import asyncio		#subprocess spawning
 import traceback	#link opening failures
 from http.client import HTTPException	#for catching IncompleteRead
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 from html import unescape
-from subprocess import DEVNULL
+from subprocess import DEVNULL, PIPE
 
-from .input import ConfirmOverlay
+from .input import ConfirmOverlay, DisplayOverlay
+from .display import colors
 
 IMG_ARGS = ["feh"]
 MPV_ARGS = ["mpv", "--pause"]
+XCLIP_ARGS = ["xclip", "-sel", "c"]
+YTDL_ARGS = ["youtube-dl"]
 if sys.platform in ("win32", "cygwin"):
 	#by default, BROWSER does not include `cygstart`, which is a cygwin program
 	#that will (for links) open things in the default system browser
@@ -292,47 +295,51 @@ class opener: #pylint: disable=invalid-name
 @opener("extension", "jpg:large")
 @opener("extension", "png")
 @opener("extension", "png:large")
-async def images(main, link):
-	'''Start feh (or replaced image viewer) in main.loop'''
+async def images(screen, link, links=None):
+	'''Start feh (or replaced image viewer) in screen.loop'''
 	if not IMG_ARGS:
-		return await browser(main, link)
-	main.blurb.push("Displaying image...")
-	args = IMG_ARGS + [link]
+		return await browser(screen, link)
+	screen.blurb.push("Displaying image...")
+	if isinstance(links, list):
+		args = IMG_ARGS.copy()
+		args.extend(links)
+	else:
+		args = IMG_ARGS + [link]
 	try:
 		await asyncio.create_subprocess_exec(*args
-			, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, loop=main.loop)
+			, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, loop=screen.loop)
 	except FileNotFoundError:
-		main.blurb.push("Image viewer %s not found, defaulting to browser" % \
+		screen.blurb.push("Image viewer %s not found, defaulting to browser" % \
 			IMG_ARGS[0])
 		IMG_ARGS.clear()
-		ret = await browser(main, link)
+		ret = await browser(screen, link)
 		return ret
 
 @opener("extension", "webm")
 @opener("extension", "mp4")
 @opener("extension", "gif")
-async def videos(main, link, title=None):
-	'''Start mpv (or replaced video player) in main.loop'''
+async def videos(screen, link, title=None):
+	'''Start mpv (or replaced video player) in screen.loop'''
 	if not MPV_ARGS:
-		return await browser(main, link)
-	main.blurb.push("Playing video...")
+		return await browser(screen, link)
+	screen.blurb.push("Playing video...")
 	args = MPV_ARGS + [link]
-	if title is not None:
+	if title is not None and args[0] == "mpv": #mpv-specific hack
 		args.extend(["--title={}".format(title)])
 	try:
 		await asyncio.create_subprocess_exec(*args
-			, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, loop=main.loop)
+			, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, loop=screen.loop)
 	except FileNotFoundError:
-		main.blurb.push("Video player %s not found, defaulting to browser" % \
+		screen.blurb.push("Video player %s not found, defaulting to browser" % \
 			MPV_ARGS[0])
 		MPV_ARGS.clear()
-		ret = await browser(main, link)
+		ret = await browser(screen, link)
 		return ret
 
 @opener
-async def browser(main, link):
+async def browser(screen, link):
 	'''Open new tab without webbrowser outputting to stdout/err'''
-	main.blurb.push("Opened new tab")
+	screen.blurb.push("Opened new tab")
 	#get file descriptors for stdout
 	fdout, fderr = sys.stdout.fileno(), sys.stderr.fileno()
 	savout, saverr = os.dup(fdout), os.dup(fderr)	#get new file descriptors
@@ -345,3 +352,126 @@ async def browser(main, link):
 	finally:	#reopen stdout/stderr
 		os.dup2(savout, fdout)
 		os.dup2(saverr, fderr)
+
+async def clipboard(string):
+	'''Copy `string` to standard selection clipboard'''
+	if not XCLIP_ARGS:
+		return
+	try:
+		process = await asyncio.create_subprocess_exec(*XCLIP_ARGS
+			, stdin=PIPE, stdout=DEVNULL, stderr=DEVNULL)
+	except FileNotFoundError as exc:
+		XCLIP_ARGS.clear()
+		raise Exception("Fatal xclip error") from exc
+	await process.communicate(string.encode("utf-8"))
+
+@opener
+async def xclip(screen, link):
+	'''Copy a link to the main clipboard'''
+	await clipboard(link)
+	screen.blurb.push("Copied to clipboard")
+
+TWITTER_RE = re.compile(r"twitter\.com/.+/status")
+@opener("pattern", TWITTER_RE)
+async def twitter(screen, link):
+	mobile_link = link.find("mobile.twitter")
+	if mobile_link != -1:
+		link = link[:mobile_link] + link[mobile_link+7:]
+
+	title, image, video, desc = await get_opengraph(
+		Request(link, headers={"User-Agent": "Twitterbot"})
+		, "title", "image", "video:url", "description", loop=screen.loop)
+	#twitter always returns at least one image; the pfp
+	if isinstance(image, str) and image.find("profile_images") != -1:
+		image = []
+
+	#no, I'm not kidding, twitter double-encodes the HTML entities
+	#but most parsers are insensitive to this because of the following:
+	#"&amp;amp;..." = "(&amp;)..." -> "(&)amp;..." -> "(&amp;)..." -> "&..."
+	try:
+		who	=	unescape(title[:title.rfind(" on Twitter")])
+		desc =	unescape(desc[1:-1]) #remove quotes
+	except AttributeError as ae:
+		raise KeyError("Curl failed to find tag") from ae
+
+	disp = [(who, colors.yellow_text)
+		, desc]
+	additional = ""
+	if video:
+		additional = "1 video"
+	elif isinstance(image, str):
+		additional = "1 image"
+	elif image:
+		additional = "%d image(s)" % len(image)
+
+	new = DisplayOverlay(screen, disp + \
+		[(additional, colors.yellow_text), "", link])
+	@new.key_handler("^g")
+	@new.key_handler("enter", override=-1)
+	def open_link(_):
+		screen.loop.create_task(browser(screen, link))
+
+	@new.key_handler("i")
+	def open_images(_):
+		if video:
+			screen.loop.create_task(videos(screen, video))
+		else:
+			#open_link(screen, images)
+			screen.loop.create_task(images(screen, None, image))
+
+	new.add()
+
+@opener
+async def download(screen, link):
+	'''Download a link with youtube-dl'''
+	screen.blurb.push("Starting download ({})...".format(link))
+	args = YTDL_ARGS + [link]
+
+	try:
+		process = await asyncio.create_subprocess_exec(*args
+			, stdin=DEVNULL, stdout=DEVNULL, stderr=PIPE, loop=screen.loop)
+	except FileNotFoundError as no_file:
+		YTDL_ARGS.clear()
+		raise Exception("youtube-dl not found") from no_file
+
+	_, stderr = await process.communicate()
+	for line in stderr.decode():
+		if line.startswith("ERROR: "):
+			raise Exception(line[7:].replace('\n', ' '))
+
+	await process.wait()
+	screen.blurb.push("Download completed")
+
+#as consequence of youtube-dl; players with compatable hooks benefit from this
+@opener("pattern", "youtube.com/watch")
+@opener("pattern", "youtu.be/")
+async def youtube(screen, link):
+	title, image, desc = await get_opengraph(link
+		, "title", "image", "description", loop=screen.loop)
+
+	new = DisplayOverlay(screen, [
+		  "Title:\n" + title
+		, ""
+		, "Description:\n" + desc
+		, ""
+		, link #TODO maybe color link?
+	])
+
+	@new.key_handler('i')
+	def open_image(_):
+		'''Open video thumbnail'''
+		open_link(screen, image)
+
+	@new.key_handler('b')
+	def open_browser(_):
+		'''Open video in browser'''
+		screen.loop.create_task(browser(screen, link))
+		return -1
+
+	@new.key_handler("^g")
+	@new.key_handler("enter", -1)
+	def open_video(_):
+		'''Open video in youtube-dl enabled video player'''
+		screen.loop.create_task(videos(screen, link))
+
+	new.add()

@@ -11,7 +11,7 @@ from .wcwidth import wcwidth
 
 #all imports needed by overlay.py
 __all__ =	["CLEAR_FORMATTING", "CHAR_CURSOR", "SELECT", "SELECT_AND_MOVE"
-			, "collen", "numdrawing", "columnslice", "colors", "Box", "Coloring"
+			, "collen", "columnslice", "colors", "Box", "Coloring"
 			, "JustifiedColoring", "Scrollable", "ScrollSuggest"]
 
 #character ranges that don't appear to cooperate with wcwidth (even the C implementation)
@@ -65,28 +65,6 @@ def collen(string):
 		#not escaped and not transitioning to escape
 		if not temp:
 			ret += max(0, wcwidth(i))
-		elif i.isalpha(): #is escaped and i is alpha
-			escape = False
-			continue
-		escape = temp
-	return ret
-
-def numdrawing(string, width=-1):
-	'''
-	Number of drawing characters in the string (up to width).
-	Ostensibly the number of non-escape sequence characters
-	'''
-	if not width:
-		return 0
-	escape = False
-	ret = 0
-	for i in string:
-		temp = (i == '\x1b') or escape
-		#not escaped and not transitioning to escape
-		if not temp:
-			ret += 1
-			if ret == width:
-				return ret
 		elif i.isalpha(): #is escaped and i is alpha
 			escape = False
 			continue
@@ -256,7 +234,7 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 			return [4, 4, 4]
 		#greenify pure blues so they're easier on the eyes
 		if sum(in216) == prelim[2]:
-			prelim[1] += 1 
+			prelim[1] += 1
 		return prelim
 
 	def grayscale(self, color):
@@ -344,6 +322,9 @@ class Coloring:
 			self.insert_color(0, color)
 
 	def __add__(self, other):
+		if isinstance(other, str):
+			self._str += other
+			return self
 		if not isinstance(other, Coloring):
 			raise TypeError("Cannot concat non-Coloring to Coloring")
 		if other._positions and other._positions[0]+len(self._str) == self._maxpos:
@@ -361,6 +342,10 @@ class Coloring:
 	def __str__(self):
 		'''Get the string contained'''
 		return self._str
+
+	def __bool__(self):
+		'''Test for emptiness'''
+		return bool(self._str)
 
 	def __format__(self, *args):
 		'''Colorize the string'''

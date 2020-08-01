@@ -15,6 +15,28 @@ __all__ = ["staticize", "KeyException", "KeyContainer", "key_handler"
 	, "Sigil", "argsplit", "argunsplit", "tab_file"
 	, "History", "LazyIterList"]
 
+def numdrawing(string, width=-1):
+	'''
+	Number of drawing characters in the string (up to width).
+	Ostensibly the number of non-escape sequence characters
+	'''
+	if not width:
+		return 0
+	escape = False
+	ret = 0
+	for i in string:
+		temp = (i == '\x1b') or escape
+		#not escaped and not transitioning to escape
+		if not temp:
+			ret += 1
+			if ret == width:
+				return ret
+		elif i.isalpha(): #is escaped and i is alpha
+			escape = False
+			continue
+		escape = temp
+	return ret
+
 #HANDLER-HELPER FUNCTIONS-------------------------------------------------------
 def staticize(func, *args, doc=None, **kwargs):
 	'''functools.partial, but conserves or adds documentation'''

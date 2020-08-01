@@ -6,9 +6,10 @@ import asyncio
 import traceback
 from collections import deque
 
-from .display import SELECT_AND_MOVE, Box, collen, numdrawing, colors, Coloring
+from .display import SELECT_AND_MOVE, Box, collen, colors, Coloring
 from .base import TextOverlay
-from .util import key_handler, KeyException, KeyContainer, LazyIterList
+from .util import numdrawing, key_handler, KeyException, KeyContainer, LazyIterList
+from .linkopen import xclip
 from .input import DisplayOverlay
 __all__ = ["ChatOverlay", "Message", "add_message_scroller"]
 
@@ -161,6 +162,12 @@ class Message(Coloring):
 			keys.add_key(key_name, func, return_val=override_val)
 			return func
 		return ret
+
+@Message.key_handler("^x")
+def copy_message(message, overlay):
+	'''Copy selected message to clipboard'''
+	overlay.parent.loop.create_task(
+		xclip(overlay.parent, str(message)))
 
 class SystemMessage(Message):
 	'''System messages that are colored red-on-white'''
