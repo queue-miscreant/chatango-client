@@ -11,8 +11,8 @@ import json
 from collections import deque
 
 import pytango
-import client
-from client import linkopen
+import term_cancer as client
+from term_cancer import linkopen
 __all__ = ["ChatBot", "ChatangoMessage", "ChatangoOverlay"
 	, "get_color", "get_client"]
 

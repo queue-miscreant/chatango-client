@@ -6,6 +6,10 @@ A terminal application for chatango, an online chatroom.
 There is currently no setup script; just run `python chatango.py`
 or `./chatango.py` in the directory you extracted it to.
 
+The branch [frozen](https://github.com/queue-miscreant/chatango-client/tree/frozen)
+contains both of the dependencies, frozen at the last significant commit as of
+writing this.
+
 Features:
 --------------------------
 * Link accumulation (F2)
