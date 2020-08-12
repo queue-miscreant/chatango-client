@@ -1,5 +1,9 @@
 Changelog
 =========================
+Note that much of this has been removed from this repository proper.
+Pending renumbering versions and giving those repositories their own changelogs.
+
+
 ## v6.283185307179 *2019/1/13*
 * Retooled tab completion to be much more convenient
 	* Renamed "Tokenize" to "Sigil", which is mostly the same
@@ -60,7 +64,7 @@ gathered in this version.
 
 ## v6.2831853071 *2019/1/8*
 * Continued refactoring so hard that I split the project in two
-	* Python interface to Chatango can now be found [here](https://gitgud.io/cubebert/pytango)
+	* Python Chatango wrapper can now be found [here](https://github.com/queue-miscreant/pytango)
 
 ## v6.283185307 *2018/12/25*
 * Refactored a lot of code
