@@ -186,6 +186,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		self._start_message = 0	#start drawing upward from this index+1
 		self._start_inner = 0	#ignore drawing this many lines in start_message
 		self._height_up = 0		#lines between start_message and the selector
+		self._hidden_top = 0	#number of lines of the topmost message hidden
 		#lazy storage
 		self._lazy_bounds = [0, 0]	#latest/earliest messages to recolor
 		self._lazy_offset = 0		#lines added since last lazy_bounds modification
@@ -199,16 +200,18 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			if i not in ("_all_messages", "parent")}
 		print(self_dict)
 
-	def clear(self):
+	def clear(self, domessages=True):
 		'''Clear all lines and messages'''
 		self.can_select = True
-		self._all_messages.clear()
+		if domessages:
+			self._all_messages.clear()
+			self._lazy_bounds = [0, 0]
+			self._lazy_offset = 0
 		self._selector = 0
 		self._start_message = 0
 		self._start_inner = 0
 		self._height_up = 0
-		self._lazy_bounds = [0, 0]
-		self._lazy_offset = 0
+		self._hidden_top = 0
 		self._last_recolor += (self._last_recolor >= 0)
 
 	def stop_select(self):
@@ -218,11 +221,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 			if self._start_message - self._lazy_offset \
 			 not in range(*self._lazy_bounds):
 				self._lazy_bounds = [0, 0]
-			self.can_select = True
-			self._selector = 0
-			self._start_message = 0
-			self._start_inner = 0
-			self._height_up = 0
+			self.clear(False)
 			self._lazy_offset = 0
 			return True
 		return False
@@ -237,7 +236,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 
 	@property
 	def has_hidden(self):
-		'''Retrieve whether there are hidden messages (have scrolled upward)'''
+		'''Retrieve whether there are hidden messages below (have scrolled upward)'''
 		return bool(self._start_message)
 
 	def display(self, lines):
@@ -270,20 +269,29 @@ class Messages: #pylint: disable=too-many-instance-attributes
 
 	def up(self, amount=1):
 		height = self.parent.height-1
+		select = self._selector+1
 
 		#the currently selected message is the top message
 		if self._start_message+1 == self._selector:
 			new_inner = min(self._start_inner + amount	#add to the inner height
 				, self.selected.height - height)		#or use the max possible
-			if new_inner >= 0:
+			self._hidden_top = 0
+			if new_inner >= self._start_inner:
 				inner_diff = new_inner - self._start_inner
 				self._start_inner = new_inner
 				amount -= inner_diff
 				if amount <= 0:
 					return inner_diff
+		elif self._hidden_top > 0:
+			delta = self._hidden_top - amount
+			if delta >= 0 or amount > 1:
+				self._hidden_top = delta
+				self._justify_start(amount, height)
+				return amount
+			amount -= self._hidden_top
+			self._hidden_top = 0
 
 		#out of checking for scrolling inside of a message; go by messages now
-		select = self._selector+1
 		num_messages = 0
 		addlines = 0
 		cached_range = range(*self._lazy_bounds)
@@ -307,27 +315,40 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		#so at this point we're moving up `addlines` lines
 		self._height_up += addlines
 		if self._height_up > height:
-			start = self._start_message+1
-			addlines = self._height_up - height
-			startlines = -self._start_inner
-			last_height = 0
-			while startlines <= addlines:
-				last_height = self._all_messages[-start].height
-				startlines += last_height
-				start += 1
-			self._start_message = start-2
-			#the last message is perfect for what we need
-			if startlines - last_height == addlines:
-				self._start_inner = 0
-			#the first message we checked was enough
-			elif startlines == last_height:
-				self._start_inner = addlines
-			else:
-				self._start_inner = last_height - startlines + addlines
-
-			self._height_up = height
+			#next message is already visible
+			delta = self._height_up - height
+			if amount == 1:
+				if addlines - delta > 0:
+					self._hidden_top = delta
+					self._height_up = height
+					return 1
+				self._justify_start(min(addlines, 1), height)
+				self._hidden_top = addlines - 1
+				return 1
+			addlines = delta
+			self._justify_start(addlines, height)
 
 		return addlines
+
+	def _justify_start(self, amount, height):
+		start = self._start_message+1
+		startlines = -self._start_inner
+		last_height = 0
+		while startlines <= amount:
+			last_height = self._all_messages[-start].height
+			startlines += last_height
+			start += 1
+		self._start_message = start-2
+		#the last message is perfect for what we need
+		if startlines - last_height == amount:
+			self._start_inner = 0
+		#the first message we checked was enough
+		elif startlines == last_height:
+			self._start_inner = amount
+		else:
+			self._start_inner = last_height - startlines + amount
+
+		self._height_up = height
 
 	def down(self, amount=1):
 		if not self._selector:
@@ -335,9 +356,11 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		height = self.parent.height-1
 		#scroll within a message if possible, if there is a hidden line
 		if self._selector == self._start_message+1 and self._start_inner > 0:
+			self._hidden_top = 0
 			new_inner = max(-1, self._start_inner - amount)
 			inner_diff = self._start_inner - new_inner
 			self._start_inner = new_inner
+			self._height_up = min(height, self._height_up+amount)
 			amount -= inner_diff
 			if new_inner < 0:
 				if self._selector == 1:
@@ -373,11 +396,18 @@ class Messages: #pylint: disable=too-many-instance-attributes
 
 		#so at this point we're moving down `addlines` lines
 		self._height_up -= addlines - last_height
-		if self._height_up < last_height:
-			self._start_message = self._selector-1
+		if self._height_up < last_height and select < self._start_message:
+			self._start_message = select
+			if amount == 1:
+				self._start_inner = self.selected.height-1
+				self._height_up = 1
+				return 1
 			self._start_inner = max(self.selected.height - height, 0)
 			self._height_up = min(self.selected.height, height)
+		elif self._hidden_top > 0:
+			self._height_up = max(height - self._hidden_top, 1)
 
+		self._hidden_top = 0
 		return addlines
 
 	def append(self, msg: Message):
@@ -485,6 +515,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 
 		self._selector = index
 		self._start_message = index-1
+		self._hidden_top = 0
 		if index:
 			self._start_inner = max(self.selected.height - height, 0)
 			self._height_up = min(self.selected.height, height)
@@ -531,6 +562,7 @@ class Messages: #pylint: disable=too-many-instance-attributes
 		'''Re-apply Message coloring and redraw all visible lines'''
 		if recolor:
 			self._last_recolor += 1
+		self._hidden_top = 0
 		self._lazy_bounds = [self._start_message, self._start_message]
 
 class ChatOverlay(TextOverlay):
@@ -626,11 +658,13 @@ class ChatOverlay(TextOverlay):
 			ret = overlay.keys(chars, overlay, do_input=do_input)
 
 		if not ret and -1 in overlay.keys:
-			self.messages.stop_select()
+			ret = self.messages.stop_select()
 			self.parent.update_input()
 		elif ret == -1:
 			overlay.remove()
-		return 1
+		if overlay != self:
+			return 1
+		return ret
 
 	@key_handler("mouse")
 	def _mouse(self, state, x, y):

@@ -738,22 +738,23 @@ class Screen: #pylint: disable=too-many-instance-attributes
 		'''Pop overlay backend. Use overlay.remove() instead.'''
 		del self._ins[overlay.index]
 		#look for the last replace and replace indices
-		was_replace = overlay.index == self._last_replace
 		was_text = overlay.index == self._last_text
+		self._last_text = -1
+		updated = False
 		for i, j in enumerate(self._ins):
-			if j.replace and was_replace:
+			if j.replace:
 				self._last_replace = i
-			if isinstance(j, TextOverlay) and was_text:
+			if isinstance(j, TextOverlay):
 				self._last_text = i
-				self.update_input()
+				updated = j.index == i+1
 			j.index = i
-		if self._last_text == overlay.index:
-			self._last_text = -1
-		elif was_text:
+		if was_text:
 			if overlay.isolated:
 				self.text.clear()
-			self._ins[self._last_text].nonscroll = None
+			if self._last_text > 0:
+				self._ins[self._last_text].nonscroll = None
 		overlay.index = None
+		self.update_input()
 		self.schedule_display()
 		self.update_status()
 

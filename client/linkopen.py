@@ -295,16 +295,21 @@ class opener: #pylint: disable=invalid-name
 @opener("extension", "jpg:large")
 @opener("extension", "png")
 @opener("extension", "png:large")
-async def images(screen, link, links=None):
+async def images(screen, link):
 	'''Start feh (or replaced image viewer) in screen.loop'''
 	if not IMG_ARGS:
 		return await browser(screen, link)
-	screen.blurb.push("Displaying image...")
-	if isinstance(links, list):
+	if isinstance(link, list):
+		if not link:
+			return
 		args = IMG_ARGS.copy()
-		args.extend(links)
-	else:
+		args.extend(i for i in link if isinstance(i, str))
+	elif isinstance(link, str):
 		args = IMG_ARGS + [link]
+	else:
+		print(link)
+		raise Exception("Attempted to open non-string")
+	screen.blurb.push("Displaying image...")
 	try:
 		await asyncio.create_subprocess_exec(*args
 			, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, loop=screen.loop)
@@ -323,9 +328,9 @@ async def videos(screen, link, title=None):
 	if not MPV_ARGS:
 		return await browser(screen, link)
 	screen.blurb.push("Playing video...")
-	args = MPV_ARGS + [link]
 	if title is not None and args[0] == "mpv": #mpv-specific hack
 		args.extend(["--title={}".format(title)])
+	args = MPV_ARGS + [link]
 	try:
 		await asyncio.create_subprocess_exec(*args
 			, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, loop=screen.loop)
@@ -415,9 +420,8 @@ async def twitter(screen, link):
 	def open_images(_):
 		if video:
 			screen.loop.create_task(videos(screen, video))
-		else:
-			#open_link(screen, images)
-			screen.loop.create_task(images(screen, None, image))
+		elif image is not None:
+			screen.loop.create_task(images(screen, image))
 
 	new.add()
 

@@ -7,7 +7,7 @@ provides a nice interface for modifying values within a context.
 import asyncio
 from .display import SELECT, CLEAR_FORMATTING, colors \
 	, Box, Coloring, JustifiedColoring, DisplayException
-from .util import staticize, quitlambda, key_handler
+from .util import staticize, quitlambda, key_handler, numdrawing
 from .base import FutureOverlay, OverlayBase, TextOverlay
 
 __all__ = ["ListOverlay", "VisualListOverlay", "ColorOverlay"
@@ -34,6 +34,7 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		self._draw_other = None
 		self._modes = [""] if modes is None else modes
 		self._search = None
+
 		self._draw_cache = {}
 
 		self.add_keys({
@@ -86,7 +87,7 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 		maxx = self.width-2
 		#worst case column: |(value[0])…(value[-1])|
 		#				    1    2     3  4        5
-		#worst case rows: |(list member)|(RESERVED)
+		#worst case rows: |(list member)|
 		#				  1	2			3
 		if size < 1 or maxx < 3:
 			raise DisplayException()
@@ -102,18 +103,18 @@ class ListOverlay(FutureOverlay, Box): #pylint: disable=too-many-instance-attrib
 			#alter the string to be drawn
 			if i+partition < len(self.list):
 				self._draw_line(row, i+partition)
-			#assuming that assembling and justifying the line is more intensive
-			if row in self._draw_cache:
-				justified = self._draw_cache[row]
-			else:
-				justified = self.box_noform(row.justify(maxx))
-				#cache the newly justified string
-				self._draw_cache[row] = justified
-			#draw the justified string
-			lines[i+1] = justified
+			#justifiedcolorings have their own cache, but we rebuild them each redraw
+			cache_fetch = self._draw_cache.get(row)
+			if cache_fetch is None:
+				cache_fetch = row.justify(maxx)
+				self._draw_cache[row] = cache_fetch
+			lines[i+1] = self.box_noform(cache_fetch)
 
 		lines[-1] = self.box_bottom(self._modes[self.mode])
 		return lines
+
+	def resize(self, _, __):
+		self._draw_cache.clear()
 
 	def _draw_line(self, line, number):
 		'''Callback to run to modify display of each line. '''
@@ -442,7 +443,7 @@ class ColorSliderOverlay(FutureOverlay, Box):
 					string += colors.RGB_COLUMNS[j]
 				string += ' ' * wide + CLEAR_FORMATTING + ' '
 			#justify (including escape sequence length)
-			lines[i+1] = self.box_noform(self.box_just(string))
+			lines[i+1] = self.box_part(string)
 		sep = self.box_part("")
 		lines[-6] = sep
 		names, vals = "", ""
@@ -455,7 +456,9 @@ class ColorSliderOverlay(FutureOverlay, Box):
 		lines[-5] = self.box_part(names) #4 lines
 		lines[-4] = self.box_part(vals) #3 line
 		lines[-3] = sep #2 lines
-		lines[-2] = self.box_part(format(self._colored_text).rjust(3*(wide+1)//2)) #1
+		formatted = format(self._colored_text)
+		nondraw = len(formatted) - numdrawing(formatted)
+		lines[-2] = self.box_part(formatted.rjust(nondraw + 3*(wide+1)//2)) #1
 		lines[-1] = self.box_bottom() #last line
 
 	#predefined self-traversal methods
@@ -545,6 +548,8 @@ class DisplayOverlay(OverlayBase, Box):
 			while begin + i < len(lines)-1:
 				lines[begin+i] = self.box_part("")
 				i += 1
+			scrollbar = 1 + self._begin * (len(lines)-3) / (len(self._prompts)-len(lines)+2)
+			lines[int(scrollbar)] = lines[int(scrollbar)][:-1] + 'o'
 		lines[begin+i] = self.box_bottom()
 
 	def resize(self, newx, newy):
@@ -561,10 +566,18 @@ class DisplayOverlay(OverlayBase, Box):
 	@key_handler('j', amt=1, doc="Scroll downward")
 	@key_handler('down', amt=1, doc="Scroll downward")
 	def scroll(self, amt):
-		maxlines = self.height-2
-		if len(self._prompts) <= maxlines: #nothing to scroll
+		if not self.replace: #nothing to scroll
 			return
+		maxlines = self.height-2
 		self._begin = min(max(0, self._begin+amt), len(self._prompts) - maxlines)
+
+	@key_handler('g', top=True, doc="Scroll top")
+	@key_handler('G', top=False, doc="Scroll bottom")
+	def scroll_border(self, top):
+		if not self.replace: #nothing to scroll
+			return
+		maxlines = self.height-2
+		self._begin = 0 if top else len(self._prompts) - maxlines
 
 class PromptOverlay(DisplayOverlay, TextOverlay):
 	'''Combine text input with a prompt'''

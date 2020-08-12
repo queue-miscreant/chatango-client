@@ -187,7 +187,7 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 			raise DisplayException("raw numbers may not be below 0")
 		return pair_number - self.predefined
 
-	def two56(self, color, too_black=2, too_white=34, reweight=None):
+	def two56(self, color, too_black=0.1, too_white=0.9, reweight=None):
 		'''
 		Convert a hex string, 3-tuple, or pre-calculated int to 256 color
 		Returns `colors.default` if not running in 256 color mode
@@ -205,37 +205,50 @@ class _ColorManager: #pylint: disable=too-many-instance-attributes
 
 		try:
 			if isinstance(color, str):
+				if color.startswith("#"):
+					color = color[1:]
 				parts_len = len(color)//3
-				in216 = [int(int(color[i*parts_len:(i+1)*parts_len], 16)*5/\
-					(16**parts_len)) for i in range(3)]
+				rgbf = [int(color[i*parts_len:(i+1)*parts_len], 16)/\
+					(16**parts_len) for i in range(3)]
 			else:
-				in216 = [int(color[i]*5/255) for i in range(3)]
+				rgbf = [i/255 for i in color]
 
+			avg = sum(rgbf)/3
 			if callable(reweight):
-				in216 = reweight(in216)
+				rgbf = reweight(rgbf)
 			elif reweight is not None:
-				in216 = self.reweight(in216)
+				rgbf = self.reweight(rgbf)
 			#too white or too black
-			elif sum(in216) < too_black or sum(in216) > too_white:
+			elif avg < too_black or avg > too_white:
 				return self.default
+
+			if sum((i - avg)**2 for i in rgbf)**0.5 < 0.05:
+				return self.grayscale(int(avg*24))
+
 			return self._two56_start + 16 + \
-				sum(map(lambda x, y: x*y, in216, [36, 6, 1]))
+				sum(map(lambda x, y: int(x*5)*y, rgbf, [36, 6, 1]))
 		except (AttributeError, TypeError):
 			return self.default
 
 	@staticmethod
-	def reweight(in216):
-		#too black or too white? just bias toward the center
-		#prelim = [[0, 1, 2, 2, 3, 4][i] for i in in216]
-		prelim = in216
-		if sum(in216) == 0:
-			return [1, 1, 1] #dark gray better than black
-		if sum(in216) == 15:
-			return [4, 4, 4]
-		#greenify pure blues so they're easier on the eyes
-		if sum(in216) == prelim[2]:
-			prelim[1] += 1
-		return prelim
+	def reweight(rgbf):
+		avg = sum(rgbf) / 3
+		rew = lambda x, y: [i*j for i, j in zip(x, y)]
+
+		if avg < 0.1:
+			rgbf = rew(rgbf, [1.25, 1.25, 1.25])
+		elif avg > 0.9:
+			rgbf = rew(rgbf, [0.75, 0.75, 0.75])
+		avg = sum(rgbf) / 3
+		unblueness = sum(rgbf) - rgbf[2]
+		if abs(unblueness - avg) < 5e-3: #dark blue admixtures
+			rgbf = rew(rgbf, [1.20, 1.20, 1.10])
+		elif unblueness < 0.15: #VERY blue colors
+			if rgbf[2] < 0.35:
+				rgbf = [0.2, 0.2, 0.6] #this is a bad color, but it's the best I can do
+			else:
+				rgbf[1] = rgbf[2]/4
+		return rgbf
 
 	def grayscale(self, color):
 		'''Gets a 256-color grayscale `color` from 0 (black) to 24 (white)'''
@@ -328,8 +341,10 @@ class Coloring:
 		if not isinstance(other, Coloring):
 			raise TypeError("Cannot concat non-Coloring to Coloring")
 		if other._positions and other._positions[0]+len(self._str) == self._maxpos:
+			final = self._formatting.pop()
+			other._formatting[0] ^= final & colors._effects_bits
 			self._positions.pop()
-			self._formatting.pop()
+			self._maxpos = len(self._str) + other._maxpos
 		self._formatting.extend(other._formatting)
 		self._positions.extend((pos+len(self._str) for pos in other._positions))
 		self._str += other._str
